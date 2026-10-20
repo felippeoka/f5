@@ -900,10 +900,9 @@
     {
       "upstreamSha": "07528262fc9cf1f2b4b2cb59e96f2023def09f73",
       "subject": "perf(web): the model picker compiles without manual memoization (#20706)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the model picker compiles without manual memoization (#20706).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the model picker compiles without manual memoization (#20706)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "07549200dcdc70dce57285276879004024beeaa7",
@@ -1375,10 +1374,9 @@
     {
       "upstreamSha": "0a453f00d5944edfba16d04b0d23997b61ecc237",
       "subject": "perf(web): notification settings compile with the React Compiler (#20504)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): notification settings compile with the React Compiler (#20504).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): notification settings compile with the React Compiler (#20504)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0a46daaf63e78cdd188f6eb944ce5ee463e63216",
@@ -1490,10 +1488,9 @@
     {
       "upstreamSha": "0b0f4dbf2671e0fcb3aaa13b8d3df20412ba14cc",
       "subject": "perf(web): the source control settings compile with the React Compiler (#20628)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the source control settings compile with the React Compiler (#20628).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the source control settings compile with the React Compiler (#20628)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0b110ce0dbd730a3e24acd605cec322e5300294a",
@@ -1937,10 +1934,9 @@
     {
       "upstreamSha": "0e95babaf52c0b5625b6a081309f85c0d8b78356",
       "subject": "perf(web): let the React Compiler compile ChatView (#20379)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): let the React Compiler compile ChatView (#20379).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): let the React Compiler compile ChatView (#20379)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0eaa18c12936dffde078b277be91cbafa5758cb9",
@@ -2321,10 +2317,9 @@
     {
       "upstreamSha": "1144a7ecc4b7f437de9c5caaa88524c057c9a8b4",
       "subject": "perf(web): useDirectoryEntries compiles with the React Compiler (#20482)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useDirectoryEntries compiles with the React Compiler (#20482).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): useDirectoryEntries compiles with the React Compiler (#20482)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1153afb4fb694944b5c25e2153b904a85cf47d70",
@@ -2474,10 +2469,9 @@
     {
       "upstreamSha": "123dc2450484f6d2dabaf3a440e83aec2d8267b1",
       "subject": "perf(web): diagnostics settings compile with the React Compiler (#20507)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): diagnostics settings compile with the React Compiler (#20507).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): diagnostics settings compile with the React Compiler (#20507)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1246146f59a5a0f7a6f2da46bdd91f79b231d6a6",
@@ -3737,10 +3731,9 @@
     {
       "upstreamSha": "1b41060585be44439a7d00b7168313daeac6b695",
       "subject": "perf(web): the diff file tree compiles with the React Compiler (#20631)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the diff file tree compiles with the React Compiler (#20631).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the diff file tree compiles with the React Compiler (#20631)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1b4830ff06bf80e505dbf669deef189af85f77d7",
@@ -3991,10 +3984,9 @@
     {
       "upstreamSha": "1da2d60b43e7523ce0eb24768710dfa23d586f61",
       "subject": "perf(web): the settings panels compile with the React Compiler (#20528)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the settings panels compile with the React Compiler (#20528).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the settings panels compile with the React Compiler (#20528)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1dc8cbe6d14a7b4e131a2806f43bde8b60d6aaa7",
@@ -4325,10 +4317,9 @@
     {
       "upstreamSha": "20851e304eb543acf9cbcd5db5d2161a60212fbf",
       "subject": "perf(web): the root route compiles with the React Compiler (#20585)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the root route compiles with the React Compiler (#20585).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the root route compiles with the React Compiler (#20585)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "20885cecf77e205b8931ca1b29f0a2832836a157",
@@ -4724,10 +4715,9 @@
     {
       "upstreamSha": "23163fdc48871b6b297371e408e239dc02199c91",
       "subject": "perf(web): the legacy sidebar compiles with the React Compiler (#20640)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the legacy sidebar compiles with the React Compiler (#20640).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the legacy sidebar compiles with the React Compiler (#20640)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "23290944bce8a2ff9f9438cb6d16f152559858d8",
@@ -5096,10 +5086,9 @@
     {
       "upstreamSha": "25f0b2a1b7323563aa5d4e7f70e78a3889c5918e",
       "subject": "fix(observability): T3 Connect tracing stops at the relay boundary (#16314)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(observability): T3 Connect tracing stops at the relay boundary (#16314).",
+      "reason": "Not-applicable: scopes T3 Connect relay tracing (src/cloud/traceRelayRequest.ts and relay HTTP handlers); f5 has no T3 Connect or relay. Upstream change: fix(observability): T3 Connect tracing stops at the relay boundary (#16314)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "261380f91f764673c7fcefcb6a3f775526dbb776",
@@ -5202,10 +5191,9 @@
     {
       "upstreamSha": "26a7df089dcfba2c113b85b26b2c21deb10e30d6",
       "subject": "perf(web): the file save coordinator compiles without manual memoization (#20697)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the file save coordinator compiles without manual memoization (#20697).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the file save coordinator compiles without manual memoization (#20697)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "26af903b9bec7f8da56bb5f545d9980d08d418e1",
@@ -5297,10 +5285,9 @@
     {
       "upstreamSha": "275e55cfca59ead9ea39ab1fb514535c91bc4414",
       "subject": "perf(web): the theme editor compiles with the React Compiler (#20458)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the theme editor compiles with the React Compiler (#20458).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the theme editor compiles with the React Compiler (#20458)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "275e7de026e62cdb0aea107fd6a31334e1e15b57",
@@ -5364,10 +5351,9 @@
     {
       "upstreamSha": "2814dc9c48851e0fb016b34a290ed978db7abace",
       "subject": "perf(web): the index route compiles with the React Compiler (#20580)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the index route compiles with the React Compiler (#20580).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the index route compiles with the React Compiler (#20580)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "281b92b48810062275798dd4107364384ebaf432",
@@ -5440,10 +5426,9 @@
     {
       "upstreamSha": "28f5516a9acfcfc1e203487e78869a406fd23b76",
       "subject": "perf(mobile): omit duplicated turn items from bounded thread snapshots (#15385)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(mobile): omit duplicated turn items from bounded thread snapshots (#15385).",
+      "reason": "Not-applicable: trims the bounded thread snapshots upstream serves to its mobile client through orchestration-v2 ThreadStream and client-runtime; f5 has neither the mobile app nor that endpoint. Upstream change: perf(mobile): omit duplicated turn items from bounded thread snapshots (#15385)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "2919147c80e4daae326a25f870a1c7b19cd16f42",
@@ -7158,10 +7143,9 @@
     {
       "upstreamSha": "3448e01788a0d65f95e0f1b78881fafd3421e495",
       "subject": "perf(web): SnapShot settings compile with the React Compiler (#20514)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): SnapShot settings compile with the React Compiler (#20514).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): SnapShot settings compile with the React Compiler (#20514)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "346247bf1a461d200209b3f33f2bb7f148987b1f",
@@ -7231,10 +7215,9 @@
     {
       "upstreamSha": "350127040a3ba3b86aada6b76b05baaf9b8a286d",
       "subject": "perf(web): capture shortcut config compile with the React Compiler (#20511)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): capture shortcut config compile with the React Compiler (#20511).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): capture shortcut config compile with the React Compiler (#20511)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "35172010b131510d36d0cef54e174926e38a3013",
@@ -8165,10 +8148,9 @@
     {
       "upstreamSha": "3ba883ebf4647ab8372f74c47422e53e92e9a53d",
       "subject": "perf(web): the item inspector compiles without manual memoization (#20545)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the item inspector compiles without manual memoization (#20545).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the item inspector compiles without manual memoization (#20545)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3bb06ad910389fcfc886bd5156f41dc73f307f80",
@@ -8743,10 +8725,9 @@
     {
       "upstreamSha": "404c261e8a4b79a8d3259d3ac304b64c851428f7",
       "subject": "perf(web): the theme color picker compiles with the React Compiler (#20525)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the theme color picker compiles with the React Compiler (#20525).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the theme color picker compiles with the React Compiler (#20525)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "404e229f22ef2dc7e42074d5379d5c554dd2c083",
@@ -8832,10 +8813,9 @@
     {
       "upstreamSha": "40ff4b454cf1ef5017c3cff9a7aa31570a054dc2",
       "subject": "perf(web): project settings panel compile with the React Compiler (#20509)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): project settings panel compile with the React Compiler (#20509).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): project settings panel compile with the React Compiler (#20509)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4107930420cffe14776ad80783f7060236b5868b",
@@ -9283,10 +9263,9 @@
     {
       "upstreamSha": "442735897f6f92af33798075baa12d4fd4d710dd",
       "subject": "fix(relay): export traces through one tracer, one request span each (#16382)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(relay): export traces through one tracer, one request span each (#16382).",
+      "reason": "Not-applicable: confined to upstream's relay worker (infra/relay); f5 has no relay. Upstream change: fix(relay): export traces through one tracer, one request span each (#16382)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "443b4ebfe83fcfe64c34b09ecb5a5fffdebb85c7",
@@ -9585,10 +9564,9 @@
     {
       "upstreamSha": "46ae590bfae29b2dee2ccfd6acbdd3964fc1393a",
       "subject": "perf(web): the media video player compiles with the React Compiler (#20486)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the media video player compiles with the React Compiler (#20486).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the media video player compiles with the React Compiler (#20486)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "46b5c66406b9942589d7e9132beeafda2434f113",
@@ -9709,10 +9687,9 @@
     {
       "upstreamSha": "478b06c60972b3469d73584a08d54323072e4839",
       "subject": "perf(web): the first-run gate compiles with the React Compiler (#20637)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the first-run gate compiles with the React Compiler (#20637).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the first-run gate compiles with the React Compiler (#20637)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "47a95332a2b8fe47da9fb0af97fd6f0b542a18ee",
@@ -10651,10 +10628,9 @@
     {
       "upstreamSha": "4e3f936fbda8e3eafae23551bcf61bd836092396",
       "subject": "perf(web): the pending user input panel compiles with the React Compiler (#20592)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the pending user input panel compiles with the React Compiler (#20592).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the pending user input panel compiles with the React Compiler (#20592)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4e547318b60031eb546d8cf2b84ad9fa0785a87a",
@@ -11154,10 +11130,9 @@
     {
       "upstreamSha": "51f7382aff301e774f52ce10de1a49b5ff9c5589",
       "subject": "fix(web): restore mobile app store links in settings (#20422)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): restore mobile app store links in settings (#20422).",
+      "reason": "Not-applicable: restores links to upstream's mobile app stores; f5 has no mobile app. Upstream change: fix(web): restore mobile app store links in settings (#20422)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "51f7f77f87318a5329d3bab15d513fda5654200b",
@@ -12566,10 +12541,9 @@
     {
       "upstreamSha": "5c43d16ec7afbbd86a37165b5395dc9921391feb",
       "subject": "perf(web): source control host settings compile with the React Compiler (#20498)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): source control host settings compile with the React Compiler (#20498).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): source control host settings compile with the React Compiler (#20498)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5c5dcbc60b35aae59cbc554231afa9f2c04ad2ce",
@@ -13327,10 +13301,9 @@
     {
       "upstreamSha": "62861700d80182675371240bb3e9f75c9894cc63",
       "subject": "perf(web): the sidebar update pill compiles with the React Compiler (#20484)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the sidebar update pill compiles with the React Compiler (#20484).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the sidebar update pill compiles with the React Compiler (#20484)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6293119f83e90062001c622e17841dc189efe1b7",
@@ -14047,10 +14020,9 @@
     {
       "upstreamSha": "67b175a4c916ac0d5dbac809da22271db3f542d7",
       "subject": "perf(release): build and publish npm platform packages concurrently (#14028)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): build and publish npm platform packages concurrently (#14028).",
+      "reason": "Not-applicable: speeds up upstream's npm platform-package publishing (scripts/build-npm-platform-packages.ts, apps/server/scripts/publishOrder.ts), which f5's release pipeline does not have. Upstream change: perf(release): build and publish npm platform packages concurrently (#14028)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "67bca6c224b3caf61dc7824f6487d754bcad8f8c",
@@ -14363,10 +14335,9 @@
     {
       "upstreamSha": "6a326afb81c64b746d70602988795b528dfe8abc",
       "subject": "perf(web): connections settings compile with the React Compiler (#20515)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): connections settings compile with the React Compiler (#20515).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): connections settings compile with the React Compiler (#20515)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6a3df51707b67c3435f86b3b83a093aec8b03415",
@@ -14414,10 +14385,9 @@
     {
       "upstreamSha": "6a71716edbc52274369b987cda475f7e9f094329",
       "subject": "perf(web): theme import dialog compile with the React Compiler (#20513)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): theme import dialog compile with the React Compiler (#20513).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): theme import dialog compile with the React Compiler (#20513)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6a8f4d3b8f1c73df33fb6ac3f1ff89e38b4cf633",
@@ -14618,10 +14588,9 @@
     {
       "upstreamSha": "6bfc8baeb8f280e57ef6d0d514680b0bce8538a2",
       "subject": "perf(relay): delete expired tunnels four at a time within a time budget (#13566)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(relay): delete expired tunnels four at a time within a time budget (#13566).",
+      "reason": "Not-applicable: changes upstream's managed relay tunnel reaper (src/environments/ManagedEndpointReaper.ts); f5 has no relay or managed endpoints. Upstream change: perf(relay): delete expired tunnels four at a time within a time budget (#13566)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6c130163941618480da333979bf6fc675d803e4f",
@@ -14835,10 +14804,9 @@
     {
       "upstreamSha": "6d73370ef1c54c2a3bdb187cb72cf6f7b88b44c3",
       "subject": "fix(web): settings stay compact with many connected machines (#19744)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings stay compact with many connected machines (#19744).",
+      "reason": "Not-applicable: compacts upstream's settings for many connected machines (device hosts, scheduled tasks, setting inheritance); f5 has no multi-environment hosts. Upstream change: fix(web): settings stay compact with many connected machines (#19744)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6da92244cc2a7438703be95a0fcfaca0b73502a7",
@@ -15699,10 +15667,9 @@
     {
       "upstreamSha": "72dac237304e5c7dddc55ca880e39c374ee66e3c",
       "subject": "perf(web): telemetry export settings compile with the React Compiler (#20500)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): telemetry export settings compile with the React Compiler (#20500).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): telemetry export settings compile with the React Compiler (#20500)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "72fbad7b1ad303a5e0a896e1de5c6489f8d10fc8",
@@ -16423,10 +16390,9 @@
     {
       "upstreamSha": "783ccf0fdde0d20824ad87af10a870fc28005835",
       "subject": "perf(release): build Vercel deployments early and go live after publish (#14029)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): build Vercel deployments early and go live after publish (#14029).",
+      "reason": "Not-applicable: reorders upstream's Vercel deployment jobs in its release workflow; f5 has no Vercel deployment. Upstream change: perf(release): build Vercel deployments early and go live after publish (#14029)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "784b5625f9e228cca8dd67e6e24e402325672544",
@@ -16747,10 +16713,9 @@
     {
       "upstreamSha": "7a89733cab5fb473c8c8af9bf8c81fb82aa4e232",
       "subject": "perf(web): the command palette compiles with the React Compiler (#20477)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the command palette compiles with the React Compiler (#20477).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the command palette compiles with the React Compiler (#20477)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7a8df3338f910cd18543cd3ea98b8b10385e8dcd",
@@ -16889,10 +16854,9 @@
     {
       "upstreamSha": "7b84431161a64c9f9e9b57637dec23474a1b4236",
       "subject": "fix(web): size the Android fold model from the inner display (#13574)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): size the Android fold model from the inner display (#13574).",
+      "reason": "Not-applicable: sizes the Android fold model in client-runtime's phone viewer; f5 has no device viewer. Upstream change: fix(web): size the Android fold model from the inner display (#13574)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7bc161f8692dfb969489f40bf3eb5bd27bc01f10",
@@ -17195,10 +17159,9 @@
     {
       "upstreamSha": "7e850a03c23d5beb303c1fa73e34f688b4aaab3c",
       "subject": "perf(web): useStableCallback compiles without manual memoization (#20556)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useStableCallback compiles without manual memoization (#20556).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): useStableCallback compiles without manual memoization (#20556)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7e8ae6b8d667708b26ab7db9cd9c4ec9b1675815",
@@ -17270,10 +17233,9 @@
     {
       "upstreamSha": "7f4142e5b07bd1027d513c88311347101b294b52",
       "subject": "perf(web): thread actions compile without manual memoization (#20470)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): thread actions compile without manual memoization (#20470).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): thread actions compile without manual memoization (#20470)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7f8cf30ca479474f8c6e0a85f6e0a1169bcca365",
@@ -17772,10 +17734,9 @@
     {
       "upstreamSha": "82f40d74a63cbc804b74a64cb697015213a08196",
       "subject": "perf(web): the settings sidebar compiles with the React Compiler (#20623)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the settings sidebar compiles with the React Compiler (#20623).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the settings sidebar compiles with the React Compiler (#20623)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe",
@@ -17790,10 +17751,9 @@
     {
       "upstreamSha": "8316dfb6192596faedcb472d3aba80597efaa6ad",
       "subject": "perf(web): settings hooks compile with the React Compiler (#20474)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): settings hooks compile with the React Compiler (#20474).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): settings hooks compile with the React Compiler (#20474)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "831eb66fee91e397f5f8d6ae179408291e8f28b0",
@@ -18214,10 +18174,9 @@
     {
       "upstreamSha": "8630e1ac7a94cdae6f3014161db65385931cf3a2",
       "subject": "perf(release): trim Windows packaging setup (#14037)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): trim Windows packaging setup (#14037).",
+      "reason": "Not-applicable: trims upstream's release-desktop.yml Windows packaging job; f5 keeps its own release pipeline (the plan excludes T3's). Upstream change: perf(release): trim Windows packaging setup (#14037)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "8650f05f95ac9f19254de679fdf4b380c37d7b94",
@@ -18592,10 +18551,9 @@
     {
       "upstreamSha": "89a24e8d97b2c8beff1a24bc99a1421feaf24421",
       "subject": "perf(web): the open-source notices panel compiles with the React Compiler (#20608)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the open-source notices panel compiles with the React Compiler (#20608).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the open-source notices panel compiles with the React Compiler (#20608)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "89b42bfeb4f79408af72fc7bb7a4482e22bb9493",
@@ -19287,10 +19245,9 @@
     {
       "upstreamSha": "8e6ace61666054e367d985a4bec60e8441092afc",
       "subject": "perf(web): the app sidebar layout compiles with the React Compiler (#20569)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the app sidebar layout compiles with the React Compiler (#20569).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the app sidebar layout compiles with the React Compiler (#20569)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "8ea52c8f2f4361e875d72ab30d72d37cfae4d87f",
@@ -20059,18 +20016,16 @@
     {
       "upstreamSha": "9434bfd1d9f53d9d377704955b6d63b5eca8a4af",
       "subject": "perf(web): default theme adoption compiles with the React Compiler (#20574)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): default theme adoption compiles with the React Compiler (#20574).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): default theme adoption compiles with the React Compiler (#20574)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9439b1a033e3188d8273ca84d436cd636412e1a4",
       "subject": "perf(web): review file patches compile without manual memoization (#20670)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): review file patches compile without manual memoization (#20670).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): review file patches compile without manual memoization (#20670)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "94401d01b956828eaa989ff4a80046c20d7b6088",
@@ -20461,10 +20416,9 @@
     {
       "upstreamSha": "9730e044cad189652a87a93af5c84c19324d8813",
       "subject": "perf(web): useTheme compiles with the React Compiler (#20473)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useTheme compiles with the React Compiler (#20473).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): useTheme compiles with the React Compiler (#20473)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "979589d6d82d2757188f977dc4869813183ebb49",
@@ -20643,10 +20597,9 @@
     {
       "upstreamSha": "993aed357cd9061fe27a99196f9d671a9e9f3671",
       "subject": "perf(web): integrations settings compile with the React Compiler (#20512)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): integrations settings compile with the React Compiler (#20512).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): integrations settings compile with the React Compiler (#20512)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "994372ba43810e64027c537231da200988faa7ca",
@@ -20804,10 +20757,9 @@
     {
       "upstreamSha": "9a067b2dfa4a07d06c4589b746e50f9f398e35ef",
       "subject": "perf(server): skip unchanged device host refreshes (#19961)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): skip unchanged device host refreshes (#19961).",
+      "reason": "Not-applicable: skips unchanged refreshes in upstream's DeviceService; f5 has no devices or simulators. Upstream change: perf(server): skip unchanged device host refreshes (#19961)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9a0766b0238f2c044a965dcba32c6cb7ea0b63cd",
@@ -21707,10 +21659,9 @@
     {
       "upstreamSha": "a09394ec39763716b29f121a8bfbe9afb26dcfc0",
       "subject": "perf(web): ChatView joins the strict React Compiler list (#20418)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): ChatView joins the strict React Compiler list (#20418).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): ChatView joins the strict React Compiler list (#20418)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a09f92171186677796ccdc28148406c7491601ce",
@@ -21862,10 +21813,9 @@
     {
       "upstreamSha": "a175e06cdc8cd08e892c04f38615200638cf3a78",
       "subject": "perf(server): check Android SDK locations before PATH (#19960)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): check Android SDK locations before PATH (#19960).",
+      "reason": "Not-applicable: speeds up Android SDK discovery in upstream's device host (src/device); f5 has no devices or simulators. Upstream change: perf(server): check Android SDK locations before PATH (#19960)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a1762fdd7482728800f1f4fd260c632f01a30b1f",
@@ -22832,10 +22782,9 @@
     {
       "upstreamSha": "a9fb6087ead0af57fbf6ee6c3f9137c7943da747",
       "subject": "perf(web): the theme library compiles with the React Compiler (#20655)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the theme library compiles with the React Compiler (#20655).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the theme library compiles with the React Compiler (#20655)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a9fb6a80635c77a1d4fd988e0018059e13628eff",
@@ -23887,10 +23836,9 @@
     {
       "upstreamSha": "b27c686298becb3d63218ec221d1a819dfb00b72",
       "subject": "perf(web): the server update action compiles with the React Compiler (#20478)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the server update action compiles with the React Compiler (#20478).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the server update action compiles with the React Compiler (#20478)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b28471567cebe20347205059bbbdb3efe1213528",
@@ -26407,10 +26355,9 @@
     {
       "upstreamSha": "c57a04b722f2172e3be2c8f73c936d10b4582431",
       "subject": "perf(release): start Windows builds without waiting for the Linux job (#14027)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): start Windows builds without waiting for the Linux job (#14027).",
+      "reason": "Not-applicable: reorders jobs in upstream's release-desktop.yml and release.yml; f5 keeps its own release pipeline (the plan excludes T3's). Upstream change: perf(release): start Windows builds without waiting for the Linux job (#14027)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c5a0c78b7c0f913610b118234117747065050a5a",
@@ -28043,10 +27990,9 @@
     {
       "upstreamSha": "d1c2346eec239946b24ec6beba28a3773debda28",
       "subject": "perf(web): SnapShot setup dialog compile with the React Compiler (#20503)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): SnapShot setup dialog compile with the React Compiler (#20503).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): SnapShot setup dialog compile with the React Compiler (#20503)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3",
@@ -28450,10 +28396,9 @@
     {
       "upstreamSha": "d4c49bdd65ee5092b61306371b38974c9e5dc804",
       "subject": "perf(web): thread status indicators compile without manual memoization (#20630)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): thread status indicators compile without manual memoization (#20630).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): thread status indicators compile without manual memoization (#20630)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d4cd7d5c33122473da22ae118c93477ef7e38310",
@@ -30216,10 +30161,9 @@
     {
       "upstreamSha": "e10f5d1b5ebe8493b8d88790646967c031c2e14e",
       "subject": "perf(web): media actions compile with the React Compiler (#20487)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): media actions compile with the React Compiler (#20487).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): media actions compile with the React Compiler (#20487)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e1230d6031bc55a21668818d0b585d8887b88579",
@@ -31138,10 +31082,9 @@
     {
       "upstreamSha": "e82a1ce3f369f113b0b33dff8249569c345e30e8",
       "subject": "fix(web): scheduled task model picker no longer shifts the dialog (#18940)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): scheduled task model picker no longer shifts the dialog (#18940).",
+      "reason": "Not-applicable: fixes upstream's scheduled task settings dialog; f5 has no scheduled tasks. Upstream change: fix(web): scheduled task model picker no longer shifts the dialog (#18940)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e846ad5505b21efd7e7ded4c3e42340d5c45a481",
@@ -31520,10 +31463,9 @@
     {
       "upstreamSha": "eb17e0db2bd075e71b4015dc57588e7f838cbcdc",
       "subject": "perf(mobile): pause elapsed-time timers on hidden thread screens (#15397)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(mobile): pause elapsed-time timers on hidden thread screens (#15397).",
+      "reason": "Not-applicable: all executable changes are confined to the mobile app. Upstream change: perf(mobile): pause elapsed-time timers on hidden thread screens (#15397)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "eb1cf7bd0efba7364d53907036f5b7eefb379c39",
@@ -31725,10 +31667,9 @@
     {
       "upstreamSha": "ec9f8e875ca01abcff45cc3cdc8c89f24130af5a",
       "subject": "perf(web): file breadcrumbs compile with the React Compiler (#20651)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): file breadcrumbs compile with the React Compiler (#20651).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): file breadcrumbs compile with the React Compiler (#20651)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ecb938da581938e2a4470e2e52092477e9bcfa2f",
@@ -32616,10 +32557,9 @@
     {
       "upstreamSha": "f22415a075ca3ac24ab0c853f39126678a1bdb66",
       "subject": "perf(web): project content search compiles with the React Compiler (#20641)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): project content search compiles with the React Compiler (#20641).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): project content search compiles with the React Compiler (#20641)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f239b77df93077e40c27cc5c5909e94266571859",
@@ -33035,10 +32975,9 @@
     {
       "upstreamSha": "f4cf855672d530f671b414cdb3c11de515c29799",
       "subject": "perf(web): the terminal drawer compiles with the React Compiler (#20527)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the terminal drawer compiles with the React Compiler (#20527).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the terminal drawer compiles with the React Compiler (#20527)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f4d979a6c6139ab10aa1013335bd94a313a5b56e",
@@ -33680,10 +33619,9 @@
     {
       "upstreamSha": "f99b20275359ff7acecdb916a9fa25ac33102b12",
       "subject": "fix(web): T3 Connect settings can repair a link that drifted to publish-only (#19389)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): T3 Connect settings can repair a link that drifted to publish-only (#19389).",
+      "reason": "Not-applicable: repairs T3 Connect cloud links in upstream's settings (useCloudLinkController, client-runtime relay errors); f5 has no T3 Connect. Upstream change: fix(web): T3 Connect settings can repair a link that drifted to publish-only (#19389)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f99d12b5e5776a9bd7c629ec72dbe8764607a6d0",
@@ -33726,10 +33664,9 @@
     {
       "upstreamSha": "f9e16b3f66476ad1e213152708c9aa8b035085a3",
       "subject": "perf(mobile): show the cached thread list sooner and stop the freeze after it (#16713)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(mobile): show the cached thread list sooner and stop the freeze after it (#16713).",
+      "reason": "Not-applicable: speeds up the mobile app's cached thread list (apps/mobile plus client-runtime shell state); f5 has no mobile app or client-runtime package. Upstream change: perf(mobile): show the cached thread list sooner and stop the freeze after it (#16713)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f9e8236899f25653ce95d688fac798cd070afbc1",

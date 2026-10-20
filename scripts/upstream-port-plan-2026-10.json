@@ -863,20 +863,9 @@
     },
     {
       "upstreamSha": "3ba883ebf4647ab8372f74c47422e53e92e9a53d",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the item inspector compiles without manual memoization (#20545).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20545"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the item inspector compiles without manual memoization (#20545)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2993dfc069115ed590d00741dd58013889387793",
@@ -890,20 +879,9 @@
     },
     {
       "upstreamSha": "07528262fc9cf1f2b4b2cb59e96f2023def09f73",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the model picker compiles without manual memoization (#20706).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20706"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the model picker compiles without manual memoization (#20706)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "825450508452a60a0446378a67daa192be9d99f5",
@@ -965,20 +943,9 @@
     },
     {
       "upstreamSha": "82f40d74a63cbc804b74a64cb697015213a08196",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the settings sidebar compiles with the React Compiler (#20623).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20623"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the settings sidebar compiles with the React Compiler (#20623)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "02d48aec5c75e6abb90d06fd2c63939a82bd3718",
@@ -1092,20 +1059,9 @@
     },
     {
       "upstreamSha": "7e850a03c23d5beb303c1fa73e34f688b4aaab3c",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useStableCallback compiles without manual memoization (#20556).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20556"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): useStableCallback compiles without manual memoization (#20556)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "78c0d7df69e193ca5e8ecde0cbea6be6050a3366",
@@ -1194,20 +1150,9 @@
     },
     {
       "upstreamSha": "8e6ace61666054e367d985a4bec60e8441092afc",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the app sidebar layout compiles with the React Compiler (#20569).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20569"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the app sidebar layout compiles with the React Compiler (#20569)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "506955372a24ec02c5dea6b5803add87ff0107ae",
@@ -1239,20 +1184,9 @@
     },
     {
       "upstreamSha": "9434bfd1d9f53d9d377704955b6d63b5eca8a4af",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): default theme adoption compiles with the React Compiler (#20574).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20574"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): default theme adoption compiles with the React Compiler (#20574)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2bb92ba474f311644137dcb1b6eac604c504bbee",
@@ -1287,20 +1221,9 @@
     },
     {
       "upstreamSha": "2814dc9c48851e0fb016b34a290ed978db7abace",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the index route compiles with the React Compiler (#20580).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20580"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the index route compiles with the React Compiler (#20580)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6f68d6d7d50054530819b2b84323d75faf6bc9f2",
@@ -1338,20 +1261,9 @@
     },
     {
       "upstreamSha": "20851e304eb543acf9cbcd5db5d2161a60212fbf",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the root route compiles with the React Compiler (#20585).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20585"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the root route compiles with the React Compiler (#20585)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "54bffb912e82b514deef44769cb68f84758538ba",
@@ -1396,20 +1308,9 @@
     },
     {
       "upstreamSha": "4e3f936fbda8e3eafae23551bcf61bd836092396",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the pending user input panel compiles with the React Compiler (#20592).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20592"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the pending user input panel compiles with the React Compiler (#20592)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6515be7f4bd34a6d69e4f40b7f615e438aa235d0",
@@ -1520,20 +1421,9 @@
     },
     {
       "upstreamSha": "89a24e8d97b2c8beff1a24bc99a1421feaf24421",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the open-source notices panel compiles with the React Compiler (#20608).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20608"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the open-source notices panel compiles with the React Compiler (#20608)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "196950a6e9c1d6997e81e517e97e3de947968bc7",
@@ -1684,20 +1574,9 @@
     },
     {
       "upstreamSha": "0b0f4dbf2671e0fcb3aaa13b8d3df20412ba14cc",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the source control settings compile with the React Compiler (#20628).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20628"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the source control settings compile with the React Compiler (#20628)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e544a4a1f6dc599eea71e9b2fb7f28d0ed9cbe02",
@@ -1708,37 +1587,15 @@
     },
     {
       "upstreamSha": "d4c49bdd65ee5092b61306371b38974c9e5dc804",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): thread status indicators compile without manual memoization (#20630).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20630"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): thread status indicators compile without manual memoization (#20630)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1b41060585be44439a7d00b7168313daeac6b695",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the diff file tree compiles with the React Compiler (#20631).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20631"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the diff file tree compiles with the React Compiler (#20631)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "452d032a2a2e47bced99ba662a1eda18f9edd116",
@@ -1766,20 +1623,9 @@
     },
     {
       "upstreamSha": "478b06c60972b3469d73584a08d54323072e4839",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the first-run gate compiles with the React Compiler (#20637).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20637"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the first-run gate compiles with the React Compiler (#20637)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0fdbb37478dedd328bfb908e9b20bb3b2061d5dc",
@@ -1797,20 +1643,9 @@
     },
     {
       "upstreamSha": "f22415a075ca3ac24ab0c853f39126678a1bdb66",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): project content search compiles with the React Compiler (#20641).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20641"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): project content search compiles with the React Compiler (#20641)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f63f0261d1223cf59f58a288cefc2cb1f91e53f0",
@@ -1879,20 +1714,9 @@
     },
     {
       "upstreamSha": "ec9f8e875ca01abcff45cc3cdc8c89f24130af5a",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): file breadcrumbs compile with the React Compiler (#20651).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20651"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): file breadcrumbs compile with the React Compiler (#20651)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c7fe6d37b3a328fb5427b330d1cb11ae66a6da14",
@@ -1917,20 +1741,9 @@
     },
     {
       "upstreamSha": "a9fb6087ead0af57fbf6ee6c3f9137c7943da747",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the theme library compiles with the React Compiler (#20655).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20655"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the theme library compiles with the React Compiler (#20655)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4a9516d3d5e73869fc9d33b744b31ef2f26ba404",
@@ -2035,20 +1848,9 @@
     },
     {
       "upstreamSha": "9439b1a033e3188d8273ca84d436cd636412e1a4",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): review file patches compile without manual memoization (#20670).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20670"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): review file patches compile without manual memoization (#20670)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d209e56e00e96977d5e13afb6f117983c854deba",
@@ -2290,20 +2092,9 @@
     },
     {
       "upstreamSha": "26a7df089dcfba2c113b85b26b2c21deb10e30d6",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the file save coordinator compiles without manual memoization (#20697).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20697"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the file save coordinator compiles without manual memoization (#20697)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "73d9a77e43ee7cdc099726129d56576d5835c109",
@@ -2497,20 +2288,9 @@
     },
     {
       "upstreamSha": "23163fdc48871b6b297371e408e239dc02199c91",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the legacy sidebar compiles with the React Compiler (#20640).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20640"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the legacy sidebar compiles with the React Compiler (#20640)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5c5dcbc60b35aae59cbc554231afa9f2c04ad2ce",
@@ -2572,37 +2352,15 @@
     },
     {
       "upstreamSha": "1da2d60b43e7523ce0eb24768710dfa23d586f61",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the settings panels compile with the React Compiler (#20528).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20528"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the settings panels compile with the React Compiler (#20528)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f4cf855672d530f671b414cdb3c11de515c29799",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the terminal drawer compiles with the React Compiler (#20527).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20527"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the terminal drawer compiles with the React Compiler (#20527)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9220fd73bf2f222ea602b711fd71e7b44d4a2bfd",
@@ -2616,20 +2374,9 @@
     },
     {
       "upstreamSha": "404c261e8a4b79a8d3259d3ac304b64c851428f7",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the theme color picker compiles with the React Compiler (#20525).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20525"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the theme color picker compiles with the React Compiler (#20525)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f0474d37d7d4986bbef7835745e04d5a4c9e717f",
@@ -2646,37 +2393,15 @@
     },
     {
       "upstreamSha": "6a326afb81c64b746d70602988795b528dfe8abc",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): connections settings compile with the React Compiler (#20515).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20515"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): connections settings compile with the React Compiler (#20515)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "3448e01788a0d65f95e0f1b78881fafd3421e495",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): SnapShot settings compile with the React Compiler (#20514).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20514"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): SnapShot settings compile with the React Compiler (#20514)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "542287245dc93186a0d11f347e786d4264d547df",
@@ -2686,54 +2411,21 @@
     },
     {
       "upstreamSha": "6a71716edbc52274369b987cda475f7e9f094329",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): theme import dialog compile with the React Compiler (#20513).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20513"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): theme import dialog compile with the React Compiler (#20513)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "993aed357cd9061fe27a99196f9d671a9e9f3671",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): integrations settings compile with the React Compiler (#20512).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20512"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): integrations settings compile with the React Compiler (#20512)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "350127040a3ba3b86aada6b76b05baaf9b8a286d",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): capture shortcut config compile with the React Compiler (#20511).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20511"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): capture shortcut config compile with the React Compiler (#20511)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d23ac516c4372ddb1e01c0e6f3b98c715c023b29",
@@ -2747,20 +2439,9 @@
     },
     {
       "upstreamSha": "40ff4b454cf1ef5017c3cff9a7aa31570a054dc2",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): project settings panel compile with the React Compiler (#20509).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20509"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): project settings panel compile with the React Compiler (#20509)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "7091bc2495df63174afc4a14d6890c1aab7daf64",
@@ -2771,20 +2452,9 @@
     },
     {
       "upstreamSha": "123dc2450484f6d2dabaf3a440e83aec2d8267b1",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): diagnostics settings compile with the React Compiler (#20507).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20507"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): diagnostics settings compile with the React Compiler (#20507)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d89076c6d8df27a9e18eda642096f99a910d18e3",
@@ -2805,37 +2475,15 @@
     },
     {
       "upstreamSha": "0a453f00d5944edfba16d04b0d23997b61ecc237",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): notification settings compile with the React Compiler (#20504).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20504"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): notification settings compile with the React Compiler (#20504)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d1c2346eec239946b24ec6beba28a3773debda28",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): SnapShot setup dialog compile with the React Compiler (#20503).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20503"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): SnapShot setup dialog compile with the React Compiler (#20503)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b618d53941b8bdde151e5b104c47ad29e2447687",
@@ -2853,20 +2501,9 @@
     },
     {
       "upstreamSha": "72dac237304e5c7dddc55ca880e39c374ee66e3c",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): telemetry export settings compile with the React Compiler (#20500).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20500"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): telemetry export settings compile with the React Compiler (#20500)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ebe997981ba59f0187581243a8c928f999a54369",
@@ -2880,20 +2517,9 @@
     },
     {
       "upstreamSha": "5c43d16ec7afbbd86a37165b5395dc9921391feb",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): source control host settings compile with the React Compiler (#20498).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20498"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): source control host settings compile with the React Compiler (#20498)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ef78932dc867d7ae836f0a37dc03bd2fb9d76ad9",
@@ -2995,37 +2621,15 @@
     },
     {
       "upstreamSha": "e10f5d1b5ebe8493b8d88790646967c031c2e14e",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): media actions compile with the React Compiler (#20487).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20487"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): media actions compile with the React Compiler (#20487)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "46ae590bfae29b2dee2ccfd6acbdd3964fc1393a",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the media video player compiles with the React Compiler (#20486).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20486"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the media video player compiles with the React Compiler (#20486)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5cc75e8cb5e63d5f50b9a79f4f7f5671b6106fcb",
@@ -3039,20 +2643,9 @@
     },
     {
       "upstreamSha": "62861700d80182675371240bb3e9f75c9894cc63",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the sidebar update pill compiles with the React Compiler (#20484).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20484"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the sidebar update pill compiles with the React Compiler (#20484)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "a77cbf0d5ed91bdb067f69e45714ed0346d404a4",
@@ -3066,20 +2659,9 @@
     },
     {
       "upstreamSha": "1144a7ecc4b7f437de9c5caaa88524c057c9a8b4",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useDirectoryEntries compiles with the React Compiler (#20482).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20482"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): useDirectoryEntries compiles with the React Compiler (#20482)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f31850cd2aa972d5c22c58f4038dfc25a24bf619",
@@ -3113,37 +2695,15 @@
     },
     {
       "upstreamSha": "b27c686298becb3d63218ec221d1a819dfb00b72",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the server update action compiles with the React Compiler (#20478).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20478"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the server update action compiles with the React Compiler (#20478)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "7a89733cab5fb473c8c8af9bf8c81fb82aa4e232",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the command palette compiles with the React Compiler (#20477).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20477"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the command palette compiles with the React Compiler (#20477)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e96db6f0c36bd38a079843fa316d2cca0b11306d",
@@ -3167,37 +2727,15 @@
     },
     {
       "upstreamSha": "8316dfb6192596faedcb472d3aba80597efaa6ad",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): settings hooks compile with the React Compiler (#20474).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20474"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): settings hooks compile with the React Compiler (#20474)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9730e044cad189652a87a93af5c84c19324d8813",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useTheme compiles with the React Compiler (#20473).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20473"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): useTheme compiles with the React Compiler (#20473)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "70c73d96e0f395c3cea59266699a6d92045959ed",
@@ -3218,20 +2756,9 @@
     },
     {
       "upstreamSha": "7f4142e5b07bd1027d513c88311347101b294b52",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): thread actions compile without manual memoization (#20470).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20470"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): thread actions compile without manual memoization (#20470)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8f309bce656b315aacc93ba54ed6f3933124da0e",
@@ -3371,20 +2898,9 @@
     },
     {
       "upstreamSha": "275e55cfca59ead9ea39ab1fb514535c91bc4414",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the theme editor compiles with the React Compiler (#20458).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20458"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): the theme editor compiles with the React Compiler (#20458)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "998bcc226a70f307913296b859b02c80456b7100",
@@ -3478,20 +2994,9 @@
     },
     {
       "upstreamSha": "a09394ec39763716b29f121a8bfbe9afb26dcfc0",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): ChatView joins the strict React Compiler list (#20418).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20418"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): ChatView joins the strict React Compiler list (#20418)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d913b61603a3dce6d2765f9cfab83cfc84b45ccd",
@@ -3571,20 +3076,9 @@
     },
     {
       "upstreamSha": "0e95babaf52c0b5625b6a081309f85c0d8b78356",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): let the React Compiler compile ChatView (#20379).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20379"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; the behavior-level 15a-3 render fixes stay planned separately. Upstream change: perf(web): let the React Compiler compile ChatView (#20379)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9ef927496573c059f9f3b06d0faa4cee37e0e993",
@@ -3685,17 +3179,9 @@
     },
     {
       "upstreamSha": "51f7382aff301e774f52ce10de1a49b5ff9c5589",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): restore mobile app store links in settings (#20422).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20422"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not-applicable: restores links to upstream's mobile app stores; f5 has no mobile app. Upstream change: fix(web): restore mobile app store links in settings (#20422)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6cecd22789f11fd325933a5d8859d6c09d6e7261",
@@ -4132,17 +3618,9 @@
     },
     {
       "upstreamSha": "6d73370ef1c54c2a3bdb187cb72cf6f7b88b44c3",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings stay compact with many connected machines (#19744).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19744"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:multi-environment",
+      "reason": "Not-applicable: compacts upstream's settings for many connected machines (device hosts, scheduled tasks, setting inheritance); f5 has no multi-environment hosts. Upstream change: fix(web): settings stay compact with many connected machines (#19744)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "727b4e745ca36d5e23e908a2f94e714316832782",
@@ -4211,37 +3689,15 @@
     },
     {
       "upstreamSha": "9a067b2dfa4a07d06c4589b746e50f9f398e35ef",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): skip unchanged device host refreshes (#19961).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19961"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:devices",
+      "reason": "Not-applicable: skips unchanged refreshes in upstream's DeviceService; f5 has no devices or simulators. Upstream change: perf(server): skip unchanged device host refreshes (#19961)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "a175e06cdc8cd08e892c04f38615200638cf3a78",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): check Android SDK locations before PATH (#19960).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19960"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:devices",
+      "reason": "Not-applicable: speeds up Android SDK discovery in upstream's device host (src/device); f5 has no devices or simulators. Upstream change: perf(server): check Android SDK locations before PATH (#19960)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d8798dd7e9ae0de05a8b152ccfaca8d7bf2a503d",
@@ -5177,17 +4633,9 @@
     },
     {
       "upstreamSha": "f99b20275359ff7acecdb916a9fa25ac33102b12",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): T3 Connect settings can repair a link that drifted to publish-only (#19389).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19389"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not-applicable: repairs T3 Connect cloud links in upstream's settings (useCloudLinkController, client-runtime relay errors); f5 has no T3 Connect. Upstream change: fix(web): T3 Connect settings can repair a link that drifted to publish-only (#19389)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "3062701c24ac6b6bde3d238fab8689e48ce2396b",
@@ -6119,17 +5567,9 @@
     },
     {
       "upstreamSha": "e82a1ce3f369f113b0b33dff8249569c345e30e8",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): scheduled task model picker no longer shifts the dialog (#18940).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18940"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:scheduled-tasks",
+      "reason": "Not-applicable: fixes upstream's scheduled task settings dialog; f5 has no scheduled tasks. Upstream change: fix(web): scheduled task model picker no longer shifts the dialog (#18940)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "bbd98a5f873eaed5f5efbfbacc6913ee87804443",
@@ -10286,37 +9726,15 @@
     },
     {
       "upstreamSha": "eb17e0db2bd075e71b4015dc57588e7f838cbcdc",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(mobile): pause elapsed-time timers on hidden thread screens (#15397).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-15397"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not-applicable: all executable changes are confined to the mobile app. Upstream change: perf(mobile): pause elapsed-time timers on hidden thread screens (#15397)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "28f5516a9acfcfc1e203487e78869a406fd23b76",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(mobile): omit duplicated turn items from bounded thread snapshots (#15385).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-15385"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not-applicable: trims the bounded thread snapshots upstream serves to its mobile client through orchestration-v2 ThreadStream and client-runtime; f5 has neither the mobile app nor that endpoint. Upstream change: perf(mobile): omit duplicated turn items from bounded thread snapshots (#15385)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6053a7878d24e5fd596d2b417ed94964a4b9c1c6",
@@ -10420,20 +9838,9 @@
     },
     {
       "upstreamSha": "f9e16b3f66476ad1e213152708c9aa8b035085a3",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(mobile): show the cached thread list sooner and stop the freeze after it (#16713).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16713"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not-applicable: speeds up the mobile app's cached thread list (apps/mobile plus client-runtime shell state); f5 has no mobile app or client-runtime package. Upstream change: perf(mobile): show the cached thread list sooner and stop the freeze after it (#16713)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "83a82a46b0631234ac85748b912566d6f4b1dee3",
@@ -11488,17 +10895,9 @@
     },
     {
       "upstreamSha": "442735897f6f92af33798075baa12d4fd4d710dd",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(relay): export traces through one tracer, one request span each (#16382).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16382"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not-applicable: confined to upstream's relay worker (infra/relay); f5 has no relay. Upstream change: fix(relay): export traces through one tracer, one request span each (#16382)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "83b982a85c87b4c0eda08beb9028e3a73f7c89b6",
@@ -11520,17 +10919,9 @@
     },
     {
       "upstreamSha": "25f0b2a1b7323563aa5d4e7f70e78a3889c5918e",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(observability): T3 Connect tracing stops at the relay boundary (#16314).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16314"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not-applicable: scopes T3 Connect relay tracing (src/cloud/traceRelayRequest.ts and relay HTTP handlers); f5 has no T3 Connect or relay. Upstream change: fix(observability): T3 Connect tracing stops at the relay boundary (#16314)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ff397a29523d3c63e5844b11608c0189640c7561",
@@ -11752,20 +11143,9 @@
     },
     {
       "upstreamSha": "6bfc8baeb8f280e57ef6d0d514680b0bce8538a2",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(relay): delete expired tunnels four at a time within a time budget (#13566).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13566"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not-applicable: changes upstream's managed relay tunnel reaper (src/environments/ManagedEndpointReaper.ts); f5 has no relay or managed endpoints. Upstream change: perf(relay): delete expired tunnels four at a time within a time budget (#13566)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "41d2535a90fdfb49b2b9a7a7c8fb4bce09c4170f",
@@ -14087,54 +13467,21 @@
     },
     {
       "upstreamSha": "783ccf0fdde0d20824ad87af10a870fc28005835",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): build Vercel deployments early and go live after publish (#14029).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14029"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:release-ci",
+      "reason": "Not-applicable: reorders upstream's Vercel deployment jobs in its release workflow; f5 has no Vercel deployment. Upstream change: perf(release): build Vercel deployments early and go live after publish (#14029)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c57a04b722f2172e3be2c8f73c936d10b4582431",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): start Windows builds without waiting for the Linux job (#14027).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14027"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:release-ci",
+      "reason": "Not-applicable: reorders jobs in upstream's release-desktop.yml and release.yml; f5 keeps its own release pipeline (the plan excludes T3's). Upstream change: perf(release): start Windows builds without waiting for the Linux job (#14027)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8630e1ac7a94cdae6f3014161db65385931cf3a2",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): trim Windows packaging setup (#14037).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14037"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:release-ci",
+      "reason": "Not-applicable: trims upstream's release-desktop.yml Windows packaging job; f5 keeps its own release pipeline (the plan excludes T3's). Upstream change: perf(release): trim Windows packaging setup (#14037)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6f8e2534f2d935e6befa7353a003c4b59fe66f6f",
@@ -14148,20 +13495,9 @@
     },
     {
       "upstreamSha": "67b175a4c916ac0d5dbac809da22271db3f542d7",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(release): build and publish npm platform packages concurrently (#14028).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14028"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:release-ci",
+      "reason": "Not-applicable: speeds up upstream's npm platform-package publishing (scripts/build-npm-platform-packages.ts, apps/server/scripts/publishOrder.ts), which f5's release pipeline does not have. Upstream change: perf(release): build and publish npm platform packages concurrently (#14028)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0cf482b08bca0249ec94fbcbd0eb04fff28d9b3d",
@@ -15294,17 +14630,9 @@
     },
     {
       "upstreamSha": "7b84431161a64c9f9e9b57637dec23474a1b4236",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): size the Android fold model from the inner display (#13574).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13574"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:devices",
+      "reason": "Not-applicable: sizes the Android fold model in client-runtime's phone viewer; f5 has no device viewer. Upstream change: fix(web): size the Android fold model from the inner display (#13574)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "df9826f0806cc4874cd79f24a42a1e9e506030c2",

@@ -1642,3 +1642,19 @@ call sites that would have passed the element index as the new exit argument;
 they now call it with the session only. The complete server suite passes 5,471
 tests with 14 skipped; it still fails only the three known `launcher.test.ts`
 process-identity cases that need `ps` access this host denies.
+
+## 15a triage log
+
+Each decision updates the October plan artifact and the ledger together, so
+reapplying the plan keeps it. Reasons name the upstream paths that were
+inspected.
+
+**Batch 1 (63 records, not applicable).** 17 change subsystems f5 does not
+have: upstream's release jobs (npm platform packages, Vercel, Windows
+packaging order), the relay and T3 Connect, the mobile app and its bounded
+snapshot endpoint, device hosts and simulators, multi-machine settings and
+scheduled tasks. 46 are React Compiler adoption commits confined to
+`apps/web` (allowlist entry plus removal of manual memoization), which the plan
+classifies as maintenance. Six compiler-motivated refactors that also change
+ref or effect timing stay planned for individual review, as do the named 15a-3
+render fixes.
