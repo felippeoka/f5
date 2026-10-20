@@ -227,11 +227,17 @@ try {
     url.protocol = url.protocol === "wss:" ? "https:" : "http:";
     return url.origin;
   });
-  const authorizedStatus = await page.evaluate(
-    async (origin) => (await fetch(`${origin}/api/bootstrap`)).status,
-    backendOrigin,
-  );
-  if (authorizedStatus !== 200) throw new Error("Main renderer backend authentication failed");
+  const authorizedBootstrap = await page.evaluate(async (origin) => {
+    const response = await fetch(`${origin}/api/bootstrap`);
+    return {
+      status: response.status,
+      protocolVersion: response.ok ? (await response.json()).protocolVersion : null,
+    };
+  }, backendOrigin);
+  if (authorizedBootstrap.status !== 200)
+    throw new Error("Main renderer backend authentication failed");
+  if (!Number.isSafeInteger(authorizedBootstrap.protocolVersion))
+    throw new Error("Backend did not advertise a valid protocol version");
   const iframeStatus = await page.evaluate(async (origin) => {
     const frame = document.createElement("iframe");
     frame.srcdoc = "<!doctype html><title>untrusted subframe</title>";
@@ -461,9 +467,11 @@ try {
     );
   const nativeRequest = (method, body) =>
     page.evaluate(
-      ({ method, body }) =>
+      ({ method, body, protocolVersion }) =>
         new Promise((resolve, reject) => {
-          const socket = new WebSocket(window.desktopBridge.getWsUrl());
+          const url = new URL(window.desktopBridge.getWsUrl());
+          url.searchParams.set("protocol", String(protocolVersion));
+          const socket = new WebSocket(url);
           const controller = new AbortController();
           const timer = setTimeout(
             () => finish(new Error(`Desktop smoke request timed out: ${method}`)),
@@ -498,11 +506,12 @@ try {
           );
           socket.addEventListener(
             "close",
-            () => finish(new Error("Desktop smoke connection closed")),
+            (event) =>
+              finish(new Error(`Desktop smoke connection closed (${event.code}: ${event.reason})`)),
             { signal: controller.signal },
           );
         }),
-      { method, body },
+      { method, body, protocolVersion: authorizedBootstrap.protocolVersion },
     );
   const terminalInput = {
     threadId: "desktop-shutdown-smoke",
