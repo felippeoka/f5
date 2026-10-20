@@ -5,20 +5,26 @@ import { F5_HOME_DIR_NAME, USERDATA_STATE_DIR_NAME } from "@t3tools/shared/appSt
 import { readPathFromLoginShell } from "@t3tools/shared/shell";
 import { ensureWindowsPathHydrated } from "@t3tools/shared/windowsPath";
 
-export async function fixPath(): Promise<void> {
-  if (process.platform === "win32") {
-    await ensureWindowsPathHydrated(process.env, {
+export async function fixPath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  // The desktop already ran these probes into the env this child inherits.
+  // Repeating them costs a login shell, or seconds of PowerShell on Windows.
+  if (env.F5_SHELL_ENVIRONMENT_PREPARED === "1") return;
+  if (platform === "win32") {
+    await ensureWindowsPathHydrated(env, {
       warn: (message) => console.warn(`[environment] ${message}`),
     });
     return;
   }
-  if (process.platform !== "darwin") return;
+  if (platform !== "darwin") return;
 
   try {
-    const shell = process.env.SHELL ?? "/bin/zsh";
+    const shell = env.SHELL ?? "/bin/zsh";
     const result = readPathFromLoginShell(shell);
     if (result) {
-      process.env.PATH = result;
+      env.PATH = result;
     }
   } catch {
     // Silently ignore — keep default PATH
