@@ -1698,3 +1698,42 @@ enrichment refresh), and
 [t3code#13689](https://github.com/pingdotgg/t3code/pull/13689)
 (RepositoryIdentityResolver TTL). f5 resolves favicons and repository identity
 on request, and its PR watch sweep polls only watched pull requests.
+
+**Batch 5 (server reads, storage and lifecycle, 15 records).** Five ports,
+each with a test that failed before the change where behavior was observable:
+
+- [t3code#19429](https://github.com/pingdotgg/t3code/pull/19429): a
+  `tool.updated` activity that repeats the last one stored for its item is
+  skipped (f5 has no execution-node table, so this is the matching write).
+- [t3code#13688](https://github.com/pingdotgg/t3code/pull/13688): shutdown
+  rewrites only the bindings it stops.
+- [t3code#19305](https://github.com/pingdotgg/t3code/pull/19305): bindings
+  over 64 KiB use a throwaway statement. The values path also stops ignoring
+  `SafeIntegers`, which was a separate f5 bug the upstream test exposed.
+- [t3code#13720](https://github.com/pingdotgg/t3code/pull/13720): the
+  projector patches a copy of the thread list instead of mapping it.
+- [t3code#13774](https://github.com/pingdotgg/t3code/pull/13774), reaper half:
+  sweeps filter stopped bindings in SQL.
+
+Equivalent: [t3code#17029](https://github.com/pingdotgg/t3code/pull/17029)
+(EXPLAIN QUERY PLAN shows f5's tail pages as index-ordered, LIMIT-bounded
+searches), [t3code#17041](https://github.com/pingdotgg/t3code/pull/17041)
+(replays resolve through the receipts primary key),
+[t3code#19316](https://github.com/pingdotgg/t3code/pull/19316) and
+[t3code#16652](https://github.com/pingdotgg/t3code/pull/16652) (stored tool
+activities never keep raw provider data, and the patch is stored once), and
+[t3code#12600](https://github.com/pingdotgg/t3code/pull/12600) (positive
+resolutions already cached for 5 seconds).
+[t3code#13693](https://github.com/pingdotgg/t3code/pull/13693) is declined:
+f5's second snapshot decode fills schema defaults, and removing it failed the
+hydration test. [t3code#19226](https://github.com/pingdotgg/t3code/pull/19226)
+is deferred because its reader worker is out of scope for this round.
+[t3code#13504](https://github.com/pingdotgg/t3code/pull/13504),
+[t3code#19386](https://github.com/pingdotgg/t3code/pull/19386) and
+[t3code#14475](https://github.com/pingdotgg/t3code/pull/14475) change
+upstream mechanisms f5 does not have.
+
+Found while testing: five tests in
+`apps/server/src/provider/Layers/ProviderSessionDirectory.test.ts` use plain
+`it(...)` with an Effect body inside `it.layer`, so their bodies never run.
+Run as `it.effect`, two of them fail. This is not fixed here.

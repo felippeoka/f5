@@ -544,10 +544,18 @@
     {
       "upstreamSha": "04ad17425a80484bf323a7d5076bd477a9499119",
       "subject": "fix(server): opening a long thread no longer blocks the server for a second (#17029)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): opening a long thread no longer blocks the server for a second (#17029).",
+      "reason": "Equivalent: upstream added indexes so its v2 bounded thread snapshot stops reading every turn item. f5 opens a thread through LIMIT-bounded tail pages; EXPLAIN QUERY PLAN shows the message tail as a covering-index search on (thread_id, created_at, message_id) with no sort, and the activity page walking (thread_id, sequence) from the newest row. Upstream change: fix(server): opening a long thread no longer blocks the server for a second (#17029)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "67a36028b52627c66bfd0cef13717de6611746ee",
+        "8168bd456ae23521e21bf68b08d0d860a6abd901"
+      ],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts:1353",
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts:1569",
+        "apps/server/src/persistence/Migrations/036_ProjectionThreadMessagesCreatedMessageId.ts:8"
+      ]
     },
     {
       "upstreamSha": "04c15f34b756aadbff4c93ff07a217fa2398e5d5",
@@ -6127,10 +6135,17 @@
     {
       "upstreamSha": "2d14185f32b6c0141a3f1192caf4a8d181cbe10f",
       "subject": "fix(server): large file edits no longer store their full diff twice (#19316)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): large file edits no longer store their full diff twice (#19316).",
+      "reason": "Equivalent: upstream stored a full file-change diff in both its event log and projection. f5 tool activities keep only changed paths and the file-change id, never the provider data, and the patch is stored once on the file-change record, capped at 1 MiB. Upstream change: fix(server): large file edits no longer store their full diff twice (#19316)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "8168bd456ae23521e21bf68b08d0d860a6abd901",
+        "9326dadeff3c9d521c550d578691d501c48b4615"
+      ],
+      "evidence": [
+        "packages/shared/src/orchestrationActivityPayload.ts:797",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:242"
+      ]
     },
     {
       "upstreamSha": "2d156a83b96ebf2e4a9c6017251baad357ae6ab1",
@@ -6616,10 +6631,9 @@
     {
       "upstreamSha": "3062701c24ac6b6bde3d238fab8689e48ce2396b",
       "subject": "fix(server): commit and title generation use your custom model when no text model is set (#19386)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): commit and title generation use your custom model when no text model is set (#19386).",
+      "reason": "Not-applicable: upstream's fallback prefers the server-level thread default model when it is a custom model. f5 server settings have no thread default; textGenerationModelSelection always decodes to an explicit selection and only falls back when its provider is disabled. Upstream change: fix(server): commit and title generation use your custom model when no text model is set (#19386)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "30be31195883635aba96031a8d79c255fb28b438",
@@ -10405,10 +10419,15 @@
     {
       "upstreamSha": "4cd0076ec65d51974dbe3efdd03be6ed5bf91c80",
       "subject": "perf(shared): cached SQLite statements no longer hold large parameters (#19305)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(shared): cached SQLite statements no longer hold large parameters (#19305).",
+      "reason": "Ported: executions binding more than 64 KiB use a throwaway statement, and the values path now honours SafeIntegers. Both new tests failed before the change. Raw ArrayBuffers are not treated as blobs because node:sqlite on Node 24.13 binds them as NULL. Upstream change: perf(shared): cached SQLite statements no longer hold large parameters (#19305)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["adfcbe924898dd84fe945e0077abeeecced960e5"],
+      "evidence": [
+        "apps/server/src/persistence/NodeSqliteClient.ts:98",
+        "apps/server/src/persistence/NodeSqliteClient.test.ts:72"
+      ]
     },
     {
       "upstreamSha": "4ce6a51a4c4bbc9a2fc9e371ecb446851f953482",
@@ -11847,10 +11866,15 @@
     {
       "upstreamSha": "574b18090281225de3449816c8366f0ee9ab886c",
       "subject": "perf(server): shutdown no longer rewrites every stopped session row (#13688)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): shutdown no longer rewrites every stopped session row (#13688).",
+      "reason": "Ported: shutdown lists bindings once and rewrites only those it stops; stopped rows without a persisted active turn keep their lastSeenAt and payload. The new test failed before the change (settled row rewritten). Upstream change: perf(server): shutdown no longer rewrites every stopped session row (#13688)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["18825b8bfc6951ba7dfd00a546854cabcc7aab51"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ProviderService.ts:3448",
+        "apps/server/src/provider/Layers/ProviderService.test.ts:1352"
+      ]
     },
     {
       "upstreamSha": "57522538182fe9ffac2b96c4f35f45a10cc70440",
@@ -15453,10 +15477,14 @@
     {
       "upstreamSha": "71964e670ff212006ebb8de26585649c2adced68",
       "subject": "perf(shared): scan PATH once per command before spawning, not on every spawn (#12600)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(shared): scan PATH once per command before spawning, not on every spawn (#12600).",
+      "reason": "Equivalent: upstream caches positive PATH resolutions before spawning and leaves misses uncached. f5 resolves executables only on Windows and already caches positive resolutions for 5 seconds without caching misses. Upstream change: perf(shared): scan PATH once per command before spawning, not on every spawn (#12600)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["cc45ed69281c7584adc6dd1c1e401846c0c185eb"],
+      "evidence": [
+        "apps/server/src/spawn/resolveCommand.ts:35",
+        "apps/server/src/processRunner.ts:154"
+      ]
     },
     {
       "upstreamSha": "719a76ca1dbf5490f1aa33ffb9966301e02be9a9",
@@ -15723,10 +15751,15 @@
     {
       "upstreamSha": "737192594f47d87f28b5f5a3fda3ef792a0d7972",
       "subject": "perf(server): unchanged node updates no longer write to SQLite (#19429)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): unchanged node updates no longer write to SQLite (#19429).",
+      "reason": "Ported: f5 has no execution-node table, so the equivalent write is a tool.updated activity per provider item update. Ingestion now skips an update matching the last appended one for that open tool item (recorded only after a successful append, cleared on completion, 512 items max). The new test failed before the change with the duplicate stored. Upstream change: perf(server): unchanged node updates no longer write to SQLite (#19429)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["bfe93d74bcdc5da0df7b45b57b06ed8564b62728"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:5569",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:7278"
+      ]
     },
     {
       "upstreamSha": "7376536b23e8db0d1b09054bbc0b919cf0c85405",
@@ -16321,10 +16354,9 @@
     {
       "upstreamSha": "77c8747150d0e140fa3fb303ed5339eb8165aa9f",
       "subject": "fix(keybindings): thread jumps no longer overlap model picker jumps (#14475)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(keybindings): thread jumps no longer overlap model picker jumps (#14475).",
+      "reason": "Not-applicable: scopes upstream's mod+N thread-jump bindings away from the open model picker. f5 has no thread-jump commands; mod+N is bound only to model-picker jumps while the picker is open (packages/shared/src/keybindings.ts:117). Upstream change: fix(keybindings): thread jumps no longer overlap model picker jumps (#14475)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "77c9d1eb5b6a48d38f6f0a2bb4a8cff8e4752ade",
@@ -18223,10 +18255,9 @@
     {
       "upstreamSha": "8659fcf145c3372161b360b74b094b8e0ab80bec",
       "subject": "fix(server): thread list reads no longer freeze the server on large databases (#19226)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): thread list reads no longer freeze the server on large databases (#19226).",
+      "reason": "Deferred: the fix moves shell snapshot reads to a node:sqlite reader worker, and the plan rules out a separate reader this round (15a-1). f5's thread-list read already skips decoding per-thread detail JSON columns (ProjectionSnapshotQuery.startup.test.ts:508); a reader worker is revisited with the next SQLite round. Upstream change: fix(server): thread list reads no longer freeze the server on large databases (#19226)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "866fc907592c9746b407484087d66c409e8034fa",
@@ -18434,10 +18465,15 @@
     {
       "upstreamSha": "8872666957802b37c9fdd212e01f0024bcc102c6",
       "subject": "perf(server): cut idle wakeups from the Connect relay and session reaper (#13774)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): cut idle wakeups from the Connect relay and session reaper (#13774).",
+      "reason": "Ported: reaper sweeps list bindings with excludeStopped, filtered in SQL, so stopped rows are no longer decoded each sweep. The Connect relay half has no f5 counterpart. The new test fails without the SQL filter. Upstream change: perf(server): cut idle wakeups from the Connect relay and session reaper (#13774)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["bb39a1b74df99b62d2d159ae6c0c644ad99d3517"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ProviderSessionReaper.ts:98",
+        "apps/server/src/provider/Layers/ProviderSessionDirectory.test.ts:247"
+      ]
     },
     {
       "upstreamSha": "88744f3ddba9d3883ba631f0f4801f1a97fe77ce",
@@ -21579,10 +21615,14 @@
     {
       "upstreamSha": "9fba2093e50f208c52d9041c70a793296e311477",
       "subject": "fix(server): replaying a command no longer freezes the server (#17041)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): replaying a command no longer freezes the server (#17041).",
+      "reason": "Equivalent: upstream's command lookup scanned the event sequence range for a command id. f5 resolves a replayed command through a primary-key lookup on orchestration_command_receipts and reads at most one event by sequence. Upstream change: fix(server): replaying a command no longer freezes the server (#17041)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:185",
+        "apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts:64"
+      ]
     },
     {
       "upstreamSha": "9fbc753ec4033435719dd204f0ad7e6618fb962e",
@@ -22015,10 +22055,9 @@
     {
       "upstreamSha": "a36af0637a63ebf316beb5db5670be226df01cbc",
       "subject": "fix(server): streamed section titles wait for the text under them (#13504)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): streamed section titles wait for the text under them (#13504).",
+      "reason": "Not-applicable: tunes upstream's splitBufferedAssistantText, which releases buffered assistant text block by block. f5's buffered mode holds the whole message until completion (with a 24k-character spill valve) and streaming mode forwards raw deltas, so there is no block release to hold a heading back in. Upstream change: fix(server): streamed section titles wait for the text under them (#13504)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a37b85279d71f958482cb8b6fef1886cdb43f364",
@@ -24407,10 +24446,9 @@
     {
       "upstreamSha": "b6eefc926ae305f4cb85cca797668b010cee1136",
       "subject": "perf(server): build the thread list snapshot without decoding it twice (#13693)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): build the thread list snapshot without decoding it twice (#13693).",
+      "reason": "Declined: upstream drops its second whole-snapshot decode. In f5 that decode is not a no-op: it fills schema defaults the row builders leave unset (project defaultModelSelection: null fails the hydration test without it), so removing it would change the snapshot shape clients and the engine receive. Upstream change: perf(server): build the thread list snapshot without decoding it twice (#13693)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "declined"
     },
     {
       "upstreamSha": "b6f72681da394369274121c4d1216f5d64a7a4bb",
@@ -24482,10 +24520,17 @@
     {
       "upstreamSha": "b77108bc41506ad7ba28839d9a8e04ba79fe340b",
       "subject": "fix(server): stop storing tool image bytes no client reads (#16652)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): stop storing tool image bytes no client reads (#16652).",
+      "reason": "Equivalent: upstream strips base64 image bodies from stored tool output. f5 rebuilds stored tool activity payloads from named fields, so raw tool data (and any image bytes in it) is never persisted; result images are extracted to attachment files and stored as references clients render. Upstream change: fix(server): stop storing tool image bytes no client reads (#16652)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "8168bd456ae23521e21bf68b08d0d860a6abd901",
+        "530136028fe8af450670a0fb2dca634545cc52b4"
+      ],
+      "evidence": [
+        "packages/shared/src/orchestrationActivityPayload.ts:778",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:2398"
+      ]
     },
     {
       "upstreamSha": "b78296a60b63f8721ae28b3c8a1b517f33bef90e",
@@ -26037,10 +26082,12 @@
     {
       "upstreamSha": "c216ba4dade683bf3a7c96bf63b33a85afc1a16c",
       "subject": "perf(server): stop remapping every thread on each thread event (#13720)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): stop remapping every thread on each thread event (#13720).",
+      "reason": "Ported: updateThread finds the thread once and patches a copy of the array instead of mapping every thread per event. Upstream added no test; the projector and engine suites (68 tests) pass. Upstream change: perf(server): stop remapping every thread on each thread event (#13720)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["659e3230b853411dc352053297dd6f6fee753726"],
+      "evidence": ["apps/server/src/orchestration/projector.ts:147"]
     },
     {
       "upstreamSha": "c21f93e43087c5b7d7f18b2d45d991cbf1f4d28c",

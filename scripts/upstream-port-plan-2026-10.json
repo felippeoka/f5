@@ -4628,17 +4628,9 @@
     },
     {
       "upstreamSha": "3062701c24ac6b6bde3d238fab8689e48ce2396b",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): commit and title generation use your custom model when no text model is set (#19386).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19386"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:server-default-model-selection",
+      "reason": "Not-applicable: upstream's fallback prefers the server-level thread default model when it is a custom model. f5 server settings have no thread default; textGenerationModelSelection always decodes to an explicit selection and only falls back when its provider is disabled. Upstream change: fix(server): commit and title generation use your custom model when no text model is set (#19386)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c08093c2b136353bc755459febf3e8afd46bf50e",
@@ -4974,17 +4966,14 @@
     },
     {
       "upstreamSha": "2d14185f32b6c0141a3f1192caf4a8d181cbe10f",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): large file edits no longer store their full diff twice (#19316).",
+      "classification": "equivalent:packages/shared/src/orchestrationActivityPayload.ts:797",
+      "reason": "Equivalent: upstream stored a full file-change diff in both its event log and projection. f5 tool activities keep only changed paths and the file-change id, never the provider data, and the patch is stored once on the file-change record, capped at 1 MiB. Upstream change: fix(server): large file edits no longer store their full diff twice (#19316)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19316"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:242"],
+      "f5Shas": [
+        "8168bd456ae23521e21bf68b08d0d860a6abd901",
+        "9326dadeff3c9d521c550d578691d501c48b4615"
+      ]
     },
     {
       "upstreamSha": "fd9cdaed17f615e364ee113829ec39b2bd2ed6fa",
@@ -5159,17 +5148,9 @@
     },
     {
       "upstreamSha": "8659fcf145c3372161b360b74b094b8e0ab80bec",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): thread list reads no longer freeze the server on large databases (#19226).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19226"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: the fix moves shell snapshot reads to a node:sqlite reader worker, and the plan rules out a separate reader this round (15a-1). f5's thread-list read already skips decoding per-thread detail JSON columns (ProjectionSnapshotQuery.startup.test.ts:508); a reader worker is revisited with the next SQLite round. Upstream change: fix(server): thread list reads no longer freeze the server on large databases (#19226)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "30d1010443d92d7c17f9d773639375a4c6de77bc",
@@ -6946,17 +6927,9 @@
     },
     {
       "upstreamSha": "77c8747150d0e140fa3fb303ed5339eb8165aa9f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(keybindings): thread jumps no longer overlap model picker jumps (#14475).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14475"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:thread-jump-keybindings",
+      "reason": "Not-applicable: scopes upstream's mod+N thread-jump bindings away from the open model picker. f5 has no thread-jump commands; mod+N is bound only to model-picker jumps while the picker is open (packages/shared/src/keybindings.ts:117). Upstream change: fix(keybindings): thread jumps no longer overlap model picker jumps (#14475)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e61eba4745f30e9dcd5425cc4a476c2bad7a11fe",
@@ -9771,31 +9744,25 @@
     },
     {
       "upstreamSha": "04ad17425a80484bf323a7d5076bd477a9499119",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): opening a long thread no longer blocks the server for a second (#17029).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts:1353",
+      "reason": "Equivalent: upstream added indexes so its v2 bounded thread snapshot stops reading every turn item. f5 opens a thread through LIMIT-bounded tail pages; EXPLAIN QUERY PLAN shows the message tail as a covering-index search on (thread_id, created_at, message_id) with no sort, and the activity page walking (thread_id, sequence) from the newest row. Upstream change: fix(server): opening a long thread no longer blocks the server for a second (#17029)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17029"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts:1569",
+        "apps/server/src/persistence/Migrations/036_ProjectionThreadMessagesCreatedMessageId.ts:8"
+      ],
+      "f5Shas": [
+        "67a36028b52627c66bfd0cef13717de6611746ee",
+        "8168bd456ae23521e21bf68b08d0d860a6abd901"
+      ]
     },
     {
       "upstreamSha": "9fba2093e50f208c52d9041c70a793296e311477",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): replaying a command no longer freezes the server (#17041).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/OrchestrationEngine.ts:185",
+      "reason": "Equivalent: upstream's command lookup scanned the event sequence range for a command id. f5 resolves a replayed command through a primary-key lookup on orchestration_command_receipts and reads at most one event by sequence. Upstream change: fix(server): replaying a command no longer freezes the server (#17041)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17041"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "evidence": ["apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts:64"],
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "f9e16b3f66476ad1e213152708c9aa8b035085a3",
@@ -10181,17 +10148,14 @@
     },
     {
       "upstreamSha": "b77108bc41506ad7ba28839d9a8e04ba79fe340b",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): stop storing tool image bytes no client reads (#16652).",
+      "classification": "equivalent:packages/shared/src/orchestrationActivityPayload.ts:778",
+      "reason": "Equivalent: upstream strips base64 image bodies from stored tool output. f5 rebuilds stored tool activity payloads from named fields, so raw tool data (and any image bytes in it) is never persisted; result images are extracted to attachment files and stored as references clients render. Upstream change: fix(server): stop storing tool image bytes no client reads (#16652)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16652"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:2398"],
+      "f5Shas": [
+        "8168bd456ae23521e21bf68b08d0d860a6abd901",
+        "530136028fe8af450670a0fb2dca634545cc52b4"
+      ]
     },
     {
       "upstreamSha": "453e596da7e98d973e3853a5c2728681dedf363b",
@@ -10977,20 +10941,11 @@
     },
     {
       "upstreamSha": "71964e670ff212006ebb8de26585649c2adced68",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(shared): scan PATH once per command before spawning, not on every spawn (#12600).",
+      "classification": "equivalent:apps/server/src/spawn/resolveCommand.ts:35",
+      "reason": "Equivalent: upstream caches positive PATH resolutions before spawning and leaves misses uncached. f5 resolves executables only on Windows and already caches positive resolutions for 5 seconds without caching misses. Upstream change: perf(shared): scan PATH once per command before spawning, not on every spawn (#12600)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-12600"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["apps/server/src/processRunner.ts:154"],
+      "f5Shas": ["cc45ed69281c7584adc6dd1c1e401846c0c185eb"]
     },
     {
       "upstreamSha": "447046b589140a50a4a782453133da83ff77e85e",
@@ -14240,20 +14195,9 @@
     },
     {
       "upstreamSha": "b6eefc926ae305f4cb85cca797668b010cee1136",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): build the thread list snapshot without decoding it twice (#13693).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13693"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "declined",
+      "reason": "Declined: upstream drops its second whole-snapshot decode. In f5 that decode is not a no-op: it fills schema defaults the row builders leave unset (project defaultModelSelection: null fails the hydration test without it), so removing it would change the snapshot shape clients and the engine receive. Upstream change: perf(server): build the thread list snapshot without decoding it twice (#13693)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "574b18090281225de3449816c8366f0ee9ab886c",
@@ -14769,17 +14713,9 @@
     },
     {
       "upstreamSha": "a36af0637a63ebf316beb5db5670be226df01cbc",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): streamed section titles wait for the text under them (#13504).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13504"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:block-buffered-assistant-delivery",
+      "reason": "Not-applicable: tunes upstream's splitBufferedAssistantText, which releases buffered assistant text block by block. f5's buffered mode holds the whole message until completion (with a 24k-character spill valve) and streaming mode forwards raw deltas, so there is no block release to hold a heading back in. Upstream change: fix(server): streamed section titles wait for the text under them (#13504)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8251c8de78a021014b83ffe986dc52a480d71e41",
