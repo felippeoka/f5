@@ -1563,3 +1563,27 @@ flood. The per-SHA record stays planned until the remaining audit and gates clos
 The complete server suite at the ACP checkpoint passes 5,462 cases and skips 12;
 only the same three launcher process-identity cases fail. The strict ledger and
 all 12 September/October plan tests pass. Required full/native gates remain open.
+
+The individual #18378 audit confirms that F5's Node 26.12.0 built-in fetch
+(undici 8.11.2) negotiates HTTP/2 against a real local TLS endpoint before the
+change. `0d0711a665` installs an HTTP/1.1 dispatcher before server startup only
+when bundled undici is at least version 8. It lazy-loads the exact upstream-pinned
+8.11.2 dependency, retains Node's environment proxy choice and credentials, and
+initializes once. Executable-relative resolution and external staging cover the
+standalone layout. No global exception handler or swallowed crash is introduced.
+The [upstream idle-reaper issue](https://github.com/nodejs/undici/issues/5936)
+has no deterministic panic reproducer; this evidence establishes the exposed
+negotiation path and its removal, not a reproduced native panic.
+
+All nine child-process/TLS tests, the external staging test, formatter, lint,
+all eight typechecks and the six-task production build pass. Both ESM and CJS
+production entries start successfully. A real Node 26.12.0 single executable
+also starts with an empty PATH and executable-relative dependencies supplied
+from the checkout. The diagnostic first required thinning the universal macOS
+Node executable and staging the server workspace's dependencies; its initial
+help-text assertion expected the wrong capitalization and was corrected after
+inspecting the successful output. This is a standalone resolution smoke, not a
+built release archive with independently installed dependencies. The required
+full run still fails the same two scripts process-identity recovery cases
+(333 pass), before reaching the exhaustive Git matrix. The per-SHA record stays
+planned while the remaining 15a audit and required release gates remain open.

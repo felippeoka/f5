@@ -4480,16 +4480,23 @@
     {
       "upstreamSha": "3ff452bd65adf758e68b886d1e3778ae1ec7d970",
       "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): a dropped HTTP/2 connection no longer crashes the server (#18378).",
+      "reason": "Planned: individually source-reviewed #18378. A real TLS baseline on Node 26.12.0/undici 8.11.2 negotiates HTTP/2; 0d0711a665 changes startup fetch to HTTP/1.1 only on bundled undici >=8, retaining authenticated environment proxies and idempotent initialization. All nine child-process/TLS tests, the external-dependency staging test, all eight typechecks, formatter, lint, production ESM/CJS builds and both startup checks pass. A real Node 26.12.0 single executable also starts with executable-relative checkout dependencies; this is not release-archive coverage. The upstream idle-reaper crash has no deterministic reproduction in the referenced upstream issue; only the exposed negotiation path and workaround boundary are reproduced here. Required full/native gates and the remaining 15a audit stay open. Upstream change: fix(server): a dropped HTTP/2 connection no longer crashes the server (#18378)",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15a-pr-18378"],
         "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
+          "apps/server/src/outboundHttp.ts",
+          "apps/server/src/serverEntrypoint.ts",
+          "scripts/lib/cli-external-packages.ts"
         ]
-      }
+      },
+      "f5Shas": ["0d0711a66528e019e121bfb3d673577efc72cce6"],
+      "evidence": [
+        "apps/server/src/outboundHttp.ts:1",
+        "apps/server/src/outboundHttp.test.ts:1",
+        "apps/server/src/serverEntrypoint.ts:28",
+        "scripts/lib/cli-external-packages.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "e77a48e81a6aaea575b0c7672ac2134cd6ee04aa",
