@@ -18,6 +18,7 @@ import { useStore } from "../../store";
 import { ProjectIcon } from "../ProjectIcon";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { synchronizeStatusPulse } from "../../lib/statusPulse";
 import { cn } from "../../lib/utils";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import type { ThreadStatusPill } from "../../threadStatus";
@@ -409,7 +410,11 @@ export function ThreadRowTrailingMeta(props: {
           className={cn("inline-flex items-center justify-center", props.terminalStatus.colorClass)}
         >
           <TerminalIcon
-            className={cn("size-3.5", props.terminalStatus.pulse && "animate-status-pulse")}
+            className={cn(
+              "size-3.5",
+              props.terminalStatus.pulse && "motion-safe:animate-status-pulse",
+            )}
+            onAnimationStart={synchronizeStatusPulse}
           />
         </span>
       ) : null}
