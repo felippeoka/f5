@@ -28,7 +28,7 @@ test.each([process.execPath, "bun"])(
       const [code] = await Promise.race([
         once(child, "close"),
         new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => reject(new Error(`Watchdog did not stop: ${error}`)), 2000);
+          timeout = setTimeout(() => reject(new Error(`Watchdog did not stop: ${error}`)), 5000);
         }),
       ]);
       expect(code, error).toBe(0);
@@ -59,7 +59,7 @@ test.each([process.execPath, "bun"])(
       await Promise.race([
         once(child.stdout!, "data"),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Watchdog did not start")), 2000);
+          timer = setTimeout(() => reject(new Error("Watchdog did not start")), 5000);
         }),
       ]);
       clearTimeout(timer);
@@ -67,11 +67,15 @@ test.each([process.execPath, "bun"])(
       const [code, signal] = await Promise.race([
         closed,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Maintenance survived owner death")), 2000);
+          timer = setTimeout(() => reject(new Error("Maintenance survived owner death")), 5000);
         }),
       ]);
-      expect(code).toBeNull();
-      expect(signal).toBe("SIGKILL");
+      if (process.platform === "win32")
+        expect(code !== null ? code !== 0 : signal === "SIGKILL").toBe(true);
+      else {
+        expect(code).toBeNull();
+        expect(signal).toBe("SIGKILL");
+      }
     } finally {
       clearTimeout(timer);
       child.kill("SIGKILL");

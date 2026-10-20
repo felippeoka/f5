@@ -1294,21 +1294,20 @@ it.layer(TestLayer)("git integration", (it) => {
 
         const realGitService = yield* GitService;
         let fetchArgs: readonly string[] | null = null;
+        const fetchAdmitted = yield* Deferred.make<void>();
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
               fetchArgs = [...input.args];
-              return realGitService.execute(input);
+              return Deferred.succeed(fetchAdmitted, undefined).pipe(
+                Effect.andThen(realGitService.execute(input)),
+              );
             }
             return realGitService.execute(input);
           },
         });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
-        yield* Effect.promise(() =>
-          vi.waitFor(() => {
-            expect(fetchArgs).not.toBeNull();
-          }),
-        );
+        yield* Deferred.await(fetchAdmitted);
 
         expect(yield* git(source, ["branch", "--show-current"])).toBe(featureBranch);
         expect(fetchArgs).toEqual([
@@ -1346,7 +1345,7 @@ it.layer(TestLayer)("git integration", (it) => {
         yield* git(source, ["checkout", defaultBranch]);
 
         const realGitService = yield* GitService;
-        let fetchStarted = false;
+        const fetchAdmitted = yield* Deferred.make<void>();
         let releaseFetch!: () => void;
         const waitForReleasePromise = new Promise<void>((resolve) => {
           releaseFetch = resolve;
@@ -1354,7 +1353,7 @@ it.layer(TestLayer)("git integration", (it) => {
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
-              fetchStarted = true;
+              Effect.runSync(Deferred.succeed(fetchAdmitted, undefined));
               return Effect.promise(() =>
                 waitForReleasePromise.then(() => ({ code: 0, stdout: "", stderr: "" })),
               );
@@ -1363,11 +1362,7 @@ it.layer(TestLayer)("git integration", (it) => {
           },
         });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
-        yield* Effect.promise(() =>
-          vi.waitFor(() => {
-            expect(fetchStarted).toBe(true);
-          }),
-        );
+        yield* Deferred.await(fetchAdmitted);
         expect(yield* git(source, ["branch", "--show-current"])).toBe(featureBranch);
         releaseFetch();
       }),
@@ -1396,7 +1391,7 @@ it.layer(TestLayer)("git integration", (it) => {
           yield* git(source, ["push", "-u", "origin", featureBranch]);
 
           const realGitService = yield* GitService;
-          let fetchStarted = false;
+          const fetchAdmitted = yield* Deferred.make<void>();
           let releaseFetch!: () => void;
           const waitForReleasePromise = new Promise<void>((resolve) => {
             releaseFetch = resolve;
@@ -1404,7 +1399,7 @@ it.layer(TestLayer)("git integration", (it) => {
           const core = yield* makeIsolatedGitCore({
             execute: (input) => {
               if (input.args[0] === "fetch") {
-                fetchStarted = true;
+                Effect.runSync(Deferred.succeed(fetchAdmitted, undefined));
                 return Effect.promise(() => waitForReleasePromise).pipe(
                   Effect.andThen(realGitService.execute(input)),
                 );
@@ -1420,11 +1415,7 @@ it.layer(TestLayer)("git integration", (it) => {
           });
           const first = yield* core.statusDetails(source);
           expect(first.branch).toBe(featureBranch);
-          yield* Effect.promise(() =>
-            vi.waitFor(() => {
-              expect(fetchStarted).toBe(true);
-            }),
-          );
+          yield* Deferred.await(fetchAdmitted);
           const second = yield* core.statusDetails(source);
           expect(second.branch).toBe(featureBranch);
           expect(invalidations).toEqual([]);
