@@ -24,6 +24,7 @@ import {
 } from "../../lib/diffPatch";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
+import { compareFilePaths } from "../../lib/filePathCollator";
 
 export interface InlineExactFileChangeDiffProps {
   workEntryId: string;
@@ -73,10 +74,7 @@ export const InlineExactFileChangeDiff = memo(function InlineExactFileChangeDiff
       return [];
     }
     return renderablePatch.files.toSorted((left, right) =>
-      resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }),
+      compareFilePaths(resolveFileDiffPath(left), resolveFileDiffPath(right)),
     );
   }, [renderablePatch]);
 

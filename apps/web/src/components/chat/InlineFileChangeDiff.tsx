@@ -25,6 +25,7 @@ import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { resolvePathLinkTarget } from "../../terminal-links";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
+import { compareFilePaths } from "../../lib/filePathCollator";
 import { buildInlineFileChangeCheckpointDiffQueryInput } from "./InlineFileChangeDiff.logic";
 
 export interface InlineFileChangeDiffProps {
@@ -125,12 +126,7 @@ export const InlineFileChangeDiff = memo(function InlineFileChangeDiff(
           },
         ];
       })
-      .toSorted((left, right) =>
-        left.filePath.localeCompare(right.filePath, undefined, {
-          numeric: true,
-          sensitivity: "base",
-        }),
-      );
+      .toSorted((left, right) => compareFilePaths(left.filePath, right.filePath));
   }, [normalizedEntryFiles, renderablePatch, turnDiffFileByPath, workspaceRoot]);
 
   const openFile = useCallback(

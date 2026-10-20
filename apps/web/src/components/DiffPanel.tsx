@@ -55,6 +55,7 @@ import {
   isChangedFileExpandedByDefault,
   resolveChangedFilesPresentation,
 } from "./chat/changedFilesPresentation";
+import { compareFilePaths } from "../lib/filePathCollator";
 import { changedLineCount } from "../lib/turnDiffTree";
 
 type DiffThemeType = "light" | "dark";
@@ -254,10 +255,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       return [];
     }
     return renderablePatch.files.toSorted((left, right) =>
-      resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }),
+      compareFilePaths(resolveFileDiffPath(left), resolveFileDiffPath(right)),
     );
   }, [renderablePatch]);
   const diffLogicalScope = useMemo(() => {
