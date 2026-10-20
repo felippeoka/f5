@@ -41,7 +41,11 @@ import {
 } from "../lib/streamingMarkdown";
 import { useFileNavigation } from "../fileNavigationContext";
 import { useTheme } from "../hooks/useTheme";
-import { resolveMarkdownFileLinkMeta, type MarkdownFileLinkMeta } from "../markdown-links";
+import {
+  collectMarkdownLinkHrefs,
+  resolveMarkdownFileLinkMeta,
+  type MarkdownFileLinkMeta,
+} from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import { inferEntryKindFromPath } from "../vscode-icons";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
@@ -414,23 +418,6 @@ function WorkerHighlightedCode({
       {plain}
     </div>
   );
-}
-
-// Matches inline markdown links: `[text](href)` / `[text](href "title")`.
-// Used once per message to compute basename-collision disambiguation ahead of
-// react-markdown's element-by-element rendering, so each chip's suffix stays
-// stable no matter which element renders first.
-const MARKDOWN_INLINE_LINK_REGEX = /\[(?:\\.|[^\]\\])*\]\(\s*(<[^>]+>|[^()\s]+)[^)]*\)/g;
-
-function collectMarkdownLinkHrefs(text: string): string[] {
-  const hrefs: string[] = [];
-  for (const match of text.matchAll(MARKDOWN_INLINE_LINK_REGEX)) {
-    const raw = match[1];
-    if (!raw) continue;
-    const href = raw.startsWith("<") && raw.endsWith(">") ? raw.slice(1, -1) : raw;
-    hrefs.push(href);
-  }
-  return hrefs;
 }
 
 function parentDirDisambiguator(displayPath: string): string | null {

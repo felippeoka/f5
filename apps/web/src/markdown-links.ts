@@ -157,6 +157,101 @@ export function resolveMarkdownFileLinkMeta(
  * returned unchanged. Useful for the chip's `href` attribute so hover / copy
  * reveals a path the user recognizes instead of the raw URI.
  */
+/** For each index, the index of the next `char` at or after it, or `text.length`. */
+function nextIndexTable(text: string, char: string): Int32Array {
+  const table = new Int32Array(text.length + 1);
+  let next = text.length;
+  table[text.length] = next;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    if (text[index] === char) next = index;
+    table[index] = next;
+  }
+  return table;
+}
+
+const WHITESPACE = /\s/;
+const LINE_TERMINATOR = new RegExp(`[\\n\\r${String.fromCharCode(0x2028, 0x2029)}]`);
+
+/**
+ * Hrefs of inline markdown links, `[text](href)` and `[text](href "title")`,
+ * with the results of
+ * `/\[(?:\\.|[^\]\\])*\]\(\s*(<[^>]+>|[^()\s]+)[^)]*\)/g` (angle brackets
+ * stripped from `<href>`). That regex rescans to the end of the text from
+ * every unterminated `[`, so a long streaming message took seconds; this
+ * scan visits each character a bounded number of times.
+ */
+export function collectMarkdownLinkHrefs(text: string): string[] {
+  const hrefs: string[] = [];
+  if (!text.includes("](")) return hrefs;
+  const nextClose = nextIndexTable(text, ")");
+  const nextAngle = nextIndexTable(text, ">");
+  const end = text.length;
+  // Every `[` after a failed or completed candidate reads the same label, so
+  // tracking whether one is open is enough; the leftmost one would match.
+  let inLabel = false;
+  let index = 0;
+  while (index < end) {
+    const char = text[index];
+    if (!inLabel) {
+      if (char === "[") inLabel = true;
+      index += 1;
+      continue;
+    }
+    if (char === "\\") {
+      // `\\.` needs a following character that is not a line terminator.
+      if (index + 1 < end && !LINE_TERMINATOR.test(text[index + 1]!)) index += 2;
+      else {
+        inLabel = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (char !== "]") {
+      index += 1;
+      continue;
+    }
+    inLabel = false;
+    if (text[index + 1] !== "(") {
+      index += 1;
+      continue;
+    }
+    let start = index + 2;
+    while (start < end && WHITESPACE.test(text[start]!)) start += 1;
+    let raw: string | null = null;
+    let matchEnd = -1;
+    if (text[start] === "<") {
+      const angle = nextAngle[start + 1]!;
+      const close = angle < end ? nextClose[angle + 1]! : end;
+      if (angle > start + 1 && close < end) {
+        raw = text.slice(start, angle + 1);
+        matchEnd = close + 1;
+      }
+    }
+    if (raw === null) {
+      let runEnd = start;
+      while (
+        runEnd < end &&
+        text[runEnd] !== "(" &&
+        text[runEnd] !== ")" &&
+        !WHITESPACE.test(text[runEnd]!)
+      )
+        runEnd += 1;
+      const close = nextClose[runEnd]!;
+      if (runEnd > start && close < end) {
+        raw = text.slice(start, runEnd);
+        matchEnd = close + 1;
+      }
+    }
+    if (raw === null) {
+      index += 1;
+      continue;
+    }
+    hrefs.push(raw.startsWith("<") && raw.endsWith(">") ? raw.slice(1, -1) : raw);
+    index = matchEnd;
+  }
+  return hrefs;
+}
+
 export function rewriteMarkdownFileUriHref(href: string): string {
   if (!href) return href;
   if (!href.toLowerCase().startsWith("file:")) return href;
