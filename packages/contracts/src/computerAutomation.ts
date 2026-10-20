@@ -168,7 +168,9 @@ export const ComputerAutomationRequest = Schema.Union([
     ...Envelope,
     op: Schema.Literal("inspect"),
     appId: Id,
-    maxNodes: Positive.check(Schema.isLessThanOrEqualTo(400)),
+    maxNodes: Positive.check(Schema.isLessThanOrEqualTo(800)),
+    snapshotId: Schema.optional(Id),
+    elementRef: Schema.optional(Id),
   }),
   Schema.Struct({
     ...Envelope,
@@ -227,6 +229,12 @@ export const ComputerScreenshot = Schema.Struct({
   mimeType: Schema.Literals(["image/png", "image/jpeg"]),
   data: Schema.String.check(Schema.isMaxLength(8 * 1024 * 1024)),
   hiddenContent: Schema.Boolean,
+  masked: Schema.optional(Schema.Literals(["none", "fields", "web-area", "window"])),
+  maskReasons: Schema.optional(
+    Schema.Array(
+      Schema.Literals(["window-match", "audit-incomplete", "partial-audit", "windows-changed"]),
+    ),
+  ),
 });
 export type ComputerScreenshot = typeof ComputerScreenshot.Type;
 export const ComputerAutomationScreenshot = ComputerScreenshot;
@@ -260,6 +268,7 @@ export const ComputerInspectResult = Schema.Struct({
   snapshotId: Id,
   appId: Id,
   accessible: Schema.Boolean,
+  truncated: Schema.optional(Schema.Boolean),
   nodes: Schema.Array(
     Schema.Struct({
       elementRef: Id,
@@ -272,7 +281,7 @@ export const ComputerInspectResult = Schema.Struct({
       enabled: Schema.Boolean,
       actions: Schema.Array(ComputerElementAction),
     }),
-  ).check(Schema.isMaxLength(400)),
+  ).check(Schema.isMaxLength(800)),
 });
 export type ComputerInspectResult = typeof ComputerInspectResult.Type;
 export const ComputerForegroundRequiredReason = Schema.Literals([
@@ -341,10 +350,15 @@ export const ComputerAutomationError = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.Literal("Execution"), message: Schema.String }),
   Schema.Struct({
+    _tag: Schema.Literal("StaleElement"),
+    reason: Schema.optional(
+      Schema.Literals(["snapshot-expired", "window-changed", "element-gone", "role-changed"]),
+    ),
+  }),
+  Schema.Struct({
     _tag: Schema.Literals([
       "OutcomeUnknown",
       "GeometryChanged",
-      "StaleElement",
       "UnsupportedAction",
       "ReplayRejected",
       "PayloadMismatch",

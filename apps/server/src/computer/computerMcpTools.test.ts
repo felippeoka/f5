@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   COMPUTER_TOOL_DEFINITIONS,
+  compactInspectResult,
+  computerToolInputJsonSchema,
   callComputerTool,
   ComputerToolGeometry,
 } from "./computerMcpTools";
+import { ComputerControlError } from "@t3tools/shared/computerControl";
+import type { ComputerInspectResult } from "@t3tools/contracts";
 import type { ComputerAutomationBrokerRuntime } from "./ComputerAutomationBroker";
 const display = {
   displayId: "d",
@@ -380,4 +384,247 @@ it("records delivery per invocation and leaves a plain wait unbadged", async () 
     ["t", "s", "type", "Fixture", "background"],
     ["t", "s", "wait", undefined, undefined],
   ]);
+});
+
+const inspectFixture = (count = 1): ComputerInspectResult => ({
+  snapshotId: "s1",
+  appId: "one",
+  accessible: true,
+  truncated: true,
+  nodes: Array.from({ length: count }, (_, index) => ({
+    elementRef: `e${index + 1}`,
+    role: "AXStaticText",
+    name: `Incident detail ${index + 1}`,
+    value: "",
+    displayId: "d",
+    bounds: { x: 12, y: 34, width: 200, height: 20 },
+    focused: false,
+    enabled: true,
+    actions: ["showMenu", "scrollIntoView"],
+  })),
+});
+describe("compact computer observations", () => {
+  it("drops defaults and weak actions, with shared display and compact bounds", () => {
+    const tree = inspectFixture(3);
+    const nodes = tree.nodes.map((node, index) => ({
+      ...node,
+      ...(index === 2
+        ? {
+            displayId: "other",
+            name: "",
+            value: "changed",
+            focused: true,
+            enabled: false,
+            actions: ["press" as const, "showMenu" as const],
+          }
+        : {}),
+    }));
+    expect(compactInspectResult({ ...tree, nodes, executionNote: "Background" })).toEqual({
+      snapshotId: "s1",
+      appId: "one",
+      accessible: true,
+      truncated: true,
+      displayId: "d",
+      executionNote: "Background",
+      nodes: [
+        { ref: "e1", role: "AXStaticText", name: "Incident detail 1", b: [12, 34, 200, 20] },
+        { ref: "e2", role: "AXStaticText", name: "Incident detail 2", b: [12, 34, 200, 20] },
+        {
+          ref: "e3",
+          role: "AXStaticText",
+          value: "changed",
+          b: [12, 34, 200, 20],
+          d: "other",
+          focused: true,
+          enabled: false,
+          actions: ["press"],
+        },
+      ],
+    });
+    expect(JSON.stringify(compactInspectResult(inspectFixture(400))).length).toBeLessThan(40_000);
+  });
+  it("advertises the inspect default and opt-in cap in the MCP schema", () => {
+    const tool = COMPUTER_TOOL_DEFINITIONS.find((tool) => tool.op === "inspect")!;
+    const schema = computerToolInputJsonSchema(tool);
+    expect(schema).toMatchObject({
+      properties: { maxNodes: { minimum: 1, maximum: 800, default: 400 } },
+    });
+  });
+  it("forwards subtree refs, defaults to 400, accepts 800 and rejects unpaired refs and 801", async () => {
+    const h = setup();
+    h.context.geometry.rememberApps([
+      { appId: "one", name: "Fixture", tier: "full", running: true, frontmost: true },
+    ]);
+    h.invoke.mockResolvedValue(inspectFixture());
+    const response = await callComputerTool(h.context, "computer_inspect", {
+      app: "one",
+      snapshotId: "old",
+      elementRef: "e9",
+    });
+    expect(h.invoke).toHaveBeenLastCalledWith(
+      "t",
+      "s",
+      expect.objectContaining({
+        op: "inspect",
+        maxNodes: 400,
+        snapshotId: "old",
+        elementRef: "e9",
+      }),
+      undefined,
+      expect.any(Object),
+    );
+    expect(response.structuredContent).toEqual(compactInspectResult(inspectFixture()));
+    expect(response.content).toEqual([
+      { type: "text", text: JSON.stringify(response.structuredContent) },
+    ]);
+    expect(
+      (await callComputerTool(h.context, "computer_inspect", { app: "one", maxNodes: 800 }))
+        .isError,
+    ).toBeFalsy();
+    h.invoke.mockClear();
+    for (const extra of [{ snapshotId: "s" }, { elementRef: "e1" }, { maxNodes: 801 }]) {
+      expect(
+        (await callComputerTool(h.context, "computer_inspect", { app: "one", ...extra })).isError,
+      ).toBe(true);
+    }
+    expect(h.invoke).not.toHaveBeenCalled();
+    expect(h.broker.reportToolFailure).toHaveBeenLastCalledWith(
+      "t",
+      "s",
+      "inspect",
+      "invalid-arguments",
+    );
+  });
+  it.each(["computer_type", "computer_key", "computer_element_action"])(
+    "attaches a fresh tree to %s with the same delivery",
+    async (tool) => {
+      const h = setup();
+      h.context.geometry.rememberApps([
+        { appId: "one", name: "Fixture", tier: "full", running: true, frontmost: true },
+      ]);
+      h.invoke
+        .mockResolvedValueOnce({ frontmostApp: { appId: "one" }, actionCompleted: true })
+        .mockResolvedValueOnce(inspectFixture());
+      const args =
+        tool === "computer_type"
+          ? { text: "hi", app: "one" }
+          : tool === "computer_key"
+            ? { keys: "Down" }
+            : { app: "one", snapshotId: "s", elementRef: "e1", action: "press" };
+      const response = await callComputerTool(h.context, tool, {
+        ...args,
+        inspect: true,
+        maxNodes: 800,
+      });
+      expect(response.isError).toBeFalsy();
+      expect(response.structuredContent).toMatchObject({
+        actionCompleted: true,
+        inspect: compactInspectResult(inspectFixture()),
+      });
+      expect(h.invoke.mock.calls[0]?.[2]).not.toHaveProperty("inspect");
+      expect(h.invoke.mock.calls[0]?.[2]).not.toHaveProperty("maxNodes");
+      expect(h.invoke.mock.calls[1]?.[2]).toEqual({
+        op: "inspect",
+        appId: "one",
+        maxNodes: 800,
+        executionMode: "foreground",
+      });
+    },
+  );
+  it("keeps an action successful if the trailing inspect fails, and skips waiting actions", async () => {
+    const h = setup();
+    h.invoke
+      .mockResolvedValueOnce({ frontmostApp: { appId: "one" }, actionCompleted: true })
+      .mockRejectedValueOnce(
+        new ComputerControlError({ _tag: "Unavailable", reason: "helper-crashed" }),
+      );
+    const response = await callComputerTool(h.context, "computer_key", {
+      keys: "Down",
+      inspect: true,
+    });
+    expect(response.isError).toBeFalsy();
+    expect(response.structuredContent).toMatchObject({
+      actionCompleted: true,
+      inspectError: "Unavailable",
+    });
+    expect(h.broker.reportToolFailure).not.toHaveBeenCalled();
+    h.invoke.mockClear().mockResolvedValue({ waiting: "secure-input", actionCompleted: false });
+    await callComputerTool(h.context, "computer_type", { text: "hi", inspect: true });
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+  });
+  it("does not automatically capture keys, but honors an explicit screenshot", async () => {
+    const h = setup();
+    await callComputerTool(h.context, "computer_key", { keys: "Down" });
+    expect(h.invoke.mock.calls[0]?.[2]).toMatchObject({ screenshot: false });
+    await callComputerTool(h.context, "computer_key", { keys: "Meta+Minus", screenshot: true });
+    expect(h.invoke.mock.calls[1]?.[2]).toMatchObject({ screenshot: true });
+    expect(COMPUTER_TOOL_DEFINITIONS.find((tool) => tool.op === "key")?.description).toContain(
+      "Meta+Minus or Down",
+    );
+  });
+  it("uses the last foreground action display without authorizing coordinates, and clears it", async () => {
+    const h = setup([display, { ...display, displayId: "other" }]);
+    h.invoke.mockResolvedValue({ displayId: "other" });
+    await callComputerTool(h.context, "computer_key", { keys: "Down" });
+    expect(h.context.geometry.display(undefined, [])).toBe("other");
+    expect(() => h.context.geometry.generation("other")).toThrow(
+      "Take a computer_screenshot first.",
+    );
+    h.context.geometry.observe({
+      displayId: "d",
+      geometryGeneration: "g",
+      modelSize: display.modelSize,
+      mimeType: "image/jpeg",
+      data: "",
+      hiddenContent: false,
+    });
+    expect(h.context.geometry.display(undefined, [])).toBe("d");
+    expect(h.context.geometry.display("explicit", [])).toBe("explicit");
+    h.context.geometry.clear();
+    expect(() => h.context.geometry.display(undefined, [])).toThrow("Specify displayId");
+  });
+  it("does not restore an action display after a later observation invalidation", async () => {
+    const h = setup([display, { ...display, displayId: "other" }]);
+    let finish: (value: unknown) => void = () => {};
+    h.invoke.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const pending = callComputerTool(h.context, "computer_key", { keys: "Down" });
+    await vi.waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(1));
+    h.context.geometry.clear();
+    finish({ displayId: "other" });
+    await pending;
+    expect(() => h.context.geometry.display(undefined, [])).toThrow("Specify displayId");
+  });
+  it("preserves masking metadata when extracting an inline screenshot", async () => {
+    const h = setup();
+    h.invoke.mockResolvedValue({
+      displayId: "d",
+      geometryGeneration: "g",
+      data: "aGVsbG8=",
+      mimeType: "image/jpeg",
+      masked: "web-area",
+      maskReasons: ["partial-audit"],
+      hiddenContent: true,
+    });
+    const response = await callComputerTool(h.context, "computer_screenshot", {});
+    expect(response.structuredContent).toMatchObject({
+      masked: "web-area",
+      maskReasons: ["partial-audit"],
+      hiddenContent: true,
+    });
+    expect(response.structuredContent).not.toHaveProperty("data");
+  });
+  it("explains why an element reference is stale", async () => {
+    const h = setup();
+    h.invoke.mockRejectedValue(
+      new ComputerControlError({ _tag: "StaleElement", reason: "window-changed" }),
+    );
+    const response = await callComputerTool(h.context, "computer_key", { keys: "Down" });
+    expect(response.content).toEqual([
+      { type: "text", text: "StaleElement (window-changed): call computer_inspect again." },
+    ]);
+  });
 });
