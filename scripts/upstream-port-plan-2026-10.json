@@ -2271,20 +2271,9 @@
     },
     {
       "upstreamSha": "3cb13308eb27b612378ac5a536b810903e481f45",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(client): a repository identity refresh keeps unchanged projects identical (#20730).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20730"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:repository-identity-resolver",
+      "reason": "Not-applicable: keeps project identity stable across upstream's periodic repository identity refresh pushes; f5 has no such refresh (see t3code#13689). Upstream change: perf(client): a repository identity refresh keeps unchanged projects identical (#20730)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "23163fdc48871b6b297371e408e239dc02199c91",
@@ -5684,11 +5673,11 @@
     },
     {
       "upstreamSha": "0e7346ccd9427c06161e222319e718e6bd70887f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: expose running terminals and prevent setup install stalls (#18740).",
+      "classification": "planned:15p",
+      "reason": "Planned: makes the sidebar terminal indicator reveal the running terminal and reuses server-created setup terminals in the drawer, which is workspace UX for 15p. Its setup-install half changes upstream's own dev script; f5 runs async setup scripts in an interactive terminal. Upstream change: fix: expose running terminals and prevent setup install stalls (#18740)",
       "reviewStatus": "reviewed",
       "verification": {
-        "scenarioIds": ["15a-pr-18740"],
+        "scenarioIds": ["15p-pr-18740"],
         "targetModules": [
           "apps/server/src/persistence/NodeSqliteClient.ts",
           "apps/server/src/orchestration",
@@ -6584,11 +6573,11 @@
     },
     {
       "upstreamSha": "f8458952710cc70894bdeb5853d700524a1c7c49",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: sync model favorites and visibility across clients (#16816).",
+      "classification": "planned:15k",
+      "reason": "Planned: moves model favorites, visibility and order from per-client storage into server settings so every client shares them, which is the 15k \"consistent favorites, visibility and order\" item; it is a settings-model change, not a performance fix. Upstream change: fix: sync model favorites and visibility across clients (#16816)",
       "reviewStatus": "reviewed",
       "verification": {
-        "scenarioIds": ["15a-pr-16816"],
+        "scenarioIds": ["15k-pr-16816"],
         "targetModules": [
           "apps/server/src/persistence/NodeSqliteClient.ts",
           "apps/server/src/orchestration",
@@ -9079,17 +9068,9 @@
     },
     {
       "upstreamSha": "fd25c42ae6e56a82be7219950a746572b1c4d0e9",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): keep newly discovered models out of legacy groups (#14314).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14314"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:model-manifest",
+      "reason": "Not-applicable: keeps newly discovered models out of the legacy section that upstream's ModelManifest defines; f5's Antigravity driver has no manifest or legacy grouping. Upstream change: fix(server): keep newly discovered models out of legacy groups (#14314)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "805967a878e6804d58c151f29d2a3d0a06828fd1",
@@ -11292,17 +11273,9 @@
     },
     {
       "upstreamSha": "5cebd3b814ae171df83fb81db3036fbbca2a660e",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(clients): dropped connections say why in the client trace (#16200).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16200"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:client-trace",
+      "reason": "Not-applicable: adds a connection-lost span to upstream's client-runtime trace. f5's web client has no tracing; disconnects surface through wsConnectionState. Upstream change: fix(clients): dropped connections say why in the client trace (#16200)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "24238fee321e2c6bc711832b8cf3698b1f6b30ca",
@@ -11928,17 +11901,9 @@
     },
     {
       "upstreamSha": "eac52f0087d9ba5dee5542f24788d1482affae43",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(client-runtime): closing a busy stream no longer drops the connection (#15563).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-15563"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:effect-rpc-client-streams",
+      "reason": "Not-applicable: patches effect's RpcClient so closing a stream shuts down its full buffer. f5's browser transport is its own WebSocket client (apps/web/src/wsTransport.ts:481), and its only RpcClient users, the ACP client and agent, define no streaming RPCs, so that queue path is never used. Upstream change: fix(client-runtime): closing a busy stream no longer drops the connection (#15563)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d60a71ef6e371d8b345ecb1f7575117d675187c7",
@@ -13039,17 +13004,9 @@
     },
     {
       "upstreamSha": "fa6262db3107a4c95b6ff611113e6fa0753e5948",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: remove outdated restart setting update advice (#14710).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14710"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:multi-environment",
+      "reason": "Not-applicable: rewords upstream's multi-environment auto-resume setting, which f5 does not have. Upstream change: fix: remove outdated restart setting update advice (#14710)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ced865c224ebb7dd2cbd0f2931d6e33559b9343a",
@@ -13427,17 +13384,9 @@
     },
     {
       "upstreamSha": "88fbc2cac77ff2bf0d406c44754ecd8014976f5f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(client-runtime): keep model ids in inline code from becoming file chips (#13909).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13909"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:inline-code-file-chips",
+      "reason": "Not-applicable: tightens which inline code spans upstream turns into file chips. f5 renders file chips only for explicit markdown links (apps/web/src/components/ChatMarkdown.tsx:536), never inline code. Upstream change: fix(client-runtime): keep model ids in inline code from becoming file chips (#13909)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "60cb7d180d9ebdd1010460ccd94cdfad1ec83042",
@@ -13796,20 +13745,9 @@
     },
     {
       "upstreamSha": "9151ea407accd1b7af575dcdd514e2b2e3fe6cbb",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(clients): saving the thread list cache no longer freezes the UI (#13767).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13767"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:client-snapshot-cache",
+      "reason": "Not-applicable: speeds up encoding upstream's persisted client shell-snapshot cache (EnvironmentCacheStore); f5's web client does not cache shell snapshots. Upstream change: perf(clients): saving the thread list cache no longer freezes the UI (#13767)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1d6f23b51929117d5e69ded8c5c0f8e195d75d4a",
@@ -13823,17 +13761,9 @@
     },
     {
       "upstreamSha": "294dd123410c77eead2810a052c31fb0cfd3e0c1",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(observability): the renderer trace proxy stops tracing itself (#13761).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13761"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:client-trace",
+      "reason": "Not-applicable: stops upstream's renderer OTLP trace proxy from tracing itself; f5's server has no browser trace proxy. Upstream change: fix(observability): the renderer trace proxy stops tracing itself (#13761)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6f97b0f66a51fbafabd54a5616da8827ebdf6020",

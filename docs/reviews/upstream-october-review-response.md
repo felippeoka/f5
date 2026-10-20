@@ -1749,3 +1749,20 @@ grace wait. The rest change subsystems f5 does not have: the node-pty 1.2
 beta upgrade, preview picture-in-picture, ignored labels on folder listings,
 port polling, resource telemetry, the service launcher, the relay, and five
 `orchestration-v2` paths.
+
+**Batch 7 (client-side and remaining shared items, 12 records).** Two ports,
+each with a test that failed first:
+[t3code#15520](https://github.com/pingdotgg/t3code/pull/15520) renders
+`[label](<path)` file links whose `>` never arrived, done as a remark plugin
+on f5's existing markdown tree. The sidebar part of
+[t3code#15666](https://github.com/pingdotgg/t3code/pull/15666): f5's sidebar
+polls git status per worktree only to show the branch's PR, and those polls
+no longer fetch from the remote. Eight items change upstream subsystems f5
+does not have: inline-code file chips, effect RpcClient streams, the client
+trace and its proxy, the client snapshot cache, repository identity refresh,
+the model manifest, and a multi-environment setting. Two move to their
+feature workstreams:
+[t3code#16816](https://github.com/pingdotgg/t3code/pull/16816) (shared model
+favorites) to 15k and
+[t3code#18740](https://github.com/pingdotgg/t3code/pull/18740) (revealing
+running terminals) to 15p.

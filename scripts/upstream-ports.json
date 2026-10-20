@@ -1742,10 +1742,15 @@
     {
       "upstreamSha": "0ce43a4eea2f21fe404639c248fb86328c410c5d",
       "subject": "fix(chat): repair unclosed local file links in assistant responses (#15520)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(chat): repair unclosed local file links in assistant responses (#15520).",
+      "reason": "Ported as a remark plugin: [label](<path) becomes a link when the destination resolves to a local file, rewriting only text nodes whose source bytes equal their value, so code, escapes, images, HTML and URLs are untouched. The new test failed before the change (no file chip rendered). Upstream change: fix(chat): repair unclosed local file links in assistant responses (#15520)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["e408c84960b3fd897ea9c2425d9884c6bec221d6"],
+      "evidence": [
+        "apps/web/src/lib/remarkUnclosedFileLinks.ts:15",
+        "apps/web/src/components/ChatMarkdown.test.tsx:114"
+      ]
     },
     {
       "upstreamSha": "0ce6b9deb0c3f6b4dd9df7ed809f7acb9d237ae0",
@@ -1919,10 +1924,10 @@
     {
       "upstreamSha": "0e7346ccd9427c06161e222319e718e6bd70887f",
       "subject": "fix: expose running terminals and prevent setup install stalls (#18740)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: expose running terminals and prevent setup install stalls (#18740).",
+      "reason": "Planned: makes the sidebar terminal indicator reveal the running terminal and reuses server-created setup terminals in the drawer, which is workspace UX for 15p. Its setup-install half changes upstream's own dev script; f5 runs async setup scripts in an interactive terminal. Upstream change: fix: expose running terminals and prevent setup install stalls (#18740)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "plannedWorkstream": "15p"
     },
     {
       "upstreamSha": "0e77fbd3d0d79eec5247e75583a04590a1785133",
@@ -5481,10 +5486,9 @@
     {
       "upstreamSha": "294dd123410c77eead2810a052c31fb0cfd3e0c1",
       "subject": "fix(observability): the renderer trace proxy stops tracing itself (#13761)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(observability): the renderer trace proxy stops tracing itself (#13761).",
+      "reason": "Not-applicable: stops upstream's renderer OTLP trace proxy from tracing itself; f5's server has no browser trace proxy. Upstream change: fix(observability): the renderer trace proxy stops tracing itself (#13761)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "295d7cba09bb4b4084482a74b5a42a0cac72a0b1",
@@ -8346,10 +8350,9 @@
     {
       "upstreamSha": "3cb13308eb27b612378ac5a536b810903e481f45",
       "subject": "perf(client): a repository identity refresh keeps unchanged projects identical (#20730)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(client): a repository identity refresh keeps unchanged projects identical (#20730).",
+      "reason": "Not-applicable: keeps project identity stable across upstream's periodic repository identity refresh pushes; f5 has no such refresh (see t3code#13689). Upstream change: perf(client): a repository identity refresh keeps unchanged projects identical (#20730)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3cd2cbbc115ac7d72fb52cc737fa64c547d6723e",
@@ -10967,10 +10970,16 @@
     {
       "upstreamSha": "5055de3ae483d5ece45695ad682b9766ff0cf423",
       "subject": "fix(vcs): passive sidebar rows stop retaining remote pollers (#15666)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(vcs): passive sidebar rows stop retaining remote pollers (#15666).",
+      "reason": "Ported: f5 has no status broadcaster, but its sidebar polls git status per worktree (every 60 s by default) and each request could fetch a stale upstream. GitStatusInput.includeRemote=false skips that fetch, and the sidebar uses it under its own query key. The new GitCore test failed before the change (one fetch observed). Upstream change: fix(vcs): passive sidebar rows stop retaining remote pollers (#15666)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["95e0254f9c4130d23db5eca2395a02f8cdf35936"],
+      "evidence": [
+        "apps/server/src/git/Layers/GitCore.ts:963",
+        "apps/web/src/components/Sidebar.tsx:279",
+        "apps/server/src/git/Layers/GitCore.extended.ts:1641"
+      ]
     },
     {
       "upstreamSha": "505ccfd0e45004c17d1fb4d3c8fc77bd14fe0989",
@@ -12684,10 +12693,9 @@
     {
       "upstreamSha": "5cebd3b814ae171df83fb81db3036fbbca2a660e",
       "subject": "fix(clients): dropped connections say why in the client trace (#16200)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(clients): dropped connections say why in the client trace (#16200).",
+      "reason": "Not-applicable: adds a connection-lost span to upstream's client-runtime trace. f5's web client has no tracing; disconnects surface through wsConnectionState. Upstream change: fix(clients): dropped connections say why in the client trace (#16200)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5d14c0e9686d8bedf47dd93dd3811fd639255c7e",
@@ -18535,10 +18543,9 @@
     {
       "upstreamSha": "88fbc2cac77ff2bf0d406c44754ecd8014976f5f",
       "subject": "fix(client-runtime): keep model ids in inline code from becoming file chips (#13909)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(client-runtime): keep model ids in inline code from becoming file chips (#13909).",
+      "reason": "Not-applicable: tightens which inline code spans upstream turns into file chips. f5 renders file chips only for explicit markdown links (apps/web/src/components/ChatMarkdown.tsx:536), never inline code. Upstream change: fix(client-runtime): keep model ids in inline code from becoming file chips (#13909)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "88fc41c1b90ff21a7d30d69e0ebffbc0c3511b9c",
@@ -19662,10 +19669,9 @@
     {
       "upstreamSha": "9151ea407accd1b7af575dcdd514e2b2e3fe6cbb",
       "subject": "perf(clients): saving the thread list cache no longer freezes the UI (#13767)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(clients): saving the thread list cache no longer freezes the UI (#13767).",
+      "reason": "Not-applicable: speeds up encoding upstream's persisted client shell-snapshot cache (EnvironmentCacheStore); f5's web client does not cache shell snapshots. Upstream change: perf(clients): saving the thread list cache no longer freezes the UI (#13767)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9159b808d35a88e74fc91e11070f3270cdb321f9",
@@ -31442,10 +31448,9 @@
     {
       "upstreamSha": "eac52f0087d9ba5dee5542f24788d1482affae43",
       "subject": "fix(client-runtime): closing a busy stream no longer drops the connection (#15563)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(client-runtime): closing a busy stream no longer drops the connection (#15563).",
+      "reason": "Not-applicable: patches effect's RpcClient so closing a stream shuts down its full buffer. f5's browser transport is its own WebSocket client (apps/web/src/wsTransport.ts:481), and its only RpcClient users, the ACP client and agent, define no streaming RPCs, so that queue path is never used. Upstream change: fix(client-runtime): closing a busy stream no longer drops the connection (#15563)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "eac6ba5ae9dfcd8106b43ac1b5612b2983bda642",
@@ -33447,10 +33452,10 @@
     {
       "upstreamSha": "f8458952710cc70894bdeb5853d700524a1c7c49",
       "subject": "fix: sync model favorites and visibility across clients (#16816)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: sync model favorites and visibility across clients (#16816).",
+      "reason": "Planned: moves model favorites, visibility and order from per-client storage into server settings so every client shares them, which is the 15k \"consistent favorites, visibility and order\" item; it is a settings-model change, not a performance fix. Upstream change: fix: sync model favorites and visibility across clients (#16816)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "plannedWorkstream": "15k"
     },
     {
       "upstreamSha": "f8500f11271622ed82df7f6c1d7f73eddb4f43e6",
@@ -33773,10 +33778,9 @@
     {
       "upstreamSha": "fa6262db3107a4c95b6ff611113e6fa0753e5948",
       "subject": "fix: remove outdated restart setting update advice (#14710)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: remove outdated restart setting update advice (#14710).",
+      "reason": "Not-applicable: rewords upstream's multi-environment auto-resume setting, which f5 does not have. Upstream change: fix: remove outdated restart setting update advice (#14710)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "fa69f05b69d05003a6994194c12edd1d8aee080c",
@@ -34016,10 +34020,9 @@
     {
       "upstreamSha": "fd25c42ae6e56a82be7219950a746572b1c4d0e9",
       "subject": "fix(server): keep newly discovered models out of legacy groups (#14314)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): keep newly discovered models out of legacy groups (#14314).",
+      "reason": "Not-applicable: keeps newly discovered models out of the legacy section that upstream's ModelManifest defines; f5's Antigravity driver has no manifest or legacy grouping. Upstream change: fix(server): keep newly discovered models out of legacy groups (#14314)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "fd3420f3805aed83326ec40a6a6663681a44ef27",
