@@ -8485,6 +8485,29 @@ describe("ChatView timeline (full app)", () => {
       }
     });
 
+    it("does not commit the timeline or composer when the right panel toggles", async () => {
+      const { mounted } = await mountIsolatedChatView();
+      try {
+        resetRenderCommits();
+        // Not the plan panel: the composer shows whether that one is open.
+        useRightPanelStore.getState().open(THREAD_ID, "files");
+        await vi.waitFor(() => expect(tabStripRenders.count).toBeGreaterThan(0));
+        await waitForRenderQuiet();
+        expect({ ...renderCommits }).toEqual(NO_COMMITS);
+
+        useRightPanelStore.getState().close(THREAD_ID);
+        await vi.waitFor(() =>
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadId, THREAD_ID).isOpen,
+          ).toBe(false),
+        );
+        await waitForRenderQuiet();
+        expect({ ...renderCommits }).toEqual(NO_COMMITS);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
     it("does not re-render the right panel tabs for a token on the open thread", async () => {
       const { mounted, client, nextSequence } = await mountIsolatedChatView();
       try {

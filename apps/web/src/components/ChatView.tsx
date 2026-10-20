@@ -102,7 +102,9 @@ import {
 } from "@t3tools/shared/orchestrationActivityPayload";
 import { areProviderModelOptionsEqual } from "@t3tools/shared/providerOptions";
 import {
+  type ComponentProps,
   lazy,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -553,6 +555,37 @@ const terminalContextIdListsEqual = (
 ): boolean =>
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
 
+type ChatHeaderPanelStateProp = "diffState" | "filesState" | "agentsState" | "previewState";
+
+// Subscribes to the header's panel toggle states here, so opening or closing a panel re-renders
+// the header without re-rendering ChatView and the composer.
+function ChatHeaderWithPanelState(
+  props: Omit<ComponentProps<typeof ChatHeader>, ChatHeaderPanelStateProp> & {
+    panelThreadId: ThreadId;
+  },
+) {
+  const { panelThreadId, ...headerProps } = props;
+  const panelState =
+    (surfaceId: string) => (store: ReturnType<typeof useRightPanelStore.getState>) =>
+      selectSurfaceHeaderState(
+        selectThreadRightPanelState(store.byThreadId, panelThreadId),
+        surfaceId,
+      );
+  const diffState = useRightPanelStore(panelState("diff"));
+  const filesState = useRightPanelStore(panelState("files"));
+  const agentsState = useRightPanelStore(panelState("agents"));
+  const previewState = useRightPanelStore(panelState("preview"));
+  return (
+    <ChatHeader
+      {...headerProps}
+      diffState={diffState}
+      filesState={filesState}
+      agentsState={agentsState}
+      previewState={previewState}
+    />
+  );
+}
+
 function summarizeTaskCounts(tasks: ReadonlyArray<ThreadTaskItem>): string {
   const counts = {
     pending: 0,
@@ -700,7 +733,9 @@ function selectModelCatalogSettings(settings: UnifiedWebSettings): ModelCatalogS
   };
 }
 
-export default function ChatView({
+// Memoized: the props are primitives, and the thread route re-renders on every streamed token
+// and right panel change, none of which ChatView reads through its props.
+export default memo(function ChatView({
   threadId,
   liveAgentCount,
   focusTimelineEntryId: routeFocusTimelineEntryId,
@@ -1145,17 +1180,15 @@ export default function ChatView({
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffState = useRightPanelStore((store) =>
-    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "diff"),
-  );
-  const filesState = useRightPanelStore((store) =>
-    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "files"),
-  );
-  const agentsState = useRightPanelStore((store) =>
-    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "agents"),
-  );
-  const previewState = useRightPanelStore((store) =>
-    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "preview"),
+  // Read at call time rather than subscribed: the header subscribes to these itself, so opening
+  // or closing a panel re-renders the header instead of the whole conversation.
+  const readSurfaceHeaderState = useCallback(
+    (surfaceId: string) =>
+      selectSurfaceHeaderState(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadId, threadId),
+        surfaceId,
+      ),
+    [threadId],
   );
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
@@ -2847,6 +2880,7 @@ export default function ChatView({
   );
   // Header toggles: a visible tab closes, a background tab comes to front, a closed one opens.
   const onToggleDiff = useCallback(() => {
+    const diffState = readSurfaceHeaderState("diff");
     if (diffState === "background") {
       // Same as clicking the tab: keep the selected turn/scope, drop any file-view params.
       useRightPanelStore.getState().activateSurface(threadId, "diff");
@@ -2875,28 +2909,28 @@ export default function ChatView({
           : { ...clearFileViewSearchParams(rest), diff: "1", diffScope: "working-tree" };
       },
     });
-  }, [diffState, navigate, threadId]);
+  }, [navigate, readSurfaceHeaderState, threadId]);
   const onToggleFiles = useCallback(() => {
-    if (filesState === "active") {
+    if (readSurfaceHeaderState("files") === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "files");
       return;
     }
     useRightPanelStore.getState().open(threadId, "files");
-  }, [filesState, threadId]);
+  }, [readSurfaceHeaderState, threadId]);
   const onToggleAgents = useCallback(() => {
-    if (agentsState === "active") {
+    if (readSurfaceHeaderState("agents") === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "agents");
       return;
     }
     useRightPanelStore.getState().open(threadId, "agents");
-  }, [agentsState, threadId]);
+  }, [readSurfaceHeaderState, threadId]);
   const onTogglePreview = useCallback(() => {
-    if (previewState === "active") {
+    if (readSurfaceHeaderState("preview") === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "preview");
       return;
     }
     useRightPanelStore.getState().open(threadId, "preview");
-  }, [previewState, threadId]);
+  }, [readSurfaceHeaderState, threadId]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -7494,7 +7528,8 @@ export default function ChatView({
           />
           {/* Top bar */}
           <AppTitlebar className={isElectron ? undefined : "sm:px-4"}>
-            <ChatHeader
+            <ChatHeaderWithPanelState
+              panelThreadId={threadId}
               isServerThread={isServerThread}
               activeThreadId={activeThread.id}
               activeThreadTitle={activeThread.title}
@@ -7525,15 +7560,11 @@ export default function ChatView({
               terminalAvailable={activeProject != null}
               terminalOpen={terminalState.terminalOpen}
               workspaceFilesAvailable={workspaceRoot !== undefined}
-              filesState={filesState}
-              agentsState={agentsState}
-              previewState={previewState}
               previewAvailable={Boolean(window.desktopBridge?.preview)}
               liveAgentCount={liveAgentCount}
               terminalToggleShortcutLabel={terminalToggleShortcutLabel}
               diffToggleShortcutLabel={diffPanelShortcutLabel}
               gitCwd={gitCwd}
-              diffState={diffState}
               threadActionItems={headerThreadActionItems}
               onThreadAction={handleHeaderThreadAction}
               onRenameThread={handleHeaderRenameThread}
@@ -8024,4 +8055,4 @@ export default function ChatView({
       <RepositoryLinks.Provider value={repositoryLinks}>{workspace}</RepositoryLinks.Provider>
     </OpenLinkThread.Provider>
   );
-}
+});
