@@ -23,7 +23,7 @@ import {
 } from "@t3tools/contracts";
 import { isArchivedWorkflow } from "@t3tools/shared/workflowArchive";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { type AppSettings, useAppSettingsSelector } from "../appSettings";
 import { selectProjectDraftThread, useComposerDraftStore } from "../composerDraftStore";
 import { useStartupReady } from "../lib/startupReady";
@@ -166,12 +166,8 @@ export default function Sidebar() {
     (store) => store.clearProjectDraftThreadId,
   );
   const navigate = useNavigate();
-  const settingsLocation = useLocation({
-    select: (location) => ({
-      pathname: location.pathname,
-      search: location.search,
-    }),
-  });
+  // Read at click time: an object selector here re-rendered the sidebar on every router update.
+  const router = useRouter();
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const isOnUsage = useLocation({ select: (loc) => loc.pathname === "/usage" });
   const pathname = useLocation({ select: (loc) => loc.pathname });
@@ -1255,7 +1251,7 @@ export default function Sidebar() {
                   onClick={() =>
                     void navigate({
                       to: "/settings",
-                      search: resolveSettingsNavigationSearch(settingsLocation),
+                      search: resolveSettingsNavigationSearch(router.state.location),
                     })
                   }
                 >

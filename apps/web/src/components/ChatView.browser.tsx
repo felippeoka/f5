@@ -121,6 +121,19 @@ vi.mock("./chat/composer/ChatComposer", async (importOriginal) => {
   return { ...actual, ChatComposer: ProfiledChatComposer };
 });
 
+const sidebarRenders = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("./Sidebar", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./Sidebar")>();
+  const { createElement } = await import("react");
+  const Sidebar = actual.default;
+  function CountedSidebar() {
+    sidebarRenders.count += 1;
+    return createElement(Sidebar);
+  }
+  return { ...actual, default: CountedSidebar };
+});
+
 // Counts renders of the right panel tab strip, not of the surface below it. The strip renders
 // the tab menu on every render, so the unmemoized menu stands in for the strip.
 const tabStripRenders = vi.hoisted(() => ({ count: 0 }));
@@ -8485,6 +8498,19 @@ describe("ChatView timeline (full app)", () => {
         );
         await waitForRenderQuiet();
         expect(renderCommits.timeline).toBe(0);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("does not re-render the sidebar for a router update that keeps the location", async () => {
+      const { mounted } = await mountIsolatedChatView();
+      try {
+        expect(sidebarRenders.count).toBeGreaterThan(0);
+        const before = sidebarRenders.count;
+        await mounted.router.invalidate();
+        await waitForRenderQuiet();
+        expect(sidebarRenders.count).toBe(before);
       } finally {
         await mounted.cleanup();
       }

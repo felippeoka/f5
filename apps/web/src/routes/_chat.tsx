@@ -6,7 +6,7 @@ import { useDesktopLinkRouting } from "../hooks/useDesktopLinkRouting";
 import { QuitHoldOverlay } from "../components/QuitHoldOverlay";
 import { ProjectCloneController } from "../components/ProjectCloneController";
 import { ThreadNavigationController } from "../components/ThreadNavigationController";
-import { Outlet, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
+import { Outlet, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
 
 import { CommandPalette } from "../components/CommandPalette";
@@ -63,7 +63,8 @@ function ChatRouteLayout() {
   useDesktopLinkRouting();
   useSnapShotRouting();
   useServerUpdateOutcome();
-  const location = useLocation();
+  // The location is read when the menu action fires, so navigation does not re-render the layout.
+  const router = useRouter();
   const navigate = useNavigate();
   const [initialThreadSidebarWidth, setInitialThreadSidebarWidth] = useState(() =>
     readInitialThreadSidebarWidth(),
@@ -100,14 +101,14 @@ function ChatRouteLayout() {
       if (action !== "open-settings") return;
       void navigate({
         to: "/settings",
-        search: resolveSettingsNavigationSearch(location),
+        search: resolveSettingsNavigationSearch(router.state.location),
       });
     });
 
     return () => {
       unsubscribe?.();
     };
-  }, [location, navigate]);
+  }, [navigate, router]);
 
   return (
     <SidebarProvider
