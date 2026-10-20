@@ -72,15 +72,19 @@ export function startClientDiagnostics(deps: {
       session.buckets[index]! += Math.max(0, count - previous.applyBatchBuckets[index]!);
     });
     previous = current;
-    void deps
-      .report({
-        sessionId: session.sessionId,
-        reportSeq: ++session.reportSeq,
-        clientKind: deps.clientKind,
-        counters: { ...session.counters, connectedMs: Math.floor(session.counters.connectedMs) },
-        applyBatchBuckets: [...session.buckets],
-      })
-      .catch(() => {});
+    try {
+      void deps
+        .report({
+          sessionId: session.sessionId,
+          reportSeq: ++session.reportSeq,
+          clientKind: deps.clientKind,
+          counters: { ...session.counters, connectedMs: Math.floor(session.counters.connectedMs) },
+          applyBatchBuckets: [...session.buckets],
+        })
+        .catch(() => {});
+    } catch {
+      // Diagnostics must not prevent disposing the stream or its listeners.
+    }
   };
   const unsubscribeHidden = deps.onHidden(report);
   let timer: number;

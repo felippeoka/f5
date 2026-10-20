@@ -79,7 +79,9 @@ async function append(writer: Writer, text: string) {
     await rotate(writer);
     size = 0;
   }
-  const handle = await fs.open(writer.path, "a+");
+  // Windows append-only handles cannot truncate a crashed/partial record.
+  // This registry owns writes to the path; use explicit end positions instead.
+  const handle = await fs.open(writer.path, fs.constants.O_RDWR | fs.constants.O_CREAT);
   try {
     // A previous process can leave an incomplete line. It cannot prove that a
     // lifecycle/completion record committed; remove it before appending again.
@@ -104,8 +106,14 @@ async function append(writer: Writer, text: string) {
       }
     }
     try {
-      await handle.writeFile(text, "utf8");
-      writer.size = size + Buffer.byteLength(text);
+      const buffer = Buffer.from(text, "utf8");
+      let written = 0;
+      while (written < buffer.length) {
+        const result = await handle.write(buffer, written, buffer.length - written, size + written);
+        if (result.bytesWritten === 0) throw new Error("Provider log append made no progress");
+        written += result.bytesWritten;
+      }
+      writer.size = size + buffer.length;
     } catch (error) {
       // This registry exclusively owns appends to this path. Roll back a
       // partial append before retrying, so repair never sees a false envelope.

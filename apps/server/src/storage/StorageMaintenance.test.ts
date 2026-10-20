@@ -3113,7 +3113,7 @@ const registeredPaths = (cwd: string) =>
   runGit(cwd, "worktree", "list", "--porcelain")
     .split("\n")
     .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.slice("worktree ".length));
+    .map((line) => NodePath.normalize(line.slice("worktree ".length)));
 
 it.layer(
   makeStorageTestLayer({

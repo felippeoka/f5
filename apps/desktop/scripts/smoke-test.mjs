@@ -633,8 +633,24 @@ try {
   await page.locator('[contenteditable="true"]').waitFor({ timeout: 60000 });
   const sendProviderPrompt = async (prompt) => {
     await page.locator('[contenteditable="true"]').fill(prompt);
-    await page.getByRole("button", { name: "Send message", exact: true }).click();
+    // Interrupting a turn pauses its queue, so the next explicit submission is
+    // labelled "Send now" rather than "Send message".
+    await page.getByRole("button", { name: /^Send (?:message|now)$/ }).click();
     await page.getByRole("button", { name: "Stop generation", exact: true }).waitFor();
+    // The composer renders optimistically. Wait for server acceptance before
+    // taking a persistence snapshot or interrupting the newly started turn.
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const snapshot = await nativeRequest("orchestration.getSnapshot", {});
+      const thread = snapshot.threads.find(
+        (entry) =>
+          entry.session?.activeTurnId &&
+          entry.messages.some((message) => message.role === "user" && message.text === prompt),
+      );
+      if (thread) return thread;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`Provider prompt did not reach active orchestration state: ${prompt}`);
   };
   const stopProviderTurn = async () => {
     await page.getByRole("button", { name: "Stop generation", exact: true }).click();
@@ -651,13 +667,8 @@ try {
     .getByRole("button", { name: "Approve once", exact: true })
     .waitFor({ state: "hidden" });
   await stopProviderTurn();
-  await sendProviderPrompt("F5_SMOKE_STREAM quit");
+  const providerThread = await sendProviderPrompt("F5_SMOKE_STREAM quit");
   const providerRendererUrl = page.url();
-  const providerSnapshot = await nativeRequest("orchestration.getSnapshot", {});
-  const providerThread = providerSnapshot.threads.find((thread) =>
-    thread.messages.some((message) => message.text === "F5_SMOKE_STREAM quit"),
-  );
-  if (!providerThread) throw new Error("Provider turn did not reach durable orchestration state");
   const waitForProviderOutput = async () => {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {

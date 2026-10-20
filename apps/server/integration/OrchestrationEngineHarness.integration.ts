@@ -43,6 +43,7 @@ import { ProjectionTurnRepositoryLive } from "../src/persistence/Layers/Projecti
 import { ProjectionPendingApprovalRepositoryLive } from "../src/persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
+import { PersistenceSqlError } from "../src/persistence/Errors.ts";
 import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
@@ -563,13 +564,18 @@ export const makeOrchestrationIntegrationHarness = (
       timeoutMs,
     ) =>
       waitFor(
-        snapshotQuery
-          .getSnapshot()
-          .pipe(
-            Effect.map(
-              (snapshot) => snapshot.threads.find((thread) => thread.id === threadId) ?? null,
-            ),
+        snapshotQuery.getSnapshot().pipe(
+          // An expired read has rolled back and is explicitly retryable.
+          // Retry only this read, never the command or provider side effect.
+          Effect.retry({
+            times: 2,
+            schedule: Schedule.spaced("10 millis"),
+            while: (error) => Schema.is(PersistenceSqlError)(error) && error.retryable === true,
+          }),
+          Effect.map(
+            (snapshot) => snapshot.threads.find((thread) => thread.id === threadId) ?? null,
           ),
+        ),
         (thread): thread is OrchestrationThread => thread !== null && predicate(thread),
         `projected thread '${threadId}'`,
         timeoutMs,

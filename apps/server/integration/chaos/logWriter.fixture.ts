@@ -9,17 +9,34 @@ const directory = process.argv[2]!;
 const originalOpen = fs.open;
 fs.open = async (...args: Parameters<typeof fs.open>) => {
   const handle = await originalOpen(...args);
-  const write = handle.writeFile.bind(handle);
-  handle.writeFile = async (...writeArgs: Parameters<typeof handle.writeFile>) => {
-    const text = writeArgs[0];
-    if (typeof text === "string" && text.includes('"eventId":"partial-completion"')) {
-      await write(text.slice(0, -1), writeArgs[1]);
-      process.stdout.write('F5_CHAOS:{"type":"partial"}\n');
-      return await new Promise<never>(() => {});
-    }
-    return write(...writeArgs);
-  };
-  return handle;
+  return new Proxy(handle, {
+    get(target, property) {
+      if (property === "write")
+        return async (buffer: Uint8Array, offset: number, length: number, position: number) => {
+          const text = Buffer.from(buffer)
+            .subarray(offset, offset + length)
+            .toString("utf8");
+          if (text.includes('"eventId":"partial-completion"')) {
+            let written = 0;
+            while (written < length - 1) {
+              const result = await target.write(
+                buffer,
+                offset + written,
+                length - 1 - written,
+                position + written,
+              );
+              if (!result.bytesWritten) throw new Error("Fixture write made no progress");
+              written += result.bytesWritten;
+            }
+            process.stdout.write('F5_CHAOS:{"type":"partial"}\n');
+            return await new Promise<never>(() => {});
+          }
+          return target.write(buffer, offset, length, position);
+        };
+      const member = Reflect.get(target, property, target);
+      return typeof member === "function" ? member.bind(target) : member;
+    },
+  });
 };
 await Effect.runPromise(
   Effect.gen(function* () {

@@ -133,6 +133,60 @@ describe("EventNdjsonLogger", () => {
     }),
   );
 
+  it.effect("rolls back a short partial append before retrying a complete record", () =>
+    Effect.gen(function* () {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-partial-log-"));
+      const filePath = path.join(directory, "thread.log");
+      const prefix = '[2026-10-19T00:00:00.000Z] NTIVE: {"type":"assistant"}\n';
+      fs.writeFileSync(filePath, prefix);
+      const open = fs.promises.open.bind(fs.promises);
+      let writes = 0;
+      const spy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+        const handle = await open(...args);
+        return new Proxy(handle, {
+          get(target, property) {
+            if (property === "write")
+              return async (
+                buffer: Uint8Array,
+                offset: number,
+                length: number,
+                position: number,
+              ) => {
+                writes++;
+                if (writes === 1)
+                  return target.write(buffer, offset, Math.min(length, 3), position);
+                if (writes === 2) throw new Error("transient write failure");
+                return target.write(buffer, offset, length, position);
+              };
+            const member = Reflect.get(target, property, target);
+            return typeof member === "function" ? member.bind(target) : member;
+          },
+        });
+      });
+      try {
+        const logger = (yield* makeEventNdjsonLogger(path.join(directory, "native.ndjson"), {
+          stream: "native",
+        }))!;
+        yield* logger.write(
+          { type: "turn.completed", text: "final🙂" },
+          ThreadId.makeUnsafe("thread"),
+        );
+        yield* logger.close();
+        const text = fs.readFileSync(filePath, "utf8");
+        assert.isTrue(text.startsWith(prefix));
+        const lines = text.trim().split("\n");
+        assert.equal(lines.length, 2);
+        assert.deepStrictEqual(JSON.parse(parseLogLine(lines[1]!).payload), {
+          type: "turn.completed",
+          text: "final🙂",
+        });
+      } finally {
+        spy.mockRestore();
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect("writes effect-style lines to thread-scoped files", () =>
     Effect.gen(function* () {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-log-"));

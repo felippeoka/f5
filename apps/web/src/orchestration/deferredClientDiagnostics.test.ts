@@ -64,6 +64,23 @@ it("starts no timers or listeners when disposed before loading finishes", async 
   expect(deps.subscribeConnection).not.toHaveBeenCalled();
 });
 
+it("releases reporter resources when sending diagnostics throws synchronously", async () => {
+  const loaded = deferred<typeof import("./clientDiagnostics")>();
+  const deps = dependencies();
+  deps.report.mockImplementation(() => {
+    throw new Error("RPC transport unavailable");
+  });
+  const unsubscribe = vi.fn();
+  deps.subscribeConnection.mockReturnValue(unsubscribe);
+  deps.onHidden.mockReturnValue(unsubscribe);
+  const bootstrap = startDeferredClientDiagnostics(deps, () => loaded.promise);
+  loaded.resolve(await import("./clientDiagnostics"));
+  await loaded.promise;
+  expect(() => bootstrap.dispose()).not.toThrow();
+  expect(unsubscribe).toHaveBeenCalledTimes(2);
+  expect(deps.scheduler.clearTimeout).toHaveBeenCalledTimes(1);
+});
+
 it("isolates a reporting module failure from the synchronization controller", async () => {
   const failure = new Error("diagnostics chunk unavailable");
   const warning = vi.spyOn(console, "warn").mockImplementation(() => {});

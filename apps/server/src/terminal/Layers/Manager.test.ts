@@ -8,7 +8,8 @@ import {
   type TerminalOpenInput,
   type TerminalRestartInput,
 } from "@t3tools/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as processTree from "@t3tools/shared/processTree";
 
 import {
   PtySpawnError,
@@ -225,7 +226,16 @@ function makeServerConfig(logsDir: string): ServerConfigShape {
 describe("TerminalManager", () => {
   const tempDirs: string[] = [];
 
+  beforeEach(() => {
+    // Fake PTY PIDs must never reach the host's process-tree killer.
+    vi.spyOn(processTree, "killProcessTreeAsync").mockImplementation(async (child, options) => {
+      child.kill(options.signal ?? (options.graceful === false ? "SIGKILL" : "SIGTERM"));
+      return { terminated: true, usedFallback: false };
+    });
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const dir of tempDirs.splice(0, tempDirs.length)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -751,7 +761,9 @@ describe("TerminalManager", () => {
     const old = adapter.processes[0]!;
     old.exitOnKill = false;
     const next = manager.open({ ...input, cwd: logsDir });
-    await vi.waitFor(() => expect(old.killSignals).toEqual(["SIGTERM"]));
+    await vi.waitFor(() =>
+      expect(old.killSignals).toContain(process.platform === "win32" ? "SIGKILL" : "SIGTERM"),
+    );
     expect(adapter.processes).toHaveLength(1);
     old.emitData("last old output");
     old.emitExit({ exitCode: 0, signal: null });
@@ -781,12 +793,15 @@ describe("TerminalManager", () => {
     const source = adapter.processes[0]!;
     source.exitOnKill = false;
     const close = manager.close({ threadId: input.threadId, terminalId: input.terminalId });
-    await vi.waitFor(() => expect(source.killSignals).toEqual(["SIGTERM"]));
+    await vi.waitFor(() =>
+      expect(source.killSignals).toContain(process.platform === "win32" ? "SIGKILL" : "SIGTERM"),
+    );
+    const signalsBeforeDisposal = [...source.killSignals];
     const disposal = manager.dispose();
     source.emitData("last output");
     source.emitExit({ exitCode: 0, signal: null });
     await Promise.all([close, disposal]);
-    expect(source.killSignals).toEqual(["SIGTERM"]);
+    expect(source.killSignals).toEqual(signalsBeforeDisposal);
   });
 
   it("does not rewrite unchanged histories on repeated close, reopen and shutdown", async () => {

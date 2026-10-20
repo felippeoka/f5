@@ -1383,7 +1383,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
           if (entry.isMain || entry.bare || seen.has(entry.canonicalPath)) continue;
           seen.add(entry.canonicalPath);
           registrations.push({
-            entry,
+            // Git uses forward slashes on Windows. Storage targets and review
+            // keys use native paths; preserve GitCore's transport representation.
+            entry: { ...entry, path: Path.normalize(entry.path) },
             projectRoot: project.workspaceRoot,
             projectName: project.title,
           });

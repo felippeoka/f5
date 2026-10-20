@@ -130,6 +130,9 @@ for (const completedItem of [false, true])
               threadId,
               (thread) =>
                 thread.latestTurn?.state === "error" &&
+                // turn.completed precedes session.exited. Wait for both before
+                // capturing the state the client must converge to.
+                thread.session?.status === "stopped" &&
                 thread.session?.activeTurnId === null &&
                 thread.messages.every((message) => !message.streaming),
             )
