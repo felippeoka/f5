@@ -1,6 +1,14 @@
 import { expect, it, vi } from "vitest";
 import { startDeferredClientDiagnostics } from "./deferredClientDiagnostics";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function dependencies() {
   return {
     read: vi.fn(() => ({
@@ -24,7 +32,7 @@ function dependencies() {
 }
 
 it("reads accumulated router counters after loading and disposes the reporter once", async () => {
-  const loaded = Promise.withResolvers<typeof import("./clientDiagnostics")>();
+  const loaded = deferred<typeof import("./clientDiagnostics")>();
   const deps = dependencies();
   const bootstrap = startDeferredClientDiagnostics(deps, () => loaded.promise);
   expect(deps.subscribeConnection).not.toHaveBeenCalled();
@@ -42,7 +50,7 @@ it("reads accumulated router counters after loading and disposes the reporter on
 });
 
 it("starts no timers or listeners when disposed before loading finishes", async () => {
-  const loaded = Promise.withResolvers<typeof import("./clientDiagnostics")>();
+  const loaded = deferred<typeof import("./clientDiagnostics")>();
   const start = vi.fn();
   const deps = dependencies();
   const bootstrap = startDeferredClientDiagnostics(deps, () => loaded.promise);
