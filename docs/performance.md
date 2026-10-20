@@ -387,7 +387,8 @@ unchanged 1,507,108-byte budget.
 ### Largest atomic compaction group
 
 `apps/server/scripts/performance/compaction.ts` measures one file-backed group of
-50,000 message events, with an ordinary writer admitted at the first rewrite.
+50,000 message events using the streaming fixture's maximum 64-character ASCII
+delta (3,199,936 folded characters), with an ordinary writer admitted at the first rewrite.
 Fixture reset is outside timing; five warmups precede thirty measured repetitions.
 The normal server report includes this scenario and its writer/transaction maxima.
 To run it alone from this revision:
@@ -396,10 +397,13 @@ To run it alone from this revision:
 F5_PERF_COMPACTION=1 F5_PERF_REPORT=/tmp/f5-compaction.json bun run --cwd apps/server test:file --config vitest.performance.config.ts
 ```
 
-A local macOS arm64 / Node 24.13.1 / SQLite 3.51.2 run on 2026-10-20 measured
-313.21 ms median and 326.22 ms p95 total compaction wall time, 307.85 ms median CPU,
-321.52 ms maximum transaction duration and 321.80 ms maximum ordinary-writer wait.
-This is a worst-group diagnostic, not a baseline comparison or a Windows result.
+A clean-source macOS arm64 / Node 24.13.1 / SQLite 3.51.2 run on 2026-10-20 at
+`e6fd4d92ae8eacb8c844725bc063c297ecd8d018` measured 355.33 ms median and
+390.89 ms p95 total compaction wall time, 349.35 ms median CPU, 302.56 ms maximum
+transaction duration and 298.14 ms maximum ordinary-writer wait. Percentiles use
+`percentile95` from the existing report harness. This measures the event-count
+ceiling; larger payloads can hold the writer longer. It is not a baseline
+comparison or a Windows result.
 Atomicity preserves replay equivalence; yielding between delete statements does
 not release the writer lease. The 2,000-event target still packs complete small
 groups, while a group up to the 50,000-event ceiling runs alone. Time budgets are
