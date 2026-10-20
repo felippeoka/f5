@@ -456,10 +456,11 @@
     {
       "upstreamSha": "03b210528160e68c8dbfc27f11f693085f92ab09",
       "subject": "fix(server): prevent busy terminals from starving history persistence (#17181)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): prevent busy terminals from starving history persistence (#17181).",
+      "reason": "Equivalent: upstream fixed KeyedCoalescingWorker, where one dirty key monopolized the shared worker. f5 has no such worker: each terminal persists on its own promise chain, and an armed flush timer is never reset by new output, so busy terminals cannot starve their own or other terminals' writes. Upstream change: fix(server): prevent busy terminals from starving history persistence (#17181)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["053e14fbc2dce73093c4a2be7f6d55beac4c6cd5"],
+      "evidence": ["apps/server/src/terminal/Layers/Manager.ts:978"]
     },
     {
       "upstreamSha": "03bd839554c9da27aae37b027bcdb2fa9896af09",
@@ -1271,10 +1272,9 @@
     {
       "upstreamSha": "0981e6b9d421ec46010d9b9edebd0beb241ef472",
       "subject": "perf(server): keep passive terminal output flowing (#17178)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): keep passive terminal output flowing (#17178).",
+      "reason": "Not-applicable: adds terminalObserve to upstream's per-request terminal output ack window (OutputProtocol.ts). f5 pushes terminal events on a channel and has no output window or observe RPC. Upstream change: perf(server): keep passive terminal output flowing (#17178)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "098bf5329727fcd7d973bf842e6b4d50d6e7b924",
@@ -2150,10 +2150,14 @@
     {
       "upstreamSha": "10395bcc59707302c1476e19186532ff5a9d3557",
       "subject": "fix(server): status refresh no longer pegs CPU in repos with thousands of untracked files (#16771)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): status refresh no longer pegs CPU in repos with thousands of untracked files (#16771).",
+      "reason": "Equivalent: upstream's status refresh added every untracked file to a temporary index, and now gives up past 5,000 files. f5's status refresh uses status plus diff-files/diff-index plumbing and never builds an untracked index; only an explicit review diff indexes untracked files, capped at 512 paths. Upstream change: fix(server): status refresh no longer pegs CPU in repos with thousands of untracked files (#16771)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["2b3a2a981edc3b0f46d6f986d0ecdf70f78ca654"],
+      "evidence": [
+        "apps/server/src/git/ReviewDiffService.ts:21",
+        "apps/server/src/git/Layers/GitCore.ts:966"
+      ]
     },
     {
       "upstreamSha": "10421bcdc9a059e0a717250257769af92567b645",
@@ -2260,9 +2264,9 @@
     {
       "upstreamSha": "10e29a26c289140b8f2312045c1ce0c278c7fe1a",
       "subject": "perf(server): ACP tool updates no longer persist a snapshot per streamed chunk (#16682)",
-      "reason": "Planned: F5 already coalesces cumulative tool redraws rather than persisting every native chunk (baseline abdf16fd7c). Individual audit found ten failing-before cases for dropped lifecycle/title/structured output and starved argument-only progress. ae320efe8e preserves meaningful lifecycle and structured output immediately, samples argument/diff changes every ten updates, skips equal snapshots, and preserves empty-placeholder suppression and the existing bounded 1,000-redraw behavior. Two real ACP wire tests exercise both hardening modes and two turns each; all 208 focused cases pass with three existing skips. This is bounded event-count and correctness proof, not a measured CPU improvement or a reproduction of the upstream storage flood. The remaining per-SHA audit and required release gates remain open. Upstream change: perf(server): ACP tool updates no longer persist a snapshot per streamed chunk (#16682).",
+      "reason": "Ported: f5 coalesces cumulative ACP tool redraws (baseline abdf16fd7c); ae320efe8e keeps lifecycle, title and structured-output changes immediate, samples argument and diff progress every ten updates and skips equal snapshots. Ten failing-before cases and two real ACP wire tests in both hardening modes pass. Event-count proof, not a measured CPU gain. Upstream change: perf(server): ACP tool updates no longer persist a snapshot per streamed chunk (#16682)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15a",
       "f5Shas": [
         "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f",
@@ -3848,10 +3852,15 @@
     {
       "upstreamSha": "1c7b267424a18d257c81d0e9a91f403fb20d2458",
       "subject": "perf(server): batch terminal history writes every 250 ms (#17183)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): batch terminal history writes every 250 ms (#17183).",
+      "reason": "Ported: terminal history flushes every 250 ms instead of 40 ms, so a busy terminal no longer rewrites its retained history about 25 times a second; close still flushes the latest output. The new test failed before the change (output written within 200 ms). Upstream change: perf(server): batch terminal history writes every 250 ms (#17183)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["cc931d0cb84d51899d57fca5f12596aec16ccda1"],
+      "evidence": [
+        "apps/server/src/terminal/Layers/Manager.ts:57",
+        "apps/server/src/terminal/Layers/Manager.test.ts:776"
+      ]
     },
     {
       "upstreamSha": "1c7d059f550a53dd94d5b9802640ecd11b759d1a",
@@ -4961,10 +4970,9 @@
     {
       "upstreamSha": "24edd55d9459edfa0a2956094b7868102bba5b6f",
       "subject": "fix(server): project favicons stop being rescanned every minute (#16206)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): project favicons stop being rescanned every minute (#16206).",
+      "reason": "Not-applicable: lengthens favicon caching in upstream's ProjectEnrichmentService. f5 has no enrichment service and resolves favicons only when the favicon route is requested, with HTTP caching (projectFaviconRoute.ts). Upstream change: fix(server): project favicons stop being rescanned every minute (#16206)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "250e052f44dd313b658abebc707242a7b25be340",
@@ -7991,9 +7999,9 @@
     {
       "upstreamSha": "3b2ebcee2f6eeb4ed3dde6c89fc59f2eb5bd996d",
       "subject": "perf(server): streamed events no longer rewrite the whole thread row (#18890)",
-      "reason": "Planned: individual implementation or baseline proof exists; a valid failing-before reproduction observes seven whole-thread metadata reads in a short stream/activity sequence. F5 now patches only activity timestamps and the estimate, reads narrow accounting state through one indexed join, and preserves unrelated metadata byte-for-byte. Missing threads are not inserted, omitted estimates are preserved, null explicitly clears, and reasoning status leaves activity timestamps unchanged. The 194 focused server cases pass; the subsequent matched server comparison shows streaming CPU p95 down 24.05%, wall p95 down 15.77%, and no workload latency regression. The remaining per-SHA audit, full interactive comparison and required release gates are open. Further F5-specific reproduction found partial direct-call live projection after a late cursor failure. Live events and all 19 cursor advances are now atomic with one cursor statement; 222 focused cases pass. The first performance comparison fails its replay-latency and streaming-CPU targets and is preserved; the subsequent atomic candidate passes the matched server comparison, including the 20% streaming CPU target; full interactive coverage and the broader audit remain open. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890).",
+      "reason": "Ported: streamed events patch only activity timestamps and the token estimate instead of rewriting the thread row, and live projection applies all cursor advances in one transaction. A failing-before reproduction observed seven whole-thread reads; the matched server comparison shows streaming CPU p95 down 24% with no workload latency regression. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15a",
       "f5Shas": [
         "1338d41a6cbe2c66d5fd54ec52ef4deb3d7f61cd",
@@ -8660,9 +8668,9 @@
     {
       "upstreamSha": "3ff452bd65adf758e68b886d1e3778ae1ec7d970",
       "subject": "fix(server): a dropped HTTP/2 connection no longer crashes the server (#18378)",
-      "reason": "Planned: individually source-reviewed #18378. A real TLS baseline on Node 26.12.0/undici 8.11.2 negotiates HTTP/2; 0d0711a665 changes startup fetch to HTTP/1.1 only on bundled undici >=8, retaining authenticated environment proxies and idempotent initialization. All nine child-process/TLS tests, the external-dependency staging test, all eight typechecks, formatter, lint, production ESM/CJS builds and both startup checks pass. A real Node 26.12.0 single executable also starts with executable-relative checkout dependencies; this is not release-archive coverage. The upstream idle-reaper crash has no deterministic reproduction in the referenced upstream issue; only the exposed negotiation path and workaround boundary are reproduced here. Required full/native gates and the remaining 15a audit stay open. Upstream change: fix(server): a dropped HTTP/2 connection no longer crashes the server (#18378)",
+      "reason": "Ported: 0d0711a665 keeps startup fetch on HTTP/1.1 when the bundled undici can negotiate HTTP/2, preserving environment proxies. TLS child-process tests prove the negotiation change; upstream's idle-reaper crash has no deterministic reproducer, so the crash itself is not reproduced. Upstream change: fix(server): a dropped HTTP/2 connection no longer crashes the server (#18378)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15a",
       "f5Shas": ["0d0711a66528e019e121bfb3d673577efc72cce6"],
       "evidence": [
@@ -13148,10 +13156,21 @@
     {
       "upstreamSha": "6108ef3d3d0ef2a598088a1bb64980580e935830",
       "subject": "fix(server): runs no longer get stuck (#15048)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): runs no longer get stuck (#15048).",
+      "reason": "Equivalent: the fix targets upstream's orchestration-v2 outbox, event sink and session manager. In f5 one serialized engine worker is the only event appender and publishes in commit order; queued turns pause when a checkpoint revert is requested; dispatcher reads propagate storage errors instead of skipping; and provider terminal events keep a durable receipt that replays until every projection succeeds. A message sent during a rollback is tracked separately (#17079). Upstream change: fix(server): runs no longer get stuck (#15048)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "babf86c0a2d749f44640ed018092893b4060d5f6",
+        "b4bec80827a1888003d44f8ee83872b97db4e067",
+        "bb7a277aed4338825c10f8976512bf9d59aa75ef"
+      ],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:892",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:538",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:1029",
+        "apps/server/src/nextTurnQueue/Layers/NextTurnQueueDispatcher.ts:1057",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:4498"
+      ]
     },
     {
       "upstreamSha": "611132c171f3a821bd2e32f22261135cef6330ac",
@@ -17218,10 +17237,11 @@
     {
       "upstreamSha": "7f0b789380f95032a55c777817cde8b49e2dae5a",
       "subject": "perf(server): skip parsing plain terminal history output (#17179)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): skip parsing plain terminal history output (#17179).",
+      "reason": "Equivalent: upstream skips its control-sequence filter for plain chunks. f5's history retains raw output and never parses escape sequences on append, so there is no per-chunk parse to skip. Upstream change: perf(server): skip parsing plain terminal history output (#17179)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["053e14fbc2dce73093c4a2be7f6d55beac4c6cd5"],
+      "evidence": ["apps/server/src/terminal/BoundedTerminalHistory.ts:41"]
     },
     {
       "upstreamSha": "7f3628e4153d5be4a241c4d54f73a6d7087014ce",
@@ -18814,10 +18834,9 @@
     {
       "upstreamSha": "8bc40b4e07bb7b4b0f71876d59520360c9bf958c",
       "subject": "fix(server): idle shells stop reloading every project once a minute (#14893)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): idle shells stop reloading every project once a minute (#14893).",
+      "reason": "Not-applicable: stops upstream's ws.ts from re-enriching every project once a minute for idle shells. f5 has no per-minute project enrichment refresh. Upstream change: fix(server): idle shells stop reloading every project once a minute (#14893)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "8bc9b78f827072a89707f6e4b577710e27263697",
@@ -19133,9 +19152,9 @@
     {
       "upstreamSha": "8ddf200e8f637eaf9a4f0d3036ece8f1d3869d10",
       "subject": "fix(server): one failing RPC handler no longer ends the client's other requests (#15515)",
-      "reason": "Planned: implementation and focused evidence exist for 16 of 22 initial ACP reproductions fail before the fix. Handler construction throws, Effect defects and cleanup defects now fail only the originating request or notification, preserve typed failures, continue ordered wire delivery and retain owner interruption. Both ACP core servers disable fatal socket-wide defects; unexpected reader failure rejects pending and later calls. All 53 library cases, 68 server ACP cases and two concurrent real-WebSocket cases pass. F5's existing request-local WebSocket exit handling is equivalent; its baseline provenance is d4d6991e764631bc825a3e4061651d6ff1ab484f. The remaining 15a per-SHA audit and required release gates are not complete. Upstream change: fix(server): one failing RPC handler no longer ends the client's other requests (#15515).",
+      "reason": "Ported: handler construction throws, defects and cleanup defects now fail only the originating ACP request or notification, keep typed failures and ordered delivery, and an unexpected reader failure rejects pending and later calls. 16 of 22 reproductions failed before; effect-acp (53), server ACP and concurrent real-WebSocket cases pass. f5's request-local WebSocket exit handling was already equivalent (d4d6991e76). Upstream change: fix(server): one failing RPC handler no longer ends the client's other requests (#15515)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15a",
       "f5Shas": ["6236ddcd59f5ac32b52133e877e5826e9dc6b72b"],
       "evidence": [
@@ -20672,10 +20691,9 @@
     {
       "upstreamSha": "999161ef844a7a38c8a6d08195c1240759169832",
       "subject": "perf(server): stop re-running git for every project each minute (#13689)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): stop re-running git for every project each minute (#13689).",
+      "reason": "Not-applicable: changes upstream's RepositoryIdentityResolver TTL and ThreadPullRequestReactor. f5 derives repository identity on demand from the git common dir (GitCore.ts) and its PR watch sweep only polls explicitly watched pull requests every two minutes, so nothing re-runs git per project each minute. Upstream change: perf(server): stop re-running git for every project each minute (#13689)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "99960383d094b850f0001d3067fa604aa3adf7d6",
@@ -27415,10 +27433,9 @@
     {
       "upstreamSha": "cdba9a038e41c6c807a2b58bd43e83dcf98d74b7",
       "subject": "perf(server): idle servers no longer scan every process every 5 seconds (#19399)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): idle servers no longer scan every process every 5 seconds (#19399).",
+      "reason": "Not-applicable: changes upstream's NativeTelemetryClient process sampler. f5 has no resource telemetry client; its only process poll is the terminal subprocess check, which runs only while a terminal session is running. Upstream change: perf(server): idle servers no longer scan every process every 5 seconds (#19399)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cdbf324aa043b1bc5705159127d2b55f186d1b9b",
@@ -34043,9 +34060,9 @@
     {
       "upstreamSha": "fd9cdaed17f615e364ee113829ec39b2bd2ed6fa",
       "subject": "perf(server): Codex plan streaming no longer commits every token (#19317)",
-      "reason": "Planned: individual implementation or baseline proof exists; F5 already buffers proposed-plan deltas until successful completion. Three strengthened baseline cases publish 100 deltas each, wait for a subsequent projected marker proving ordered consumption, then assert zero proposed-plan event writes before completion, one complete exact plan on success and zero on interruption or failure. The baseline provenance is the initial F5 commit; no runtime fix or CPU improvement is claimed. The remaining per-SHA audit, comparative performance and required release gates are open. Upstream change: perf(server): Codex plan streaming no longer commits every token (#19317).",
+      "reason": "Equivalent: f5 already buffers Codex proposed-plan deltas until completion. Strengthened tests publish 100 deltas and assert zero plan writes before completion, one exact plan on success and none on interruption or failure. Upstream change: perf(server): Codex plan streaming no longer commits every token (#19317)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "15a",
       "f5Shas": [
         "8168bd456ae23521e21bf68b08d0d860a6abd901",

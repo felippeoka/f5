@@ -1658,3 +1658,43 @@ scheduled tasks. 46 are React Compiler adoption commits confined to
 classifies as maintenance. Six compiler-motivated refactors that also change
 ref or effect timing stay planned for individual review, as do the named 15a-3
 render fixes.
+
+**Batch 2 (server streaming, 6 records).** Five earlier f5 commits already
+delivered these upstream fixes, so they are now recorded as ported or
+equivalent with their f5 commits:
+[t3code#16682](https://github.com/pingdotgg/t3code/pull/16682) (ACP tool
+redraw coalescing), [t3code#18890](https://github.com/pingdotgg/t3code/pull/18890)
+(streamed events patch activity columns),
+[t3code#18378](https://github.com/pingdotgg/t3code/pull/18378) (startup fetch
+stays on HTTP/1.1), [t3code#15515](https://github.com/pingdotgg/t3code/pull/15515)
+(request-local ACP handler failures) and
+[t3code#19317](https://github.com/pingdotgg/t3code/pull/19317) (Codex plan
+deltas buffered until completion).
+[t3code#15048](https://github.com/pingdotgg/t3code/pull/15048) targets
+upstream's orchestration-v2 outbox. It is equivalent because f5 has a single
+serialized engine worker that publishes in commit order, pauses the queue on
+checkpoint revert and keeps durable terminal receipts.
+
+**Batch 3 (terminal history, 4 records).**
+[t3code#17183](https://github.com/pingdotgg/t3code/pull/17183) is ported:
+history flushes every 250 ms instead of 40 ms. A new test failed before the
+change. [t3code#17181](https://github.com/pingdotgg/t3code/pull/17181) and
+[t3code#17179](https://github.com/pingdotgg/t3code/pull/17179) are equivalent:
+each f5 terminal persists on its own chain with a timer that new output never
+resets, and history appends never parse escape sequences.
+[t3code#17178](https://github.com/pingdotgg/t3code/pull/17178) adds an observe
+RPC to upstream's terminal output window, which f5 does not have.
+
+**Batch 4 (idle polling, 5 records).**
+[t3code#16771](https://github.com/pingdotgg/t3code/pull/16771) is equivalent.
+f5's status refresh runs `status` plus `diff-files`/`diff-index` plumbing and
+never adds untracked files to a temporary index. Only an explicit review diff
+does that, and it is capped at 512 paths. Not applicable:
+[t3code#19399](https://github.com/pingdotgg/t3code/pull/19399) (resource
+telemetry process sampler),
+[t3code#16206](https://github.com/pingdotgg/t3code/pull/16206) and
+[t3code#14893](https://github.com/pingdotgg/t3code/pull/14893) (project
+enrichment refresh), and
+[t3code#13689](https://github.com/pingdotgg/t3code/pull/13689)
+(RepositoryIdentityResolver TTL). f5 resolves favicons and repository identity
+on request, and its PR watch sweep polls only watched pull requests.

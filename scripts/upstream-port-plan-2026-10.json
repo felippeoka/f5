@@ -4564,20 +4564,9 @@
     },
     {
       "upstreamSha": "cdba9a038e41c6c807a2b58bd43e83dcf98d74b7",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): idle servers no longer scan every process every 5 seconds (#19399).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19399"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:resource-telemetry",
+      "reason": "Not-applicable: changes upstream's NativeTelemetryClient process sampler. f5 has no resource telemetry client; its only process poll is the terminal subprocess check, which runs only while a terminal session is running. Upstream change: perf(server): idle servers no longer scan every process every 5 seconds (#19399)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8e018ff91f64d6caedc029e498eca446ff0fad20",
@@ -7109,20 +7098,10 @@
     },
     {
       "upstreamSha": "7f0b789380f95032a55c777817cde8b49e2dae5a",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): skip parsing plain terminal history output (#17179).",
+      "classification": "equivalent:apps/server/src/terminal/BoundedTerminalHistory.ts:41",
+      "reason": "Equivalent: upstream skips its control-sequence filter for plain chunks. f5's history retains raw output and never parses escape sequences on append, so there is no per-chunk parse to skip. Upstream change: perf(server): skip parsing plain terminal history output (#17179)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17179"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "f5Shas": ["053e14fbc2dce73093c4a2be7f6d55beac4c6cd5"]
     },
     {
       "upstreamSha": "cf8479e605eb3cc8662dee38cbf1925020a1c1a7",
@@ -7684,17 +7663,10 @@
     },
     {
       "upstreamSha": "03b210528160e68c8dbfc27f11f693085f92ab09",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): prevent busy terminals from starving history persistence (#17181).",
+      "classification": "equivalent:apps/server/src/terminal/Layers/Manager.ts:978",
+      "reason": "Equivalent: upstream fixed KeyedCoalescingWorker, where one dirty key monopolized the shared worker. f5 has no such worker: each terminal persists on its own promise chain, and an armed flush timer is never reset by new output, so busy terminals cannot starve their own or other terminals' writes. Upstream change: fix(server): prevent busy terminals from starving history persistence (#17181)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17181"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "f5Shas": ["053e14fbc2dce73093c4a2be7f6d55beac4c6cd5"]
     },
     {
       "upstreamSha": "a5b482452dc8ca87625d5a80f83be0a9b56674de",
@@ -8182,20 +8154,9 @@
     },
     {
       "upstreamSha": "0981e6b9d421ec46010d9b9edebd0beb241ef472",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): keep passive terminal output flowing (#17178).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17178"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:terminal-output-window",
+      "reason": "Not-applicable: adds terminalObserve to upstream's per-request terminal output ack window (OutputProtocol.ts). f5 pushes terminal events on a channel and has no output window or observe RPC. Upstream change: perf(server): keep passive terminal output flowing (#17178)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b822420e5074d750e7258ea48568666720cf0415",
@@ -10212,17 +10173,11 @@
     },
     {
       "upstreamSha": "10395bcc59707302c1476e19186532ff5a9d3557",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): status refresh no longer pegs CPU in repos with thousands of untracked files (#16771).",
+      "classification": "equivalent:apps/server/src/git/ReviewDiffService.ts:21",
+      "reason": "Equivalent: upstream's status refresh added every untracked file to a temporary index, and now gives up past 5,000 files. f5's status refresh uses status plus diff-files/diff-index plumbing and never builds an untracked index; only an explicit review diff indexes untracked files, capped at 512 paths. Upstream change: fix(server): status refresh no longer pegs CPU in repos with thousands of untracked files (#16771)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16771"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "evidence": ["apps/server/src/git/Layers/GitCore.ts:966"],
+      "f5Shas": ["2b3a2a981edc3b0f46d6f986d0ecdf70f78ca654"]
     },
     {
       "upstreamSha": "b77108bc41506ad7ba28839d9a8e04ba79fe340b",
@@ -11010,17 +10965,9 @@
     },
     {
       "upstreamSha": "24edd55d9459edfa0a2956094b7868102bba5b6f",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): project favicons stop being rescanned every minute (#16206).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16206"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:project-enrichment",
+      "reason": "Not-applicable: lengthens favicon caching in upstream's ProjectEnrichmentService. f5 has no enrichment service and resolves favicons only when the favicon route is requested, with HTTP caching (projectFaviconRoute.ts). Upstream change: fix(server): project favicons stop being rescanned every minute (#16206)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "61a0ec9eb0ad12dd4ef054d2dbab8b5eedbdaf06",
@@ -12814,17 +12761,20 @@
     },
     {
       "upstreamSha": "6108ef3d3d0ef2a598088a1bb64980580e935830",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): runs no longer get stuck (#15048).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/OrchestrationEngine.ts:892",
+      "reason": "Equivalent: the fix targets upstream's orchestration-v2 outbox, event sink and session manager. In f5 one serialized engine worker is the only event appender and publishes in commit order; queued turns pause when a checkpoint revert is requested; dispatcher reads propagate storage errors instead of skipping; and provider terminal events keep a durable receipt that replays until every projection succeeds. A message sent during a rollback is tracked separately (#17079). Upstream change: fix(server): runs no longer get stuck (#15048)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-15048"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "evidence": [
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:538",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:1029",
+        "apps/server/src/nextTurnQueue/Layers/NextTurnQueueDispatcher.ts:1057",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:4498"
+      ],
+      "f5Shas": [
+        "babf86c0a2d749f44640ed018092893b4060d5f6",
+        "b4bec80827a1888003d44f8ee83872b97db4e067",
+        "bb7a277aed4338825c10f8976512bf9d59aa75ef"
+      ]
     },
     {
       "upstreamSha": "fed41fa88bb27cb4325cb208d571393850bc63c2",
@@ -13105,17 +13055,9 @@
     },
     {
       "upstreamSha": "8bc40b4e07bb7b4b0f71876d59520360c9bf958c",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): idle shells stop reloading every project once a minute (#14893).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14893"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:project-enrichment",
+      "reason": "Not-applicable: stops upstream's ws.ts from re-enriching every project once a minute for idle shells. f5 has no per-minute project enrichment refresh. Upstream change: fix(server): idle shells stop reloading every project once a minute (#14893)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "cc1e634bfa62edd56ff792eea666e436fdef788f",
@@ -14243,20 +14185,9 @@
     },
     {
       "upstreamSha": "999161ef844a7a38c8a6d08195c1240759169832",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): stop re-running git for every project each minute (#13689).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13689"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:repository-identity-resolver",
+      "reason": "Not-applicable: changes upstream's RepositoryIdentityResolver TTL and ThreadPullRequestReactor. f5 derives repository identity on demand from the git common dir (GitCore.ts) and its PR watch sweep only polls explicitly watched pull requests every two minutes, so nothing re-runs git per project each minute. Upstream change: perf(server): stop re-running git for every project each minute (#13689)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ee18e56f902f2ccd74dffdc50363051be02ae0ab",
