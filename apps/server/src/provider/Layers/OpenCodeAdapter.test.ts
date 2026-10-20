@@ -2,7 +2,18 @@ import assert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ServiceMap, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect";
+import {
+  ServiceMap,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { beforeEach } from "vitest";
 
 import {
@@ -75,6 +86,8 @@ const runtimeMock = {
     afterEvent: undefined as (() => void) | undefined,
     onAbort: undefined as (() => Promise<void>) | undefined,
     childrenError: false,
+    exitServer: undefined as ((code: number) => void) | undefined,
+    requestSignal: undefined as AbortSignal | undefined,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -102,6 +115,8 @@ const runtimeMock = {
     this.state.afterEvent = undefined;
     this.state.onAbort = undefined;
     this.state.childrenError = false;
+    this.state.exitServer = undefined;
+    this.state.requestSignal = undefined;
   },
 };
 
@@ -138,15 +153,18 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           }
         }),
       );
+      const exit = yield* Deferred.make<number>();
+      runtimeMock.state.exitServer = (code) => Effect.runSync(Deferred.succeed(exit, code));
       return {
         url,
-        exitCode: null,
+        exitCode: serverUrl ? null : Deferred.await(exit),
         external: Boolean(serverUrl),
       };
     }),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
-  createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
-    ({
+  createOpenCodeSdkClient: ({ baseUrl, serverPassword, signal }) => {
+    runtimeMock.state.requestSignal = signal;
+    return {
       command: { list: async () => ({ data: runtimeMock.state.commands }) },
       app: { skills: async () => ({ data: [] }) },
       session: {
@@ -238,7 +256,8 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           };
         },
       },
-    }) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
+    } as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>;
+  },
   loadOpenCodeInventory: () =>
     Effect.fail(
       new OpenCodeRuntimeError({
@@ -257,6 +276,8 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
   updateMcpStateIfCurrent: () => Effect.succeed(true),
+  updateHistoryReconciliationIfCurrent: () => Effect.succeed(true),
+  updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
   listBindingsByProject: () => Effect.succeed([]),
 });
 
@@ -618,6 +639,44 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         runtimeMock.state.abortCalls.includes("http://127.0.0.1:9999/session"),
         true,
       );
+    }),
+  );
+
+  it.effect("owned server death cancels requests and emits exactly one error and exit", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeOpenCodeAdapter(
+        Schema.decodeSync(OpenCodeSettings)({ binaryPath: "fake-opencode" }),
+      );
+      const threadId = asThreadId("owned-death");
+      const terminal = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "runtime.error" || event.type === "session.exited"),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      assert.equal(runtimeMock.state.requestSignal!.aborted, false);
+      runtimeMock.state.exitServer!(23);
+      const events = yield* Fiber.join(terminal).pipe(Effect.timeout("1 second"));
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["runtime.error", "session.exited"],
+      );
+      assert.equal(runtimeMock.state.requestSignal!.aborted, true);
+      assert.deepEqual(yield* adapter.listSessions(), []);
+      yield* Effect.sync(() => runtimeMock.state.closeCalls.length).pipe(
+        Effect.repeat({ until: (count) => count === 1 }),
+        Effect.timeout("1 second"),
+      );
+      assert.equal(runtimeMock.state.closeCalls.length, 1);
     }),
   );
 

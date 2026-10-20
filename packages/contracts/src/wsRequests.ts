@@ -1,3 +1,4 @@
+import { ReportClientDiagnosticsInput } from "./server";
 import { Schema, Struct, Tuple } from "effect";
 import { AttachmentCloneToUploadInput, AttachmentUploadsInput } from "./attachmentUpload";
 import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
@@ -366,6 +367,7 @@ const WebSocketRequestBody = Schema.Union([
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),
   ),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getLatestSequence, Schema.Struct({})),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getSnapshot, OrchestrationGetSnapshotInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getStartupSnapshot, OrchestrationGetStartupSnapshotInput),
   tagRequestBody(
@@ -539,6 +541,7 @@ const WebSocketRequestBody = Schema.Union([
 
   // Server meta
   tagRequestBody(WS_METHODS.serverProbe, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.serverReportClientDiagnostics, ReportClientDiagnosticsInput),
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpdateSettings, ServerSettingsPatch),
   tagRequestBody(WS_METHODS.serverGetProjectSettings, Schema.Struct({ projectId: ProjectId })),

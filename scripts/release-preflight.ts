@@ -1,3 +1,12 @@
+import { parse } from "yaml";
+import {
+  selectReleaseCiRun,
+  requiredReleaseCiJobs,
+  assertReleaseCiJobs,
+  type CiRun,
+  type CiJob,
+  type CiWorkflow,
+} from "./lib/release-qualification.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import { readFileSync, appendFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -40,10 +49,23 @@ if (dryRun) {
   const runs = JSON.parse(
     run("gh", [
       "api",
-      `repos/${process.env.GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&status=success`,
+      `repos/${process.env.GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&branch=main&per_page=100`,
     ]),
-  ) as { workflow_runs: unknown[] };
-  if (!runs.workflow_runs.length) throw new Error("No successful CI push run for release SHA");
+  ) as { workflow_runs: CiRun[] };
+  const qualifiedRun = selectReleaseCiRun(runs.workflow_runs, sha);
+  const jobPages = JSON.parse(
+    run("gh", [
+      "api",
+      "--paginate",
+      "--slurp",
+      `repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${qualifiedRun.id}/jobs?filter=all&per_page=100`,
+    ]),
+  ) as { jobs: CiJob[] }[];
+  const workflow = parse(readFileSync(".github/workflows/ci.yml", "utf8")) as CiWorkflow;
+  assertReleaseCiJobs(
+    jobPages.flatMap((page) => page.jobs),
+    requiredReleaseCiJobs(workflow, profile),
+  );
   for (const release of releases)
     if (
       !release.draft &&

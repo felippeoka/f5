@@ -5,6 +5,8 @@ import path from "node:path";
 import { ThreadId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { vi } from "vitest";
+import { providerLogWriterInventory } from "../logWriterRegistry.ts";
 
 import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -28,6 +30,109 @@ function parseLogLine(line: string) {
 }
 
 describe("EventNdjsonLogger", () => {
+  it.effect(
+    "serializes native and canonical streams through one writer and flushes admitted deltas on close",
+    () =>
+      Effect.gen(function* () {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-shared-log-"));
+        try {
+          const native = (yield* makeEventNdjsonLogger(path.join(directory, "native.ndjson"), {
+            stream: "native",
+            batchWindowMs: 60_000,
+          }))!;
+          const canonical = (yield* makeEventNdjsonLogger(
+            path.join(directory, "canonical.ndjson"),
+            { stream: "canonical", batchWindowMs: 60_000 },
+          ))!;
+          const thread = ThreadId.makeUnsafe("same-thread");
+          for (let i = 0; i < 30; i++) {
+            yield* native.write({ type: "content.delta", index: i }, thread);
+            yield* canonical.write({ type: "content.delta", index: i }, thread);
+          }
+          assert.equal(providerLogWriterInventory().writers, 1);
+          yield* native.close();
+          yield* canonical.close();
+          const lines = fs
+            .readFileSync(path.join(directory, "same-thread.log"), "utf8")
+            .trim()
+            .split("\n")
+            .map(parseLogLine);
+          assert.equal(lines.length, 60);
+          for (let i = 0; i < 30; i++) {
+            assert.equal(lines[i * 2]!.stream, "NTIVE");
+            assert.equal(lines[i * 2 + 1]!.stream, "CANON");
+            assert.equal(JSON.parse(lines[i * 2]!.payload).index, i);
+          }
+          assert.equal(providerLogWriterInventory().entries, 0);
+          assert.equal(providerLogWriterInventory().writers, 0);
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true });
+        }
+      }),
+  );
+
+  it.effect("close waits for a record admitted before serialization yields", () =>
+    Effect.gen(function* () {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-log-admission-"));
+      try {
+        const logger = (yield* makeEventNdjsonLogger(path.join(directory, "native.ndjson"), {
+          stream: "native",
+        }))!;
+        let closing: Promise<void> | undefined;
+        yield* logger.write(
+          {
+            toJSON() {
+              closing = Effect.runPromise(logger.close());
+              return { type: "turn.completed" };
+            },
+          },
+          ThreadId.makeUnsafe("thread"),
+        );
+        yield* Effect.promise(() => closing!);
+        assert.equal(
+          JSON.parse(
+            parseLogLine(fs.readFileSync(path.join(directory, "thread.log"), "utf8").trim())
+              .payload,
+          ).type,
+          "turn.completed",
+        );
+        assert.equal(providerLogWriterInventory().writers, 0);
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("recovers a transient open failure and removes a crashed partial final record", () =>
+    Effect.gen(function* () {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-retry-log-"));
+      const filePath = path.join(directory, "thread.log");
+      fs.writeFileSync(
+        filePath,
+        '[2026-10-19T00:00:00.000Z] NTIVE: {"type":"assistant"}\n[partial completion',
+      );
+      const open = fs.promises.open.bind(fs.promises);
+      const spy = vi
+        .spyOn(fs.promises, "open")
+        .mockRejectedValueOnce(new Error("temporary disk failure"))
+        .mockImplementation(open);
+      try {
+        const logger = (yield* makeEventNdjsonLogger(path.join(directory, "native.ndjson"), {
+          stream: "native",
+        }))!;
+        yield* logger.write({ type: "turn.completed" }, ThreadId.makeUnsafe("thread"));
+        yield* logger.close();
+        const lines = fs.readFileSync(filePath, "utf8").trim().split("\n").map(parseLogLine);
+        assert.equal(lines.length, 2);
+        assert.equal(JSON.parse(lines[1]!.payload).type, "turn.completed");
+        assert.equal(spy.mock.calls.length, 2);
+      } finally {
+        spy.mockRestore();
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect("writes effect-style lines to thread-scoped files", () =>
     Effect.gen(function* () {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-log-"));

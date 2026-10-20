@@ -1,6 +1,7 @@
 import {
   EventId,
   NonNegativeInt,
+  ProviderInstanceId,
   ProviderRuntimeEvent,
   ThreadId,
   TurnId,
@@ -30,6 +31,10 @@ export const ProviderTerminalEventReceipt = Schema.Struct({
   appliedAt: Schema.NullOr(Schema.String),
   attempt: NonNegativeInt,
   lastError: Schema.NullOr(Schema.String),
+  originProviderInstanceId: Schema.NullOr(ProviderInstanceId),
+  originSessionGeneration: Schema.NullOr(NonNegativeInt),
+  originTurnId: Schema.NullOr(TurnId),
+  nextDueAt: Schema.String,
 });
 export type ProviderTerminalEventReceipt = typeof ProviderTerminalEventReceipt.Type;
 
@@ -43,6 +48,16 @@ export interface ProviderTerminalEventRepositoryShape {
     ReadonlyArray<ProviderTerminalEventReceipt>,
     ProviderTerminalEventRepositoryError
   >;
+  readonly listDue: (
+    now?: string,
+  ) => Effect.Effect<
+    ReadonlyArray<ProviderTerminalEventReceipt>,
+    ProviderTerminalEventRepositoryError
+  >;
+  readonly hasPending: (
+    threadId: ThreadId,
+    turnId: TurnId | null,
+  ) => Effect.Effect<boolean, ProviderTerminalEventRepositoryError>;
   readonly markApplied: (
     eventId: EventId,
   ) => Effect.Effect<void, ProviderTerminalEventRepositoryError>;

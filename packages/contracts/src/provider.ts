@@ -153,6 +153,7 @@ export type ProviderRespondToUserInputInput = typeof ProviderRespondToUserInputI
 const ProviderEventKind = Schema.Literals(["session", "notification", "request", "error"]);
 
 export const ProviderEvent = Schema.Struct({
+  sessionGeneration: Schema.optional(NonNegativeInt),
   id: EventId,
   kind: ProviderEventKind,
   provider: ProviderKind,

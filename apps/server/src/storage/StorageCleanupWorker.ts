@@ -894,7 +894,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       event.type === "thread.deleted"
         ? trigger.pipe(Effect.forkScoped, Effect.asVoid)
         : Effect.void,
-    ).pipe(Effect.forkScoped);
+    ).pipe(Effect.forkScoped({ startImmediately: true }));
   });
 
   return { start, dryRun, runOnce } satisfies StorageCleanupWorkerShape;

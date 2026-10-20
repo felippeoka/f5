@@ -1,3 +1,4 @@
+import { makeShutdownSourceScope, registerShutdown } from "../../shutdown.ts";
 import {
   CommandId,
   InvestigationWorkflowId,
@@ -10,10 +11,10 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { isArchivedWorkflow, isDeletedWorkflow } from "@t3tools/shared/workflowArchive";
 import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
-import { Cause, Effect, Layer, Stream } from "effect";
+import { Cause, Effect, Layer, Scope, Stream } from "effect";
 
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { buildFallbackTitle, resolveBestEffortGeneratedTitle } from "../../threadTitle.ts";
@@ -1121,6 +1122,7 @@ function liveThreadById(snapshot: OrchestrationReadModel, threadId: ThreadId) {
 }
 
 export const makeInvestigationWorkflowService = Effect.gen(function* () {
+  const sources = yield* makeShutdownSourceScope("investigation-workflows-sources");
   const baseOrchestrationEngine = yield* OrchestrationEngineService;
   const textGeneration = yield* TextGeneration;
   const providerRegistry = yield* Effect.serviceOption(ProviderRegistry);
@@ -1133,7 +1135,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
   const providerTurnDeliveryWorker = yield* Effect.serviceOption(ProviderTurnDeliveryWorker);
   const resolveStageDispatch = yield* makeWorkflowStageDispatchResolver;
 
-  const titleGenerationWorker = yield* makeDrainableWorker(
+  const titleGenerationWorker = yield* makeBackgroundWorker(
     (item: InvestigationWorkflowTitleGenerationWorkItem) =>
       Effect.gen(function* () {
         const snapshot = yield* orchestrationEngine.getReadModel();
@@ -1192,6 +1194,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
           }),
         ),
       ),
+    { name: "InvestigationWorkflowService", key: (item) => String(item.workflowId) },
   );
 
   const startPendingInvestigations = (workflow: InvestigationWorkflow, updatedAt: string) =>
@@ -2435,6 +2438,8 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
     );
 
   const start: InvestigationWorkflowServiceShape["start"] = Effect.gen(function* () {
+    if (sources.stopped) return;
+    yield* Effect.addFinalizer(() => sources.stop);
     yield* reconcileStuckWorkflows.pipe(
       Effect.catchCause((cause) =>
         Effect.logError("InvestigationWorkflowService.reconcileStuckWorkflows failed", {
@@ -2458,7 +2463,11 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
         : domainEvents;
     yield* Stream.runForEach(work, (item) =>
       item.kind === "event" ? handleDomainEvent(item.event) : handleDeliveryOutcome(item.outcome),
-    ).pipe(Effect.forkScoped, Effect.asVoid);
+    ).pipe(
+      Scope.provide(sources.scope),
+      Effect.forkIn(sources.scope, { startImmediately: true }),
+      Effect.asVoid,
+    );
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logError("InvestigationWorkflowService.start failed", { cause }).pipe(
@@ -2817,6 +2826,15 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
       ),
       Effect.orElseSucceed(() => null),
     );
+
+  yield* registerShutdown(
+    "investigation-workflows-titles",
+    "drain",
+    () => titleGenerationWorker.drain,
+    ["provider-ingestion"],
+  );
+
+  yield* Effect.addFinalizer(() => sources.stop);
 
   return {
     start,

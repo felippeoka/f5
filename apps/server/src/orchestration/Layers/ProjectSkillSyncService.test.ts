@@ -1,3 +1,4 @@
+import { ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
 import * as FS from "node:fs/promises";
 import * as OS from "node:os";
 import * as Path from "node:path";
@@ -53,11 +54,14 @@ async function fixture(failFirst = false) {
   const events = Effect.runSync(PubSub.unbounded<OrchestrationEvent>());
   const endings = new Map<string, () => Effect.Effect<boolean>>();
   const registrations = new Map<string, number>();
+  const closed = new Set<string>();
+  const shutdown = new ShutdownRegistry();
   const scan = vi.spyOn(scanner, "scanProjectSkills");
   let failures = failFirst ? 1 : 0;
   let modelReads = 0;
   const runtime = ManagedRuntime.make(
     ProjectSkillSyncServiceLive.pipe(
+      Layer.provide(Layer.succeed(ServerShutdown, shutdown)),
       Layer.provide(
         Layer.succeed(OrchestrationEngineService, {
           getReadModel: () =>
@@ -96,6 +100,12 @@ async function fixture(failFirst = false) {
                   Effect.sync(() => {
                     endings.set(path, () => Queue.end(queue));
                   }),
+                ).pipe(
+                  Stream.ensuring(
+                    Effect.sync(() => {
+                      closed.add(path);
+                    }),
+                  ),
                 );
               },
             } satisfies FileSystem.FileSystem;
@@ -133,6 +143,15 @@ async function fixture(failFirst = false) {
   return {
     roots,
     projects,
+    shutdown,
+    closed,
+    publish: () =>
+      Effect.runPromise(
+        PubSub.publish(events, {
+          type: "project.meta-updated",
+          aggregateId: projects[0]!.id,
+        } as OrchestrationEvent),
+      ),
     scan,
     registrations,
     endings,
@@ -199,4 +218,20 @@ it("replaces normally ended watch streams and forgets removed projects' watch pa
   const baseline = [...h.registrations];
   await h.drain();
   expect([...h.registrations]).toEqual(baseline);
+});
+
+it("stops polling, watches and queued debounce admission before shutdown drains", async () => {
+  const h = await fixture();
+  await vi.waitFor(() => expect(h.endings.size).toBe(h.registrations.size));
+  const results = await h.shutdown.run();
+  expect(results.map((result) => result.name).sort()).toEqual([
+    "project-skill-sources",
+    "project-skill-work",
+  ]);
+  expect(results.every((result) => result.outcome === "complete")).toBe(true);
+  expect([...h.registrations.keys()].every((path) => h.closed.has(path))).toBe(true);
+  const scans = h.scan.mock.calls.length;
+  await h.publish();
+  await h.drain();
+  expect(h.scan.mock.calls).toHaveLength(scans);
 });

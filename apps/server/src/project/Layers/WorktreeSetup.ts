@@ -1866,6 +1866,7 @@ export const makeWorktreeSetup = Effect.gen(function* () {
       );
     }),
     scope,
+    { startImmediately: true },
   );
   return {
     start,

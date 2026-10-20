@@ -57,6 +57,13 @@ export interface ProviderSubmissionHandle {
 }
 
 export interface ProviderServiceShape {
+  readonly acknowledgeHistoryReconciliation?: (input: {
+    readonly threadId: ThreadId;
+    readonly markerId: string;
+    readonly historyIdentity: string;
+    readonly instanceId: import("@t3tools/contracts").ProviderInstanceId;
+    readonly generation: number;
+  }) => Effect.Effect<boolean, ProviderServiceError>;
   /** Registers a service-owned operation; caller cancellation cannot abandon transport. */
   readonly submitTurn?: (input: ProviderSendTurnInput) => Effect.Effect<ProviderSubmissionHandle>;
 

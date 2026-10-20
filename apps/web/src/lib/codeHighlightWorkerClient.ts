@@ -1,3 +1,5 @@
+import { recordBrowserWork, recordBrowserGauge } from "./performanceCounters";
+import { raceWithAbort } from "@t3tools/shared/abortSignal";
 import type { resolveLanguage, resolveTheme } from "@pierre/diffs";
 
 import type { DiffThemeName } from "./diffRendering";
@@ -28,6 +30,15 @@ export type CodeHighlightWorkerResponse =
  * retained by long sessions that touch many languages.
  */
 export const CODE_HIGHLIGHT_WORKER_MAX_LANGUAGES = 16;
+export const CODE_HIGHLIGHT_MAX_JOBS = 32;
+export const CODE_HIGHLIGHT_MAX_BYTES = 8 * 1024 * 1024;
+const reservations = new Set<{ bytes: number }>();
+let reservedBytes = 0;
+let factoryGeneration = 0;
+export const codeHighlightResourceInventory = () => ({
+  jobs: reservations.size,
+  bytes: reservedBytes,
+});
 const CODE_HIGHLIGHT_JOB_TIMEOUT_MS = 20_000;
 /** After this many worker crashes in a row, large blocks stay plain text. */
 const CODE_HIGHLIGHT_WORKER_MAX_FAILURES = 3;
@@ -49,7 +60,7 @@ interface WorkerSlot {
   readonly themes: Set<string>;
   readonly pending: Map<number, PendingJob>;
   /** Assets each unanswered job carried, including cancelled jobs. */
-  readonly sentAssets: Map<number, { languages: string[]; themes: string[] }>;
+  readonly sentAssets: Map<number, { languages: string[]; themes: string[]; finish: () => void }>;
 }
 
 let workerFactory: CodeHighlightWorkerFactory = defaultWorkerFactory;
@@ -60,6 +71,8 @@ let consecutiveFailures = 0;
 function retireSlot(target: WorkerSlot, error: Error): void {
   if (slot === target) slot = null;
   target.worker.terminate();
+  for (const sent of target.sentAssets.values()) sent.finish();
+  target.sentAssets.clear();
   for (const job of target.pending.values()) job.reject(error);
   target.pending.clear();
 }
@@ -77,6 +90,7 @@ function createSlot(): WorkerSlot {
     const response = event.data;
     const sent = created.sentAssets.get(response.id);
     created.sentAssets.delete(response.id);
+    sent?.finish();
     if (response.type === "error" && sent) {
       // The worker may not have loaded them; send them again next time.
       for (const language of sent.languages) created.languages.delete(language);
@@ -90,6 +104,8 @@ function createSlot(): WorkerSlot {
       job.resolve(response.html);
     } else if (response.type === "error") {
       job.reject(new Error(response.message));
+    } else {
+      job.reject(abortError());
     }
   });
   worker.addEventListener("error", (event) => {
@@ -104,17 +120,18 @@ function acquireSlot(language: string): WorkerSlot {
   if (
     slot &&
     !slot.languages.has(language) &&
-    slot.languages.size >= CODE_HIGHLIGHT_WORKER_MAX_LANGUAGES &&
-    slot.pending.size === 0
+    slot.languages.size >= CODE_HIGHLIGHT_WORKER_MAX_LANGUAGES
   ) {
+    if (slot.sentAssets.size > 0) throw new Error("Code highlight grammar capacity reached.");
     retireSlot(slot, new Error("Code highlight worker recycled."));
   }
   slot ??= createSlot();
   return slot;
 }
 
+let diffsModule: Promise<typeof import("@pierre/diffs")> | undefined;
 async function resolveAssets(language: string, theme: DiffThemeName) {
-  const diffs = await import("@pierre/diffs");
+  const diffs = await (diffsModule ??= import("@pierre/diffs"));
   let resolvedLanguage: ResolvedLanguage | null = null;
   let effectiveLanguage = language;
   if (language !== "text" && language !== "ansi") {
@@ -153,69 +170,108 @@ export async function highlightCodeInWorker(input: {
     throw new Error("Code highlight worker is disabled after repeated failures.");
   }
   if (input.signal?.aborted) throw abortError();
-  const { effectiveLanguage, resolvedLanguage, resolvedTheme } = await resolveAssets(
-    input.language,
-    input.theme,
-  );
-  if (input.signal?.aborted) throw abortError();
-
-  // Slots record grammars by resolved name, so aliases like `ts` match `typescript`.
-  const target = acquireSlot(resolvedLanguage?.name ?? effectiveLanguage);
-  const resolvedLanguages =
-    resolvedLanguage && !target.languages.has(resolvedLanguage.name) ? [resolvedLanguage] : [];
-  const resolvedThemes = target.themes.has(input.theme) ? [] : [resolvedTheme];
-  for (const entry of resolvedLanguages) target.languages.add(entry.name);
-  for (const _theme of resolvedThemes) target.themes.add(input.theme);
-
-  const id = nextJobId++;
-  target.sentAssets.set(id, {
-    languages: resolvedLanguages.map((entry) => entry.name),
-    themes: resolvedThemes.length > 0 ? [input.theme] : [],
-  });
-  return new Promise<string>((resolve, reject) => {
-    const cleanup = () => {
-      clearTimeout(timeout);
-      input.signal?.removeEventListener("abort", onAbort);
-    };
-    const onAbort = () => {
-      if (!target.pending.delete(id)) return;
-      cleanup();
-      target.worker.postMessage({ type: "cancel", id } satisfies CodeHighlightWorkerRequest);
-      reject(abortError());
-    };
-    const timeout = setTimeout(() => {
-      if (!target.pending.has(id)) return;
-      // A job this slow means the worker is stuck; replace it.
-      consecutiveFailures += 1;
-      retireSlot(target, new Error("Code highlighting timed out."));
-    }, CODE_HIGHLIGHT_JOB_TIMEOUT_MS);
-    target.pending.set(id, {
-      resolve: (html) => {
+  const bytes = new TextEncoder().encode(input.code).byteLength;
+  if (
+    reservations.size >= CODE_HIGHLIGHT_MAX_JOBS ||
+    reservedBytes + bytes > CODE_HIGHLIGHT_MAX_BYTES
+  ) {
+    throw new Error("Code highlight capacity reached; showing plain text.");
+  }
+  const reservation = { bytes };
+  reservations.add(reservation);
+  reservedBytes += bytes;
+  recordBrowserWork("highlightJobs");
+  recordBrowserWork("highlightBytes", bytes);
+  recordBrowserGauge("highlightJobs", reservations.size);
+  recordBrowserGauge("highlightBytes", reservedBytes);
+  const generation = factoryGeneration;
+  const release = () => {
+    if (reservations.delete(reservation)) reservedBytes -= bytes;
+    recordBrowserGauge("highlightJobs", reservations.size);
+    recordBrowserGauge("highlightBytes", reservedBytes);
+  };
+  let posted = false;
+  try {
+    const assets = resolveAssets(input.language, input.theme);
+    const { effectiveLanguage, resolvedLanguage, resolvedTheme } = input.signal
+      ? await raceWithAbort(assets, input.signal)
+      : await assets;
+    if (input.signal?.aborted || generation !== factoryGeneration) throw abortError();
+    const target = acquireSlot(resolvedLanguage?.name ?? effectiveLanguage);
+    const resolvedLanguages =
+      resolvedLanguage && !target.languages.has(resolvedLanguage.name) ? [resolvedLanguage] : [];
+    const resolvedThemes = target.themes.has(input.theme) ? [] : [resolvedTheme];
+    for (const entry of resolvedLanguages) target.languages.add(entry.name);
+    for (const _theme of resolvedThemes) target.themes.add(input.theme);
+    const id = nextJobId++;
+    return await new Promise<string>((resolve, reject) => {
+      const cleanup = () => {
+        input.signal?.removeEventListener("abort", onAbort);
+      };
+      const onAbort = () => {
+        if (!target.pending.delete(id)) return;
         cleanup();
-        resolve(html);
-      },
-      reject: (error) => {
-        cleanup();
-        reject(error);
-      },
+        // Keep physical worker bytes/jobs reserved until acknowledgement or
+        // retirement. Cancelling a Promise alone does not remove worker work.
+        try {
+          target.worker.postMessage({ type: "cancel", id } satisfies CodeHighlightWorkerRequest);
+        } catch {
+          retireSlot(target, new Error("Code highlight cancellation failed."));
+        }
+        reject(abortError());
+      };
+      const timeout = setTimeout(() => {
+        if (!target.sentAssets.has(id)) return;
+        consecutiveFailures++;
+        retireSlot(target, new Error("Code highlighting timed out."));
+      }, CODE_HIGHLIGHT_JOB_TIMEOUT_MS);
+      target.sentAssets.set(id, {
+        languages: resolvedLanguages.map((entry) => entry.name),
+        themes: resolvedThemes.length ? [input.theme] : [],
+        finish: () => {
+          clearTimeout(timeout);
+          release();
+        },
+      });
+      target.pending.set(id, {
+        resolve: (html) => {
+          cleanup();
+          resolve(html);
+        },
+        reject: (error) => {
+          cleanup();
+          reject(error);
+        },
+      });
+      input.signal?.addEventListener("abort", onAbort, { once: true });
+      posted = true;
+      try {
+        target.worker.postMessage({
+          type: "highlight",
+          id,
+          code: input.code,
+          language: effectiveLanguage,
+          theme: input.theme,
+          resolvedLanguages,
+          resolvedThemes,
+        } satisfies CodeHighlightWorkerRequest);
+      } catch {
+        retireSlot(target, new Error("Code highlight dispatch failed."));
+      }
     });
-    input.signal?.addEventListener("abort", onAbort, { once: true });
-    target.worker.postMessage({
-      type: "highlight",
-      id,
-      code: input.code,
-      language: effectiveLanguage,
-      theme: input.theme,
-      resolvedLanguages,
-      resolvedThemes,
-    } satisfies CodeHighlightWorkerRequest);
-  });
+  } finally {
+    if (!posted) release();
+  }
 }
 
 export function setCodeHighlightWorkerFactoryForTests(
   factory: CodeHighlightWorkerFactory | null,
 ): void {
+  factoryGeneration++;
+  diffsModule = undefined;
   if (slot) retireSlot(slot, new Error("Code highlight worker reset."));
+  reservations.clear();
+  reservedBytes = 0;
   workerFactory = factory ?? defaultWorkerFactory;
   consecutiveFailures = 0;
 }

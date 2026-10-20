@@ -1,4 +1,4 @@
-import { MessageId, ThreadId } from "@t3tools/contracts";
+import { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
@@ -11,6 +11,75 @@ const layer = it.layer(
 );
 
 layer("ProjectionThreadMessageRepository", (it) => {
+  it.effect(
+    "appends only to the exact message identity, preserves metadata and creation time, and supports reasoning-only deltas",
+    () =>
+      Effect.gen(function* () {
+        const repository = yield* ProjectionThreadMessageRepository;
+        const threadId = ThreadId.makeUnsafe("append-owner");
+        const messageId = MessageId.makeUnsafe("append-message");
+        const turnId = TurnId.makeUnsafe("append-turn");
+        const createdAt = "2026-10-19T00:00:00.000Z";
+        const updatedAt = "2026-10-19T00:00:01.000Z";
+        const input = {
+          threadId,
+          messageId,
+          turnId,
+          role: "assistant" as const,
+          delta: " \n",
+          updatedAt,
+        };
+        assert.equal(yield* repository.appendStreamingText(input), 0);
+        yield* repository.upsert({
+          messageId,
+          threadId,
+          turnId,
+          role: "assistant",
+          text: "first",
+          isStreaming: false,
+          createdAt,
+          updatedAt: createdAt,
+          skillCall: { name: "review" },
+          attachments: [
+            { type: "image", id: "image", name: "image.png", mimeType: "image/png", sizeBytes: 5 },
+          ],
+        });
+        for (const mismatch of [
+          { threadId: ThreadId.makeUnsafe("another-thread") },
+          { turnId: null },
+          { turnId: TurnId.makeUnsafe("another-turn") },
+          { role: "user" as const },
+        ]) {
+          assert.equal(yield* repository.appendStreamingText({ ...input, ...mismatch }), 0);
+        }
+        assert.equal(yield* repository.appendStreamingText(input), 1);
+        const [plain] = yield* repository.listByThreadId({ threadId });
+        assert.equal(plain?.text, "first \n");
+        assert.equal(plain?.reasoningText, undefined);
+        assert.equal(plain?.createdAt, createdAt);
+        assert.equal(plain?.updatedAt, updatedAt);
+        assert.equal(plain?.isStreaming, true);
+        assert.deepEqual(plain?.skillCall, { name: "review" });
+        assert.equal(plain?.attachments?.[0]?.name, "image.png");
+        assert.equal(
+          yield* repository.appendStreamingText({
+            ...input,
+            delta: "",
+            reasoningDelta: "reason \n",
+          }),
+          1,
+        );
+        assert.equal(
+          (yield* repository.listByThreadId({ threadId }))[0]?.reasoningText,
+          "reason \n",
+        );
+        assert.deepEqual(
+          yield* repository.listByThreadId({ threadId: ThreadId.makeUnsafe("another-thread") }),
+          [],
+        );
+      }),
+  );
+
   it.effect("preserves existing attachments when upsert omits attachments", () =>
     Effect.gen(function* () {
       const repository = yield* ProjectionThreadMessageRepository;

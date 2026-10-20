@@ -18,3 +18,27 @@ export {
  * threads entirely.
  */
 export const MAX_READ_MODEL_ACTIVITIES = 200_000;
+
+import { READ_MODEL_MESSAGE_WARNING_THRESHOLD } from "@t3tools/shared/orchestrationRetention";
+import { Effect } from "effect";
+
+export const observeReadModelRetention = (model: {
+  readonly threads: ReadonlyArray<{
+    readonly messages: ReadonlyArray<{
+      readonly text: string;
+      readonly reasoningText?: string | undefined;
+    }>;
+  }>;
+}) => {
+  let messages = 0;
+  let characters = 0;
+  for (const thread of model.threads)
+    for (const message of thread.messages) {
+      messages++;
+      characters += message.text.length + (message.reasoningText?.length ?? 0);
+    }
+  const fields = { threads: model.threads.length, messages, characters };
+  return messages > READ_MODEL_MESSAGE_WARNING_THRESHOLD
+    ? Effect.logWarning("orchestration read model exceeds message warning threshold", fields)
+    : Effect.logInfo("orchestration read model hydrated", fields);
+};

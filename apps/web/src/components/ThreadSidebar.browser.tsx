@@ -1396,9 +1396,26 @@ describe("Thread sidebar", () => {
     });
     try {
       // Finish startup first so the fixture's bootstrap thread cannot replace Home.
-      await vi.waitFor(() =>
-        expect(useRecoveryStateStore.getState().recoveryEpoch).toBeGreaterThan(0),
-      );
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          unsubscribe();
+          window.clearTimeout(timeout);
+        };
+        const unsubscribe = useRecoveryStateStore.subscribe((state) => {
+          if (state.recoveryEpoch > 0) {
+            cleanup();
+            resolve();
+          }
+        });
+        const timeout = window.setTimeout(() => {
+          cleanup();
+          reject(new Error("Startup recovery did not complete."));
+        }, 10_000);
+        if (useRecoveryStateStore.getState().recoveryEpoch > 0) {
+          cleanup();
+          resolve();
+        }
+      });
       await mounted.router.navigate({ href: url });
       await vi.waitFor(() => {
         expect(mounted.router.state.location.pathname).toBe("/");

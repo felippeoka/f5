@@ -117,7 +117,25 @@ export class OrchestrationListenerCallbackError extends Schema.TaggedErrorClass<
   }
 }
 
+/** Admission rejected before committing intent; retrying the same command is safe. */
+export class OrchestrationOverloadError extends Schema.TaggedErrorClass<OrchestrationOverloadError>()(
+  "OrchestrationOverloadError",
+  {
+    lane: Schema.Literals(["ordinary", "control"]),
+    reason: Schema.Literals(["full", "closed", "superseded"]),
+  },
+) {
+  get retryable(): boolean {
+    return this.reason !== "superseded";
+  }
+  readonly deliveryCertainty = "not_sent";
+  override get message(): string {
+    return `Orchestration ${this.lane} admission is ${this.reason}; the command was not sent.`;
+  }
+}
+
 export type OrchestrationDispatchError =
+  | OrchestrationOverloadError
   | ProjectionRepositoryError
   | OrchestrationCommandIdConflictError
   | OrchestrationCommandInvariantError

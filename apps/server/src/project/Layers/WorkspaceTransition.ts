@@ -1252,6 +1252,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
       return cancel(event.payload.threadId).pipe(Effect.ignore);
     }),
     scope,
+    { startImmediately: true },
   );
   const moveThread: WorkspaceTransitionShape["moveThread"] = (input) =>
     Effect.gen(function* () {

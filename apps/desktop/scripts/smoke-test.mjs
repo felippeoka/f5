@@ -21,9 +21,16 @@ mkdirSync(state, { recursive: true });
 writeFileSync(
   join(state, "settings.json"),
   JSON.stringify({
-    providers: Object.fromEntries(
-      ["codex", "claude", "cursor", "opencode", "grok"].map((id) => [id, { enabled: false }]),
-    ),
+    providers: {
+      ...Object.fromEntries(
+        ["claude", "cursor", "opencode", "grok"].map((id) => [id, { enabled: false }]),
+      ),
+      codex: {
+        enabled: true,
+        binaryPath: resolve(desktopDir, "../../scripts/fixtures/codex-lifecycle-host.mjs"),
+        homePath: join(directory, "codex-home"),
+      },
+    },
     prHub: { pollIntervalSeconds: 0, discoverNotifications: false },
   }),
 );
@@ -452,6 +459,84 @@ try {
       { origin: backendOrigin, expected },
       { timeout: 60_000 },
     );
+  const nativeRequest = (method, body) =>
+    page.evaluate(
+      ({ method, body }) =>
+        new Promise((resolve, reject) => {
+          const socket = new WebSocket(window.desktopBridge.getWsUrl());
+          const controller = new AbortController();
+          const timer = setTimeout(
+            () => finish(new Error(`Desktop smoke request timed out: ${method}`)),
+            15_000,
+          );
+          const finish = (error, value) => {
+            clearTimeout(timer);
+            controller.abort();
+            socket.close();
+            if (error) reject(error);
+            else resolve(value);
+          };
+          socket.addEventListener(
+            "open",
+            () =>
+              socket.send(JSON.stringify({ id: "desktop-smoke", body: { ...body, _tag: method } })),
+            { signal: controller.signal },
+          );
+          socket.addEventListener(
+            "message",
+            (event) => {
+              const response = JSON.parse(String(event.data));
+              if (response.id !== "desktop-smoke") return;
+              finish(response.error ? new Error(response.error.message) : null, response.result);
+            },
+            { signal: controller.signal },
+          );
+          socket.addEventListener(
+            "error",
+            () => finish(new Error("Desktop smoke connection failed")),
+            { signal: controller.signal },
+          );
+          socket.addEventListener(
+            "close",
+            () => finish(new Error("Desktop smoke connection closed")),
+            { signal: controller.signal },
+          );
+        }),
+      { method, body },
+    );
+  const terminalInput = {
+    threadId: "desktop-shutdown-smoke",
+    terminalId: "default",
+    cwd: workspace,
+    cols: 80,
+    rows: 24,
+  };
+  const waitForTerminalOutput = async (marker) => {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const snapshot = await nativeRequest("terminal.snapshot", {
+        threadId: terminalInput.threadId,
+        terminalId: terminalInput.terminalId,
+      });
+      // The echoed shell command contains the marker once. Require actual
+      // subprocess output as well, rather than passing on that echo alone.
+      if ((snapshot?.history.split(marker).length ?? 1) - 1 >= 3) return snapshot;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("Terminal smoke subprocess did not emit output");
+  };
+  const startTerminalStream = async (marker) => {
+    await nativeRequest("terminal.open", terminalInput);
+    const script = `process.stdout.write('BEGIN'+String.fromCharCode(10));setInterval(()=>process.stdout.write('${marker}'+String.fromCharCode(10)),100)`;
+    await nativeRequest("terminal.write", {
+      threadId: terminalInput.threadId,
+      terminalId: terminalInput.terminalId,
+      data: `node -e "${script}"\r`,
+    });
+    return waitForTerminalOutput(marker);
+  };
+  const recoveryTerminalMarker = "F5_BACKEND_RECOVERY_OUTPUT";
+  await startTerminalStream(recoveryTerminalMarker);
   const retainedWsUrl = await page.evaluate(() => window.desktopBridge.getWsUrl());
   const retainedRendererUrl = page.url();
   const recoveryCount = () =>
@@ -471,6 +556,9 @@ try {
   const beforeSecondInstance = recoveryCount();
   await application.evaluate(({ app }) => app.emit("second-instance", {}, [], ""));
   await waitForRecovery(beforeSecondInstance);
+  const restoredTerminal = await nativeRequest("terminal.open", terminalInput);
+  if (!restoredTerminal.history.includes(recoveryTerminalMarker))
+    throw new Error("Backend recovery lost terminal history");
   if ((await page.evaluate(() => window.desktopBridge.getWsUrl())) !== retainedWsUrl)
     throw new Error("Reopening changed the retained window's connection");
   if (
@@ -534,6 +622,55 @@ try {
   page.off("dialog", observeUnloadDialog);
   await page.reload();
   await page.locator('[contenteditable="true"]').waitFor({ timeout: 60000 });
+  const sendProviderPrompt = async (prompt) => {
+    await page.locator('[contenteditable="true"]').fill(prompt);
+    await page.getByRole("button", { name: "Send message", exact: true }).click();
+    await page.getByRole("button", { name: "Stop generation", exact: true }).waitFor();
+  };
+  const stopProviderTurn = async () => {
+    await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Stop generation", exact: true })
+      .waitFor({ state: "hidden" });
+  };
+  await sendProviderPrompt("F5_SMOKE_STREAM stop");
+  await page.getByText("Desktop stream 1", { exact: false }).first().waitFor();
+  await stopProviderTurn();
+  await sendProviderPrompt("F5_SMOKE_APPROVAL");
+  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Approve once", exact: true })
+    .waitFor({ state: "hidden" });
+  await stopProviderTurn();
+  await sendProviderPrompt("F5_SMOKE_STREAM quit");
+  const providerRendererUrl = page.url();
+  const providerSnapshot = await nativeRequest("orchestration.getSnapshot", {});
+  const providerThread = providerSnapshot.threads.find((thread) =>
+    thread.messages.some((message) => message.text === "F5_SMOKE_STREAM quit"),
+  );
+  if (!providerThread) throw new Error("Provider turn did not reach durable orchestration state");
+  const waitForProviderOutput = async () => {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const details = await nativeRequest("orchestration.getThreadDetails", {
+        threadId: providerThread.id,
+      });
+      const output = details.messages.filter((message) => message.role === "assistant");
+      if (output.length >= 3 && output.every((message) => message.text.includes("Desktop stream")))
+        return output;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("Provider stream did not produce persisted output");
+  };
+  await openRoute("#/usage");
+  await waitForTitles("Usage · F5");
+  await page.goto(providerRendererUrl);
+  await page.getByRole("button", { name: "Stop generation", exact: true }).waitFor();
+  const providerMessages = await waitForProviderOutput();
+  const pendingDraft = "Keep this draft through provider and terminal shutdown";
+  await page.locator('[contenteditable="true"]').fill(pendingDraft);
+  const quitTerminalMarker = "F5_DESKTOP_QUIT_OUTPUT";
+  await startTerminalStream(quitTerminalMarker);
   const popupEvent = application.waitForEvent("window");
   await application.evaluate(({ BrowserWindow }) => {
     const popup = new BrowserWindow({ width: 320, height: 240, webPreferences: { sandbox: true } });
@@ -564,6 +701,42 @@ try {
   await pressQuit();
   await pressQuit();
   await closed;
+  // Reopen the same isolated profile after a real app quit with a live PTY.
+  application = await _electron.launch({
+    executablePath: requireDesktop("electron"),
+    args: [wrapper],
+    cwd: directory,
+    env,
+    timeout: 60_000,
+  });
+  electronProcess = application.process();
+  for (const stream of [electronProcess.stdout, electronProcess.stderr])
+    stream?.on("data", (chunk) => {
+      output = (output + chunk.toString()).slice(-65_536);
+    });
+  page = await application.firstWindow({ timeout: 60_000 });
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(providerRendererUrl);
+  await page.locator('[contenteditable="true"]').waitFor({ timeout: 60_000 });
+  const quitHistory = await nativeRequest("terminal.open", terminalInput);
+  if (quitHistory.history.split(quitTerminalMarker).length - 1 < 3)
+    throw new Error("Desktop quit/reopen lost active terminal output");
+  const restoredProviderMessages = await waitForProviderOutput();
+  for (const before of providerMessages) {
+    const after = restoredProviderMessages.find((message) => message.id === before.id);
+    if (!after?.text.startsWith(before.text))
+      throw new Error("Desktop quit/reopen lost provider output");
+  }
+  if ((await page.locator('[contenteditable="true"]').innerText()) !== pendingDraft)
+    throw new Error("Desktop quit/reopen lost the streaming thread's draft");
+  await page
+    .getByRole("button", { name: "Stop generation", exact: true })
+    .waitFor({ state: "hidden", timeout: 15_000 });
+  await nativeRequest("terminal.close", {
+    threadId: terminalInput.threadId,
+    terminalId: terminalInput.terminalId,
+  });
+  if (errors.length) throw new Error(errors.join("\n"));
   console.log(
     artifactDirectory
       ? "Desktop smoke test passed."

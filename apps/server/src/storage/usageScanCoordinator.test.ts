@@ -19,7 +19,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((path) => FS.rm(path, { recursive: true, force: true })));
 });
-test("finishing persistence cannot clear a newer scan's running state", async () => {
+test("joins a scan until persistence finishes before admitting a new scan", async () => {
   const stateDir = await fixture();
   const writeFile = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises"))
     .writeFile;
@@ -59,13 +59,15 @@ test("finishing persistence cannot clear a newer scan's running state", async ()
         yield* Deferred.succeed(releaseFirstScan, undefined);
         yield* Effect.promise(() => writing);
         yield* coordinator.request(true);
-        yield* Deferred.await(entered);
+        expect(calls).toBe(1);
+        expect((yield* coordinator.snapshot).running).toBe(first);
         releaseWrite();
         yield* Deferred.await(first);
         // Finalizers run after completing the first scan's Deferred.
         yield* Effect.yieldNow;
-        expect((yield* coordinator.snapshot).running).not.toBeNull();
+        expect((yield* coordinator.snapshot).running).toBeNull();
         yield* coordinator.request(true);
+        yield* Deferred.await(entered);
         expect(calls).toBe(2);
       }),
     ),
@@ -271,4 +273,39 @@ test("closing the layer scope aborts the underlying walk", async () => {
     ),
   );
   expect(signal?.aborted).toBe(true);
+});
+
+test("accounts for its own persisted file with Windows logical-byte semantics", async () => {
+  const stateDir = await fixture();
+  await FS.writeFile(Path.join(stateDir, "storage-usage.json"), "{}");
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directoryBytes = yield* Effect.promise(async () => (await FS.lstat(stateDir)).size);
+        const coordinator = yield* makeUsageScanCoordinator({
+          stateDir,
+          measureBytes: (stat) => stat.size,
+          scan: () =>
+            Effect.succeed({
+              report: {
+                ...report(),
+                stateDir,
+                totalUsedBytes: directoryBytes + 2,
+                otherBytes: directoryBytes + 2,
+              },
+              persistenceBytes: { file: 2, directory: directoryBytes },
+            }),
+        });
+        yield* coordinator.request(true);
+        const latest = (yield* coordinator.awaitLatest)!.report;
+        const text = yield* Effect.promise(() =>
+          FS.readFile(Path.join(stateDir, "storage-usage.json"), "utf8"),
+        );
+        const directoryAfter = yield* Effect.promise(() => FS.lstat(stateDir));
+        expect(latest.totalUsedBytes).toBe(directoryAfter.size + Buffer.byteLength(text));
+        expect(latest.otherBytes).toBe(latest.totalUsedBytes);
+        expect(JSON.parse(text)).toEqual(latest);
+      }),
+    ),
+  );
 });

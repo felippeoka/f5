@@ -1,3 +1,4 @@
+import type { TextRevision } from "../../lib/streamingTextRevision";
 import { BotIcon, ChevronDownIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -7,6 +8,7 @@ import { cn } from "~/lib/utils";
 
 interface ReasoningSectionProps {
   reasoningText: string;
+  textRevision?: TextRevision | undefined;
   defaultExpanded: boolean;
   isStreaming: boolean;
   cwd: string | undefined;
@@ -14,6 +16,7 @@ interface ReasoningSectionProps {
 
 export function ReasoningSection({
   reasoningText,
+  textRevision,
   defaultExpanded,
   isStreaming,
   cwd,
@@ -52,7 +55,12 @@ export function ReasoningSection({
       <CollapsiblePanel>
         <div className="rounded-lg bg-muted/40 p-3">
           <div className="text-ui text-muted-foreground">
-            <ChatMarkdown text={reasoningText} cwd={cwd} isStreaming={isStreaming} />
+            <ChatMarkdown
+              textRevision={textRevision}
+              text={reasoningText}
+              cwd={cwd}
+              isStreaming={isStreaming}
+            />
           </div>
         </div>
       </CollapsiblePanel>

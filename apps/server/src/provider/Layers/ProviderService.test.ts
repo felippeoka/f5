@@ -1,10 +1,11 @@
+import { ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
+import { ProviderControlTarget } from "../controlTarget.ts";
 import { PreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker.ts";
 import { readPersistedSessionGeneration } from "../sessionCapabilities.ts";
 import { reloadCodexMcpConfigAfterLogin } from "../../mcp/reloadCodexMcpConfigAfterLogin.ts";
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { withProviderThreadAccess } from "../providerThreadAccess.ts";
-import { Deferred } from "effect";
 import { TestClock } from "effect/testing";
 import { ServerSettingsService } from "../../serverSettings";
 import { beginAccountChange, beginProviderUpdate } from "../../profiles/ProviderAccountGuard.ts";
@@ -34,7 +35,7 @@ import {
 } from "@t3tools/contracts";
 import { it, assert, vi } from "@effect/vitest";
 
-import { Effect, Fiber, Layer, Metric, Option, PubSub, Ref, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Metric, Option, PubSub, Ref, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -4008,5 +4009,204 @@ it.effect(
     }).pipe(
       Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
     );
+  },
+);
+
+it.effect.each(["interrupt", "approval", "input", "stop"] as const)(
+  "refuses a stale %s target after acquiring provider thread ownership",
+  (control) => {
+    const codex = makeFakeCodexAdapter();
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId(`stale-${control}`);
+      const start = {
+        provider: "codex" as const,
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "full-access" as const,
+      };
+      const first = yield* service.startSession(threadId, start);
+      yield* service.startSession(threadId, start);
+      codex.stopSession.mockClear();
+      const requestId = ApprovalRequestId.makeUnsafe("old-request");
+      const action =
+        control === "stop"
+          ? service.stopSession({ threadId })
+          : control === "interrupt"
+            ? service.interruptTurn({ threadId })
+            : control === "approval"
+              ? service.respondToRequest({ threadId, requestId, decision: "accept" })
+              : service.respondToUserInput({ threadId, requestId, answers: {} });
+      const error = yield* action.pipe(
+        Effect.provideService(ProviderControlTarget, {
+          threadId,
+          provider: "codex",
+          instanceId: "codex",
+          generation: first.capabilities!.generation,
+          activeTurnId: null,
+        }),
+        Effect.flip,
+      );
+      assert.equal(error._tag, "ProviderValidationError");
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+      assert.equal(codex.interruptTurn.mock.calls.length, 0);
+      assert.equal(codex.respondToRequest.mock.calls.length, 0);
+      assert.equal(codex.respondToUserInput.mock.calls.length, 0);
+      assert.equal((yield* service.listSessions()).length, 1);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", codex.adapter]]))),
+    );
+  },
+);
+
+it.live(
+  "shutdown refuses new provider starts and turns while allowing existing session controls",
+  () => {
+    const adapter = makeFakeCodexAdapter();
+    const shutdown = new ShutdownRegistry();
+    const layer = makeProviderServiceLayerForAdapters(new Map([["codex", adapter.adapter]])).pipe(
+      Layer.provide(Layer.succeed(ServerShutdown, shutdown)),
+    );
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId("shutdown-admission");
+      yield* service.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        runtimeMode: "full-access",
+        cwd: process.cwd(),
+      });
+      shutdown.register({
+        name: "test-existing-control",
+        phase: "flush",
+        run: () => Effect.runPromise(service.interruptTurn({ threadId })),
+      });
+      const results = yield* Effect.promise(() => shutdown.run());
+      assert.equal(
+        results.every((result) => result.outcome === "complete"),
+        true,
+      );
+      assert.equal(adapter.interruptTurn.mock.calls.length, 1);
+      const before = adapter.startSession.mock.calls.length;
+      const start = yield* service
+        .startSession(threadId, {
+          threadId,
+          provider: "codex",
+          runtimeMode: "full-access",
+          cwd: process.cwd(),
+        })
+        .pipe(Effect.flip);
+      assert.equal(start._tag, "ProviderTurnDeliveryError");
+      const send = yield* service
+        .sendTurn({ threadId, input: "not sent", attachments: [] })
+        .pipe(Effect.flip);
+      assert.equal(send._tag, "ProviderTurnDeliveryError");
+      if (send._tag === "ProviderTurnDeliveryError") assert.equal(send.certainty, "not_sent");
+      const prompt = yield* service
+        .runOneOffPrompt({ threadId, provider: "codex", prompt: "not sent" })
+        .pipe(Effect.flip);
+      assert.equal(prompt._tag, "ProviderTurnDeliveryError");
+      assert.equal(adapter.startSession.mock.calls.length, before);
+      assert.equal(adapter.sendTurn.mock.calls.length, 0);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  },
+);
+
+it.effect(
+  "refuses turns with durable incomplete history until the matching recovery is acknowledged",
+  () => {
+    const adapter = makeFakeCodexAdapter();
+    const layer = makeProviderServiceLayerForAdapters(new Map([["codex", adapter.adapter]]));
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("durable-incomplete-history");
+      const started = yield* service.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        runtimeMode: "full-access",
+        cwd: process.cwd(),
+      });
+      const instanceId = ProviderInstanceId.make("codex");
+      const generation = started.capabilities!.generation;
+      yield* directory.updateHistoryReconciliationIfCurrent({
+        threadId,
+        instanceId,
+        generation,
+        marker: { eventId: "lost", turnId: "turn-old", historyIdentity: "native-thread" },
+      });
+      const error = yield* service
+        .sendTurn({ threadId, input: "wait for history", attachments: [] })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "ProviderTurnDeliveryError");
+      if (error._tag === "ProviderTurnDeliveryError") {
+        assert.equal(error.certainty, "not_sent");
+        assert.equal(error.retryable, false);
+      }
+      assert.equal(adapter.sendTurn.mock.calls.length, 0);
+      const acknowledge = service.acknowledgeHistoryReconciliation!;
+      const recovery = {
+        threadId,
+        markerId: "lost",
+        historyIdentity: "native-thread",
+        instanceId,
+        generation,
+      };
+      assert.isFalse(yield* acknowledge({ ...recovery, generation: generation - 1 }));
+      assert.isFalse(yield* acknowledge({ ...recovery, markerId: "different" }));
+      assert.isFalse(yield* acknowledge({ ...recovery, historyIdentity: "unrelated" }));
+      assert.isTrue(yield* acknowledge(recovery));
+      yield* service.sendTurn({ threadId, input: "history repaired", attachments: [] });
+      assert.equal(adapter.sendTurn.mock.calls.length, 1);
+    }).pipe(Effect.provide(layer));
+  },
+);
+
+it.live(
+  "a provider shutdown failure does not cancel sibling stops or masquerade as success",
+  () => {
+    const failing = makeFakeCodexAdapter("codex"),
+      healthy = makeFakeCodexAdapter("opencode");
+    const shutdown = new ShutdownRegistry();
+    failing.stopAll.mockReturnValue(
+      Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: "codex",
+          method: "stopAll",
+          detail: "injected stop failure",
+        }),
+      ),
+    );
+    const layer = makeProviderServiceLayerForAdapters(
+      new Map([
+        ["codex", failing.adapter],
+        ["opencode", healthy.adapter],
+      ]),
+    ).pipe(Layer.provide(Layer.succeed(ServerShutdown, shutdown)));
+    return Effect.gen(function* () {
+      const started = yield* Deferred.make<void>(),
+        release = yield* Deferred.make<void>();
+      let finished = false;
+      healthy.stopAll.mockImplementation(() =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.andThen(
+            Effect.sync(() => {
+              finished = true;
+            }),
+          ),
+        ),
+      );
+      yield* ProviderService;
+      const closing = yield* Effect.forkChild(Effect.promise(() => shutdown.run()));
+      yield* Deferred.await(started);
+      assert.isFalse(finished);
+      yield* Deferred.succeed(release, undefined);
+      const results = yield* Fiber.join(closing);
+      assert.isTrue(finished);
+      assert.equal(failing.stopAll.mock.calls.length, 1);
+      assert.equal(healthy.stopAll.mock.calls.length, 1);
+      assert.equal(results.find((result) => result.name === "providers")?.outcome, "failed");
+    }).pipe(Effect.provide(layer), Effect.scoped);
   },
 );

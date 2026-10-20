@@ -1,3 +1,6 @@
+import { createPersistentOrchestrationSystem } from "../testUtils/persistentOrchestration.ts";
+import { AcceptedShutdownWork, ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
+import { ProviderControlTarget } from "../../provider/controlTarget.ts";
 import { WorkspaceWriteContext } from "../../project/workspaceTransitionContext.ts";
 import { workflowArchiveFixture } from "../workflowArchive.testUtils.ts";
 import { workflowEntries, reconcileWorkflowArchives } from "../workflowArchiveLifecycle.ts";
@@ -26,17 +29,25 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Deferred, Effect, Layer, ManagedRuntime, Metric, Queue, Stream, Tracer } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Scope,
+  Layer,
+  ManagedRuntime,
+  Metric,
+  Queue,
+  Stream,
+  Tracer,
+} from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
-import {
-  makeSqlitePersistenceLive,
-  SqlitePersistenceMemory,
-} from "../../persistence/Layers/Sqlite.ts";
+import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
@@ -107,6 +118,7 @@ async function createOrchestrationSystem(input?: {
   readonly git?: GitCoreShape;
   readonly queue?: NextTurnQueueStoreShape;
   readonly diskSpaceHold?: { current: string | null };
+  readonly shutdown?: ShutdownRegistry;
 }) {
   if (input?.tracePath) {
     fs.mkdirSync(path.dirname(input.tracePath), { recursive: true });
@@ -123,6 +135,7 @@ async function createOrchestrationSystem(input?: {
       )
     : Layer.empty;
   const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provide(input?.shutdown ? Layer.succeed(ServerShutdown, input.shutdown) : Layer.empty),
     Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
@@ -143,37 +156,6 @@ async function createOrchestrationSystem(input?: {
     engine,
     sql,
     transitions: await runtime.runPromise(Effect.service(WorkspaceTransitions)),
-    run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
-    dispose: () => runtime.dispose(),
-  };
-}
-
-async function createPersistentOrchestrationSystem(input: {
-  readonly dbPath: string;
-  readonly eventStoreLayer?: Layer.Layer<OrchestrationEventStore, never, SqlClient.SqlClient>;
-  readonly projectionSnapshotQueryLayer?: Layer.Layer<
-    ProjectionSnapshotQuery,
-    never,
-    SqlClient.SqlClient
-  >;
-}) {
-  const persistenceLayer = makeSqlitePersistenceLive(input.dbPath).pipe(
-    Layer.provide(NodeServices.layer),
-  );
-  const orchestrationLayer = OrchestrationEngineLive.pipe(
-    Layer.provide(input.projectionSnapshotQueryLayer ?? OrchestrationProjectionSnapshotQueryLive),
-    Layer.provide(OrchestrationProjectionPipelineLive),
-    Layer.provide(input.eventStoreLayer ?? OrchestrationEventStoreLive),
-    Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provideMerge(persistenceLayer),
-    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
-    Layer.provideMerge(NodeServices.layer),
-  );
-  const runtime = ManagedRuntime.make(orchestrationLayer);
-  const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
-  return {
-    engine,
-    sql: await runtime.runPromise(Effect.service(SqlClient.SqlClient)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -2182,4 +2164,483 @@ describe("usage recovery stop durability", () => {
       }
     },
   );
+});
+
+describe("command admission", () => {
+  it("rejects an oversized ordinary command before committing any intent", async () => {
+    const system = await createOrchestrationSystem();
+    try {
+      const failure = await system.run(
+        system.engine
+          .dispatch({
+            type: "project.create",
+            commandId: CommandId.makeUnsafe("oversized"),
+            projectId: asProjectId("oversized-project"),
+            title: "x".repeat(32 * 1024 * 1024),
+            workspaceRoot: process.cwd(),
+            createdAt: now(),
+          })
+          .pipe(Effect.flip),
+      );
+      expect(failure).toMatchObject({
+        _tag: "OrchestrationOverloadError",
+        lane: "ordinary",
+        retryable: true,
+        deliveryCertainty: "not_sent",
+      });
+      expect((await system.run(system.engine.getReadModel())).snapshotSequence).toBe(0);
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      await system.dispose();
+    }
+  });
+  it("a stop overtakes queued starts and atomically rejects unsent durable deliveries", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("cancel-project"),
+      threadId = ThreadId.makeUnsafe("cancel-thread");
+    let maintenance: Scope.Closeable | undefined;
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cancel-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("cancel-thread-create"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      maintenance = await system.run(system.engine.acquireMaintenanceLock());
+      const start = (id: string) =>
+        system.run(
+          system.engine
+            .dispatch({
+              type: "thread.turn.start",
+              commandId: CommandId.makeUnsafe(id),
+              threadId,
+              message: { messageId: asMessageId(id), role: "user", text: id, attachments: [] },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              createdAt: now(),
+            })
+            .pipe(Effect.exit),
+        );
+      const first = start("active-start");
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(1);
+      const second = start("queued-start");
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(2);
+      const stop = system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("overtaking-stop"),
+          threadId,
+          createdAt: now(),
+        }),
+      );
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(3);
+      await system.run(Scope.close(maintenance, Exit.void));
+      maintenance = undefined;
+      expect(Exit.isSuccess(await first)).toBe(true);
+      expect(await second).toMatchObject({ _tag: "Failure" });
+      await stop;
+      const model = await system.run(system.engine.getReadModel());
+      expect(model.threads[0]!.messages.map((message) => message.id)).toEqual(["active-start"]);
+      const deliveries = await system.run(
+        system.sql<{
+          state: string;
+          certainty: string;
+        }>`SELECT state, certainty FROM provider_turn_deliveries`,
+      );
+      expect(deliveries).toEqual([{ state: "rejected", certainty: "not_sent" }]);
+      await system.run(system.engine.completeControl!("overtaking-stop"));
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      if (maintenance) await system.run(Scope.close(maintenance, Exit.void));
+      await system.dispose();
+    }
+  });
+  it("preserves command-id conflicts while a control reservation is still held", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("conflict-project"),
+      firstThread = ThreadId.makeUnsafe("conflict-a"),
+      secondThread = ThreadId.makeUnsafe("conflict-b");
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("conflict-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      for (const threadId of [firstThread, secondThread])
+        await system.run(
+          system.engine.dispatch({
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe(threadId),
+            threadId,
+            projectId,
+            title: "Thread",
+            model: "gpt-5-codex",
+            runtimeMode: "approval-required",
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            branch: null,
+            worktreePath: null,
+            createdAt: now(),
+          }),
+        );
+      const commandId = CommandId.makeUnsafe("shared-control-id");
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId,
+          threadId: firstThread,
+          createdAt: now(),
+        }),
+      );
+      const conflict = await system.run(
+        system.engine
+          .dispatch({
+            type: "thread.session.stop",
+            commandId,
+            threadId: secondThread,
+            createdAt: now(),
+          })
+          .pipe(Effect.flip),
+      );
+      expect(conflict).toMatchObject({
+        _tag: "OrchestrationCommandIdConflictError",
+        receiptAggregateId: firstThread,
+        commandAggregateId: secondThread,
+      });
+      expect(system.engine.inspectQueue!().entries).toBe(1);
+      await system.run(system.engine.completeControl!(commandId));
+    } finally {
+      await system.dispose();
+    }
+  });
+  it("a stop cancels older queued starts while retaining a start admitted afterwards", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("ordered-project"),
+      threadId = ThreadId.makeUnsafe("ordered-thread");
+    let maintenance: Scope.Closeable | undefined;
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("ordered-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("ordered-thread-create"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      maintenance = await system.run(system.engine.acquireMaintenanceLock());
+      const blocker = system.run(
+        system.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.makeUnsafe("ordered-blocker"),
+          threadId,
+          title: "Blocker",
+        }),
+      );
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(1);
+      const start = (id: string) =>
+        system.run(
+          system.engine
+            .dispatch({
+              type: "thread.turn.start",
+              commandId: CommandId.makeUnsafe(id),
+              threadId,
+              message: { messageId: asMessageId(id), role: "user", text: id, attachments: [] },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              createdAt: now(),
+            })
+            .pipe(Effect.exit),
+        );
+      const older = start("older");
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(2);
+      const stop = system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("ordered-stop"),
+          threadId,
+          createdAt: now(),
+        }),
+      );
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(3);
+      const newer = start("newer");
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(4);
+      await system.run(Scope.close(maintenance, Exit.void));
+      maintenance = undefined;
+      await blocker;
+      await stop;
+      expect(Exit.isFailure(await older)).toBe(true);
+      expect(Exit.isSuccess(await newer)).toBe(true);
+      expect(
+        (await system.run(system.engine.getReadModel())).threads[0]!.messages.map(
+          (message) => message.id,
+        ),
+      ).toEqual(["newer"]);
+      await system.run(system.engine.completeControl!("ordered-stop"));
+    } finally {
+      if (maintenance) await system.run(Scope.close(maintenance, Exit.void));
+      await system.dispose();
+    }
+  });
+  it("persists a control's outcome ahead of a saturated ordinary queue using its existing reservation", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("saturated-project"),
+      threadId = ThreadId.makeUnsafe("saturated-thread");
+    let maintenance: Scope.Closeable | undefined;
+    const bulk: Array<Promise<unknown>> = [];
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("saturated-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("saturated-thread-create"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      const commandId = CommandId.makeUnsafe("saturated-stop");
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId,
+          threadId,
+          createdAt: now(),
+        }),
+      );
+      maintenance = await system.run(system.engine.acquireMaintenanceLock());
+      let finished = 0;
+      for (let index = 0; index < 1024; index++)
+        bulk.push(
+          system
+            .run(
+              system.engine
+                .dispatch({
+                  type: "thread.meta.update",
+                  commandId: CommandId.makeUnsafe("saturated-bulk"),
+                  threadId,
+                  title: "Metadata",
+                })
+                .pipe(Effect.exit),
+            )
+            .then((result) => {
+              finished++;
+              return result;
+            }),
+        );
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(1025);
+      const beforeBytes = system.engine.inspectQueue!().bytes;
+      const outcome = system.run(
+        system.engine
+          .dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.makeUnsafe("saturated-stop-result"),
+            threadId,
+            session: {
+              threadId,
+              status: "stopped",
+              providerName: "codex",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: now(),
+            },
+            createdAt: now(),
+          })
+          .pipe(
+            Effect.provideService(ProviderControlTarget, system.engine.controlOrigin!(commandId)),
+            Effect.exit,
+          ),
+      );
+      await expect.poll(() => system.engine.inspectQueue!().bytes).toBeGreaterThan(beforeBytes);
+      await system.run(Scope.close(maintenance, Exit.void));
+      maintenance = undefined;
+      expect(Exit.isSuccess(await outcome)).toBe(true);
+      expect(finished).toBeLessThan(1024);
+      await Promise.all(bulk);
+      await system.run(system.engine.completeControl!(commandId));
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      if (maintenance) await system.run(Scope.close(maintenance, Exit.void));
+      await Promise.allSettled(bulk);
+      await system.dispose();
+    }
+  });
+  it("rejects new work on shutdown while accepted source work can persist through producer closure", async () => {
+    const shutdown = new ShutdownRegistry();
+    const system = await createOrchestrationSystem({ shutdown });
+    const projectId = asProjectId("shutdown-project");
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("shutdown-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      shutdown.register({
+        name: "fixture-source",
+        phase: "producers",
+        run: async () => {
+          expect(
+            await system.run(
+              system.engine
+                .dispatch({
+                  type: "project.meta.update",
+                  commandId: CommandId.makeUnsafe("shutdown-new-work"),
+                  projectId,
+                  title: "Rejected",
+                })
+                .pipe(Effect.flip),
+            ),
+          ).toMatchObject({ _tag: "OrchestrationOverloadError", reason: "closed" });
+          await system.run(
+            system.engine
+              .dispatch({
+                type: "project.meta.update",
+                commandId: CommandId.makeUnsafe("shutdown-source-work"),
+                projectId,
+                title: "Final source output",
+              })
+              .pipe(Effect.provideService(AcceptedShutdownWork, true)),
+          );
+        },
+      });
+      const results = await shutdown.run();
+      expect(results.every((result) => result.outcome === "complete")).toBe(true);
+      expect((await system.run(system.engine.getReadModel())).projects[0]!.title).toBe(
+        "Final source output",
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+  it("reserves controls before commit and releases slots only after reactor completion", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("control-project"),
+      threadId = ThreadId.makeUnsafe("control-thread");
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("control-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("control-thread-create"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      for (let index = 0; index < 64; index++)
+        await system.run(
+          system.engine.dispatch({
+            type: "thread.session.stop",
+            commandId: CommandId.makeUnsafe(`control-${index}`),
+            threadId,
+            createdAt: now(),
+          }),
+        );
+      const sequence = (await system.run(system.engine.getReadModel())).snapshotSequence;
+      expect(
+        await system.run(
+          system.engine
+            .dispatch({
+              type: "thread.session.stop",
+              commandId: CommandId.makeUnsafe("control-full"),
+              threadId,
+              createdAt: now(),
+            })
+            .pipe(Effect.flip),
+        ),
+      ).toMatchObject({ _tag: "OrchestrationOverloadError", lane: "control" });
+      expect((await system.run(system.engine.getReadModel())).snapshotSequence).toBe(sequence);
+      await system.run(system.engine.completeControl!("control-0"));
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("control-recovered"),
+          threadId,
+          createdAt: now(),
+        }),
+      );
+      expect(system.engine.inspectQueue!().entries).toBe(64);
+      for (let index = 1; index < 64; index++)
+        await system.run(system.engine.completeControl!(`control-${index}`));
+      await system.run(system.engine.completeControl!("control-recovered"));
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      await system.dispose();
+    }
+  });
 });

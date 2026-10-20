@@ -42,6 +42,10 @@ const HeldLifecycleLocks = ServiceMap.Reference<ReadonlySet<string>>(
   { defaultValue: () => new Set<string>() },
 );
 
+/** Detached background work must acquire its own leases after its caller returns. */
+export const withoutLifecycleLocks = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.provideService(HeldLifecycleLocks, new Set<string>()));
+
 const locks = new Map<string, { semaphore: Semaphore.Semaphore; users: number }>();
 
 function withKeyedLock<A, E, R>(key: string, action: Effect.Effect<A, E, R>) {

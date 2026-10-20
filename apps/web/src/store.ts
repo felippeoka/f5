@@ -1,3 +1,10 @@
+import { registerBrowserResourceReader } from "./lib/performanceCounters";
+import {
+  withHistoryCoverage,
+  canHydrateThreadTail,
+  tailEntityKeys,
+  type ThreadDetailCoverage,
+} from "./orchestration/detailCoverage";
 import type { OrchestrationStartupSnapshot } from "@t3tools/contracts";
 import { resolveProjectModel } from "./orchestrationState";
 import { Fragment, type ReactNode, createElement, useEffect } from "react";
@@ -24,7 +31,7 @@ import {
   type TurnDiffSummary,
 } from "./types";
 import { Debouncer } from "@tanstack/react-pacer";
-import { applyDomainEvent, taskItemsEqual } from "./applyDomainEvent";
+import { applyDomainEvent, createDomainEventBatch, taskItemsEqual } from "./applyDomainEvent";
 import {
   areUnknownEqual,
   arraysShallowEqual,
@@ -45,6 +52,9 @@ export interface AppState {
   investigationWorkflows: InvestigationWorkflow[];
   threadsHydrated: boolean;
   lastAppliedSequence: number;
+  backendGeneration?: number | undefined;
+  backendIncarnation?: string | undefined;
+  detailCoverageByThreadId?: ReadonlyMap<ThreadId, ThreadDetailCoverage>;
   pinRevision?: number;
   detailEventBufferByThreadId: Map<ThreadId, ThreadDetailEventBuffer>;
   /**
@@ -59,7 +69,7 @@ export interface AppState {
    * takes a ticket when it starts so an older read never overwrites a newer
    * one. Missing means no ticketed read has landed yet.
    */
-  rewindDraftReads?: RewindDraftReadState;
+  rewindDraftReads?: RewindDraftReadState | undefined;
 }
 
 export interface RewindDraftReadState {
@@ -100,6 +110,8 @@ function createInitialState(): AppState {
     investigationWorkflows: [],
     threadsHydrated: false,
     lastAppliedSequence: 0,
+    detailCoverageByThreadId: new Map(),
+    rewindDraftReads: undefined,
     pinRevision: 0,
     detailEventBufferByThreadId: new Map(),
     changedFilesExpandedByThreadId: { ...persistedChangedFilesExpandedByThreadId },
@@ -113,6 +125,8 @@ const persistedChangedFilesExpandedByThreadId: Record<string, boolean> = {};
 let persistedProjectStateUsesLegacyShape = false;
 
 interface ThreadDetailEventBuffer {
+  readonly bytes?: number;
+  readonly overflowSequence?: number | undefined;
   readonly events: ReadonlyArray<OrchestrationEvent>;
   readonly retainers: number;
 }
@@ -1228,6 +1242,7 @@ export function beginThreadDetailLoad(state: AppState, threadId: ThreadId): AppS
   const existing = state.detailEventBufferByThreadId.get(threadId);
   const detailEventBufferByThreadId = new Map(state.detailEventBufferByThreadId);
   detailEventBufferByThreadId.set(threadId, {
+    ...existing,
     events: existing?.events ?? [],
     retainers: (existing?.retainers ?? 0) + 1,
   });
@@ -1252,7 +1267,7 @@ export function clearThreadDetailBuffer(state: AppState, threadId: ThreadId): Ap
   return { ...state, detailEventBufferByThreadId };
 }
 
-function dropThreadDetailBuffer(state: AppState, threadId: ThreadId): AppState {
+export function dropThreadDetailBuffer(state: AppState, threadId: ThreadId): AppState {
   if (!state.detailEventBufferByThreadId.has(threadId)) {
     return state;
   }
@@ -1280,7 +1295,11 @@ export function invalidateThreadDetails(
     };
   });
 
-  if (!threadsChanged && state.detailEventBufferByThreadId.size === 0) {
+  if (
+    !threadsChanged &&
+    state.detailEventBufferByThreadId.size === 0 &&
+    (state.detailCoverageByThreadId?.size ?? 0) === 0
+  ) {
     return state;
   }
 
@@ -1288,6 +1307,7 @@ export function invalidateThreadDetails(
     ...state,
     threads: threadsChanged ? threads : state.threads,
     detailEventBufferByThreadId: new Map(),
+    detailCoverageByThreadId: new Map(),
   };
 }
 
@@ -1328,7 +1348,9 @@ export function evictThreadDetails(state: AppState, threadIds: Iterable<ThreadId
   if (!threadsChanged) {
     return state;
   }
-  let nextState: AppState = { ...state, threads };
+  const detailCoverageByThreadId = new Map(state.detailCoverageByThreadId);
+  for (const id of evictIds) detailCoverageByThreadId.delete(id);
+  let nextState: AppState = { ...state, threads, detailCoverageByThreadId };
   for (const threadId of evictIds) {
     nextState = dropThreadDetailBuffer(nextState, threadId);
   }
@@ -1365,6 +1387,7 @@ export function syncStartupSnapshot(
       ? state.rewindDraftReads
       : advanceSnapshotDraftTicket(state.rewindDraftReads, ticket);
   const threads = arraysShallowEqual(nextThreads, state.threads) ? state.threads : nextThreads;
+  const retainedThreadIds = new Set(nextThreads.map((thread) => thread.id));
   return {
     ...state,
     projects,
@@ -1380,6 +1403,9 @@ export function syncStartupSnapshot(
     threads,
     pinRevision: readModel.pinRevision ?? 0,
     threadsHydrated: true,
+    detailCoverageByThreadId: new Map(
+      [...(state.detailCoverageByThreadId ?? [])].filter(([id]) => retainedThreadIds.has(id)),
+    ),
     lastAppliedSequence: Math.max(state.lastAppliedSequence, readModel.snapshotSequence),
     ...(rewindDraftReads ? { rewindDraftReads } : {}),
   };
@@ -1403,7 +1429,6 @@ export function syncThreadTailDetails(
   state: AppState,
   threadId: ThreadId,
   details: OrchestrationThreadTailDetails,
-  options?: { advanceLastAppliedSequence?: boolean },
 ): AppState {
   const existingThread = state.threads.find((thread) => thread.id === threadId);
   if (!existingThread) {
@@ -1411,16 +1436,10 @@ export function syncThreadTailDetails(
   }
   const detailBuffer = state.detailEventBufferByThreadId.get(threadId);
   const bufferedEvents = detailBuffer?.events ?? [];
-  const detailSequenceIsStale = details.detailSequence < state.lastAppliedSequence;
-  if (detailBuffer === undefined && detailSequenceIsStale) {
-    return state;
-  }
+  const coverage = state.detailCoverageByThreadId?.get(threadId);
+  if (!canHydrateThreadTail(state, threadId, details)) return state;
 
   const detailFields = mapThreadTailFieldsFromReadModel(details, existingThread);
-  // Thread-tail RPCs can hydrate one thread without proving that the router
-  // has actually observed every intervening global event. Background live
-  // warms therefore opt out of advancing the app-wide sequence cursor.
-  const advanceLastAppliedSequence = options?.advanceLastAppliedSequence ?? true;
   const threads = updateThread(state.threads, threadId, (thread) => {
     if (thread !== existingThread) {
       return thread;
@@ -1458,18 +1477,25 @@ export function syncThreadTailDetails(
     };
   });
 
-  let nextState =
-    threads === state.threads
-      ? !advanceLastAppliedSequence || state.lastAppliedSequence >= details.detailSequence
-        ? state
-        : { ...state, lastAppliedSequence: details.detailSequence }
-      : {
-          ...state,
-          threads,
-          ...(advanceLastAppliedSequence
-            ? { lastAppliedSequence: Math.max(state.lastAppliedSequence, details.detailSequence) }
-            : {}),
-        };
+  const detailCoverageByThreadId = new Map(state.detailCoverageByThreadId);
+  const replacedKeys = tailEntityKeys(details);
+  const retainedKeys = tailEntityKeys({
+    ...detailFields,
+    checkpoints: detailFields.turnDiffSummaries,
+  });
+  detailCoverageByThreadId.set(threadId, {
+    tailSequence: details.detailSequence,
+    latestMutation: Math.max(coverage?.latestMutation ?? 0, details.detailSequence),
+    // Tail merges retain already-backfilled rows. Keep newer coverage for
+    // those rows, while replaced tail rows are covered by tailSequence.
+    entities: new Map(
+      [...(coverage?.entities ?? [])].filter(
+        ([key, sequence]) =>
+          sequence > details.detailSequence && !replacedKeys.has(key) && retainedKeys.has(key),
+      ),
+    ),
+  });
+  let nextState: AppState = { ...state, threads, detailCoverageByThreadId };
   nextState = dropThreadDetailBuffer(nextState, threadId);
 
   if (bufferedEvents.length === 0) {
@@ -1686,9 +1712,7 @@ export function prependOlderThreadHistoryPage(
     existingHistory.oldestLoadedCommandExecutionCursor ===
       nextHistory.oldestLoadedCommandExecutionCursor
   ) {
-    return state.lastAppliedSequence >= page.detailSequence
-      ? state
-      : { ...state, lastAppliedSequence: page.detailSequence };
+    return state;
   }
 
   const threads = updateThread(state.threads, threadId, (thread) =>
@@ -1703,11 +1727,7 @@ export function prependOlderThreadHistoryPage(
           history: nextHistory,
         },
   );
-  return {
-    ...state,
-    threads,
-    lastAppliedSequence: Math.max(state.lastAppliedSequence, page.detailSequence),
-  };
+  return withHistoryCoverage({ ...state, threads }, threadId, page, state);
 }
 
 export function prependOlderThreadActivitiesPage(
@@ -1751,19 +1771,13 @@ export function prependOlderThreadActivitiesPage(
     existingHistory.hasOlderActivities === hasOlderActivities &&
     areUnknownEqual(existingHistory.oldestLoadedActivityCursor, oldestLoadedActivityCursor)
   ) {
-    return state.lastAppliedSequence >= page.detailSequence
-      ? state
-      : { ...state, lastAppliedSequence: page.detailSequence };
+    return state;
   }
 
   const threads = updateThread(state.threads, threadId, (thread) =>
     thread !== existingThread ? thread : { ...thread, activities, history: nextHistory },
   );
-  return {
-    ...state,
-    threads,
-    lastAppliedSequence: Math.max(state.lastAppliedSequence, page.detailSequence),
-  };
+  return withHistoryCoverage({ ...state, threads }, threadId, page, state);
 }
 
 export function markThreadHistoryBackfilling(state: AppState, threadId: ThreadId): AppState {
@@ -1845,7 +1859,10 @@ export function drainBufferedThreadDetailEvents(
   threadId: ThreadId,
   detailSequence: number,
 ): AppState {
-  const bufferedEvents = state.detailEventBufferByThreadId.get(threadId)?.events;
+  const buffer = state.detailEventBufferByThreadId.get(threadId);
+  if (buffer?.overflowSequence !== undefined && buffer.overflowSequence > detailSequence)
+    return state;
+  const bufferedEvents = buffer?.events;
   const stateWithoutBuffer = dropThreadDetailBuffer(state, threadId);
   if (!bufferedEvents || bufferedEvents.length === 0) {
     return stateWithoutBuffer;
@@ -2146,11 +2163,7 @@ interface AppStore extends AppState {
     readModel: OrchestrationStartupSnapshot,
     options?: { rewindDraftReadTicket?: number },
   ) => void;
-  syncThreadTailDetails: (
-    threadId: ThreadId,
-    details: OrchestrationThreadTailDetails,
-    options?: { advanceLastAppliedSequence?: boolean },
-  ) => void;
+  syncThreadTailDetails: (threadId: ThreadId, details: OrchestrationThreadTailDetails) => void;
   prependOlderThreadHistoryPage: (
     threadId: ThreadId,
     page: OrchestrationThreadHistoryPage,
@@ -2177,6 +2190,8 @@ interface AppStore extends AppState {
   syncThreadDetails: (threadId: ThreadId, details: OrchestrationThreadTailDetails) => void;
   beginThreadDetailLoad: (threadId: ThreadId) => void;
   clearThreadDetailBuffer: (threadId: ThreadId) => void;
+  resetThreadDetailBuffer: (threadId: ThreadId) => void;
+  resetBackendState: (incarnation: string) => void;
   drainBufferedThreadDetailEvents: (threadId: ThreadId, detailSequence: number) => void;
   applyDomainEvent: (event: OrchestrationEvent) => void;
   applyDomainEventBatch: (events: ReadonlyArray<OrchestrationEvent>) => void;
@@ -2200,8 +2215,8 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => setThreadRewindDrafts(state, threadId, drafts, ticket)),
   syncStartupSnapshot: (readModel, options) =>
     set((state) => syncStartupSnapshot(state, readModel, options)),
-  syncThreadTailDetails: (threadId, details, options) =>
-    set((state) => syncThreadTailDetails(state, threadId, details, options)),
+  syncThreadTailDetails: (threadId, details) =>
+    set((state) => syncThreadTailDetails(state, threadId, details)),
   prependOlderThreadHistoryPage: (threadId, page, expectedGeneration) =>
     set((state) => prependOlderThreadHistoryPage(state, threadId, page, expectedGeneration)),
   mergeAnchoredThreadHistoryPage: (threadId, page, expectedGeneration) =>
@@ -2224,6 +2239,26 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => syncThreadDetails(state, threadId, details)),
   beginThreadDetailLoad: (threadId) => set((state) => beginThreadDetailLoad(state, threadId)),
   clearThreadDetailBuffer: (threadId) => set((state) => clearThreadDetailBuffer(state, threadId)),
+  resetThreadDetailBuffer: (threadId) =>
+    set((state) => {
+      const existing = state.detailEventBufferByThreadId.get(threadId);
+      const buffers = new Map(state.detailEventBufferByThreadId);
+      if (existing) buffers.set(threadId, { retainers: existing.retainers, events: [] });
+      const threads = updateThread(state.threads, threadId, (thread) => ({
+        ...thread,
+        history: {
+          ...ensureThreadHistoryState(thread.history),
+          generation: ensureThreadHistoryState(thread.history).generation + 1,
+        },
+      }));
+      return { ...state, threads, detailEventBufferByThreadId: buffers };
+    }),
+  resetBackendState: (incarnation) =>
+    set((state) => ({
+      ...createInitialState(),
+      backendIncarnation: incarnation,
+      backendGeneration: (state.backendGeneration ?? 0) + 1,
+    })),
   drainBufferedThreadDetailEvents: (threadId, detailSequence) =>
     set((state) => drainBufferedThreadDetailEvents(state, threadId, detailSequence)),
   applyDomainEvent: (event) =>
@@ -2239,12 +2274,9 @@ export const useStore = create<AppStore>((set) => ({
       if (events.length === 0) {
         return state;
       }
-      // Dedup against the already-committed cursor. The caller (EventRouter)
-      // tracks an enqueued-sequence cursor that advances at enqueue time; if
-      // an external thread-detail sync commits an overlapping range while
-      // events are queued, those events would otherwise re-apply here and
-      // double-append streaming message deltas. This guard matches the
-      // single-event subscriber's "sequence <= latestSequence" early-return.
+      // Hydration never moves this cursor. Only committed stream batches and
+      // global snapshots can deduplicate an entire event across all entities.
+      const batch = createDomainEventBatch();
       const committedBefore = state.lastAppliedSequence;
       let nextState: AppState = state;
       let maxSequence = committedBefore;
@@ -2252,7 +2284,7 @@ export const useStore = create<AppStore>((set) => ({
         if (event.sequence <= committedBefore) {
           continue;
         }
-        nextState = applyDomainEvent(nextState, event);
+        nextState = applyDomainEvent(nextState, event, batch);
         if (event.sequence > maxSequence) {
           maxSequence = event.sequence;
         }
@@ -2283,7 +2315,21 @@ export const useStore = create<AppStore>((set) => ({
 }));
 
 // Persist state changes with debouncing to avoid localStorage thrashing
-useStore.subscribe((state) => debouncedPersistState.maybeExecute(state));
+useStore.subscribe((state, previous) => {
+  const projectsChanged =
+    state.projects !== previous.projects &&
+    (state.projects.length !== previous.projects.length ||
+      state.projects.some(
+        (project, index) =>
+          project.cwd !== previous.projects[index]?.cwd ||
+          project.expanded !== previous.projects[index]?.expanded,
+      ));
+  if (
+    projectsChanged ||
+    state.changedFilesExpandedByThreadId !== previous.changedFilesExpandedByThreadId
+  )
+    debouncedPersistState.maybeExecute(state);
+});
 
 // Flush pending writes synchronously before page unload to prevent data loss.
 if (typeof window !== "undefined") {
@@ -2291,6 +2337,19 @@ if (typeof window !== "undefined") {
     debouncedPersistState.flush();
   });
 }
+
+registerBrowserResourceReader("store", () => {
+  const state = useStore.getState();
+  const buffers = [...state.detailEventBufferByThreadId.values()];
+  return {
+    retainedThreads: state.threads.filter((thread) => thread.messages.length > 0).length,
+    retainedMessages: state.threads.reduce((sum, thread) => sum + thread.messages.length, 0),
+    hydrationBuffers: buffers.length,
+    hydrationEvents: buffers.reduce((sum, buffer) => sum + buffer.events.length, 0),
+    hydrationBytes: buffers.reduce((sum, buffer) => sum + (buffer.bytes ?? 0), 0),
+    coverageThreads: state.detailCoverageByThreadId?.size ?? 0,
+  };
+});
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {

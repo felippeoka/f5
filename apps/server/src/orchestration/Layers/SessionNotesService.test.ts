@@ -1,3 +1,4 @@
+import { ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
 import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
@@ -189,8 +190,10 @@ async function createHarness(input: {
     streamEvents: Stream.empty,
   };
 
+  const shutdown = new ShutdownRegistry();
   const runtime = ManagedRuntime.make(
     SessionNotesServiceLive.pipe(
+      Layer.provide(Layer.succeed(ServerShutdown, shutdown)),
       Layer.provideMerge(Layer.succeed(OrchestrationEngineService, orchestrationEngine)),
       Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
       Layer.provideMerge(ServerSettingsService.layerTest()),
@@ -203,6 +206,7 @@ async function createHarness(input: {
 
   return {
     service,
+    shutdown,
     updateSelection: (selection: ModelSelection) =>
       runtime.runPromise(
         Effect.gen(function* () {
@@ -230,6 +234,23 @@ describe("SessionNotesService", () => {
 
   afterEach(async () => {
     await Promise.all(disposers.splice(0).map((dispose) => dispose()));
+  });
+  it("stops source admission before provider exit can schedule new notes", async () => {
+    let requests = 0;
+    const harness = await createHarness({
+      runOneOffPrompt: () =>
+        Effect.sync(() => {
+          requests++;
+          return { text: "invalid" };
+        }),
+    });
+    disposers.push(harness.dispose);
+    expect((await harness.shutdown.run()).every((result) => result.outcome === "complete")).toBe(
+      true,
+    );
+    await harness.emit(makeSessionSetEvent("ready"));
+    await Effect.runPromise(harness.service.drain);
+    expect(requests).toBe(0);
   });
   it("uses a stable independent selection for retries and reads changes on the next refresh", async () => {
     const selections: Array<ModelSelection | undefined> = [];

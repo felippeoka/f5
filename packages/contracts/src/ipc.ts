@@ -1,3 +1,4 @@
+import type { ReportClientDiagnosticsInput } from "./server";
 import type {
   WorktreesMoveThreadInput,
   WorktreesMoveThreadResult,
@@ -406,6 +407,7 @@ import type {
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetStartupSnapshotInput,
   OrchestrationGetStartupSnapshotResult,
+  OrchestrationGetLatestSequenceResult,
   OrchestrationGetThreadCommandExecutionInput,
   OrchestrationGetThreadCommandExecutionResult,
   OrchestrationGetThreadCommandExecutionsInput,
@@ -855,6 +857,7 @@ export interface NativeApi {
     ) => Promise<T | null>;
   };
   server: {
+    reportClientDiagnostics: (input: ReportClientDiagnosticsInput) => Promise<void>;
     getClaudeTranscriptRepair: (input: {
       threadId: ThreadId;
     }) => Promise<{ backupId?: string; canRepair: boolean } | null>;
@@ -1129,6 +1132,7 @@ export interface NativeApi {
     onAdvisoriesUpdated: (callback: (snapshot: PrHubAdvisoriesChanged) => void) => () => void;
   };
   orchestration: {
+    getLatestSequence: () => Promise<OrchestrationGetLatestSequenceResult>;
     getSnapshot: () => Promise<OrchestrationReadModel>;
     getStartupSnapshot: (
       input?: OrchestrationGetStartupSnapshotInput,

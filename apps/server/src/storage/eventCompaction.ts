@@ -29,8 +29,8 @@ import { truncateMiddleByBytes } from "../orchestration/outputTruncation.ts";
  * command, with command output reduced to the compacted copy.
  *
  * The SQLite connection is shared and synchronous, so the scan is paged, every
- * write transaction covers at most {@link MAX_EVENTS_PER_TRANSACTION} events
- * (a large group is split, its kept event rewritten first), and the time
+ * write transaction packs whole groups toward {@link MAX_EVENTS_PER_TRANSACTION}
+ * events (larger groups run alone), and the time
  * budget is checked between pages and transactions. Work stopped by the
  * budget resumes on the next pass: compacted groups are no longer eligible. A
  * group whose payloads cannot be parsed is skipped; a thread that fails is
@@ -46,6 +46,7 @@ export const EVENT_COMPACTION_IDLE_MS = 60 * 60 * 1_000;
 /** Size of the copy of a command's output kept in the event log. */
 export const COMPACTED_COMMAND_OUTPUT_MAX_BYTES = 16 * 1_024;
 export const MAX_EVENTS_PER_TRANSACTION = 2_000;
+export const MAX_EVENTS_PER_GROUP = 50_000;
 export const FAILED_THREAD_RETRY_MS = 24 * 60 * 60 * 1_000;
 const COMPACTED_COMMAND_OUTPUT_HEAD_BYTES = 8 * 1_024;
 const SCAN_PAGE_SIZE = 1_000;
@@ -278,8 +279,9 @@ export const compactThreadEvents = (input: {
             UPDATE orchestration_events SET payload_json = ${op.payloadJson}
             WHERE sequence = ${op.sequence}
           `;
-          return;
+          return { receiptsRemoved: 0, eventsRemoved: 0 };
         }
+        let receiptsRemoved = 0;
         if (op.outputReceipts) {
           const receipts = yield* sql<{ readonly commandId: string }>`
             DELETE FROM orchestration_command_receipts
@@ -290,14 +292,14 @@ export const compactThreadEvents = (input: {
             )
             RETURNING command_id AS "commandId"
           `;
-          totals.receiptsRemoved += receipts.length;
+          receiptsRemoved = receipts.length;
         }
         const removed = yield* sql<{ readonly sequence: number }>`
           DELETE FROM orchestration_events
           WHERE sequence IN ${sql.in(op.sequences)}
           RETURNING sequence
         `;
-        totals.eventsRemoved += removed.length;
+        return { receiptsRemoved, eventsRemoved: removed.length };
       });
 
     const prepareOutputGroup = (group: EventGroup) =>
@@ -469,16 +471,37 @@ export const compactThreadEvents = (input: {
             : group.sequences.length > 1 && !group.lastStreaming,
         );
 
-        // Writes are packed into transactions of at most
-        // MAX_EVENTS_PER_TRANSACTION events; a larger delete is split.
-        let pending: WriteOp[] = [];
+        let pending: Array<{ group: EventGroup; prepared: PreparedGroup }> = [];
         let pendingCost = 0;
         const flush = Effect.gen(function* () {
           if (pending.length === 0) return;
           const batch = pending;
           pending = [];
           pendingCost = 0;
-          yield* sql.withTransaction(Effect.forEach(batch, applyOp, { discard: true }));
+          yield* Effect.uninterruptibleMask((restore) =>
+            restore(
+              sql.withTransaction(
+                Effect.forEach(
+                  batch.flatMap(({ prepared }) => prepared.ops),
+                  applyOp,
+                ),
+              ),
+            ).pipe(
+              Effect.tap((counts) =>
+                Effect.sync(() => {
+                  for (const count of counts) {
+                    totals.eventsRemoved += count.eventsRemoved;
+                    totals.receiptsRemoved += count.receiptsRemoved;
+                  }
+                  for (const { group, prepared } of batch) {
+                    totals.bytesRemoved += prepared.bytesRemoved;
+                    if (group.kind === "output") totals.commandOutputsCompacted++;
+                    else totals.messagesCompacted++;
+                  }
+                }),
+              ),
+            ),
+          );
           yield* Effect.yieldNow;
         });
 
@@ -486,6 +509,15 @@ export const compactThreadEvents = (input: {
           if (outOfTime()) {
             yield* flush;
             return false;
+          }
+          if (group.sequences.length > MAX_EVENTS_PER_GROUP) {
+            totals.groupsSkipped++;
+            yield* Effect.logWarning("event compaction skipped an oversized group", {
+              threadId,
+              groupId: group.id,
+              events: group.sequences.length,
+            });
+            continue;
           }
           const prepared = yield* (
             group.kind === "output" ? prepareOutputGroup(group) : prepareMessageGroup(group)
@@ -506,17 +538,14 @@ export const compactThreadEvents = (input: {
             ),
           );
           if (prepared === null) continue;
-          for (const op of prepared.ops) {
-            if (pendingCost > 0 && pendingCost + opCost(op) > MAX_EVENTS_PER_TRANSACTION) {
-              yield* flush;
-              if (outOfTime()) return false;
-            }
-            pending.push(op);
-            pendingCost += opCost(op);
+          const cost = prepared.ops.reduce((sum, op) => sum + opCost(op), 0);
+          if (pendingCost > 0 && pendingCost + cost > MAX_EVENTS_PER_TRANSACTION) {
+            yield* flush;
+            if (outOfTime()) return false;
           }
-          totals.bytesRemoved += prepared.bytesRemoved;
-          if (group.kind === "output") totals.commandOutputsCompacted += 1;
-          else totals.messagesCompacted += 1;
+          pending.push({ group, prepared });
+          pendingCost += cost;
+          if (pendingCost >= MAX_EVENTS_PER_TRANSACTION) yield* flush;
         }
         yield* flush;
 

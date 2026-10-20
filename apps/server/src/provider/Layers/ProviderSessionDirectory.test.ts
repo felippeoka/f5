@@ -29,6 +29,91 @@ function makeDirectoryLayer<E, R>(persistenceLayer: Layer.Layer<SqlClient.SqlCli
 }
 
 it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryLive", (it) => {
+  it("fences incomplete-history markers and retains them through replacement until exact recovery", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = ThreadId.makeUnsafe("incomplete-history");
+      const instanceId = ProviderInstanceId.make("codex");
+      yield* directory.upsert({
+        threadId,
+        provider: "codex",
+        providerInstanceId: instanceId,
+        runtimePayload: { sessionGeneration: 2, activeTurnId: "turn-2" },
+      });
+      const marker = {
+        eventId: "missing-output",
+        turnId: "turn-2",
+        historyIdentity: "native-thread",
+      };
+      assert.isFalse(
+        yield* directory.updateHistoryReconciliationIfCurrent({
+          threadId,
+          instanceId,
+          generation: 1,
+          marker,
+        }),
+      );
+      assert.isFalse(
+        yield* directory.updateHistoryReconciliationIfCurrent({
+          threadId,
+          instanceId: ProviderInstanceId.make("other"),
+          generation: 2,
+          marker,
+        }),
+      );
+      assert.isTrue(
+        yield* directory.updateHistoryReconciliationIfCurrent({
+          threadId,
+          instanceId,
+          generation: 2,
+          marker,
+        }),
+      );
+      yield* directory.upsert({
+        threadId,
+        provider: "codex",
+        providerInstanceId: instanceId,
+        runtimePayload: { sessionGeneration: 3, activeTurnId: null },
+      });
+      const binding = Option.getOrThrow(yield* directory.getBinding(threadId));
+      assert.deepEqual(
+        (binding.runtimePayload as Record<string, unknown>).historyReconciliationRequired,
+        marker,
+      );
+      assert.isFalse(
+        yield* directory.updateHistoryReconciliationIfCurrent({
+          threadId,
+          instanceId,
+          generation: 2,
+          marker: null,
+          expectedMarkerId: marker.eventId,
+        }),
+      );
+      assert.isFalse(
+        yield* directory.updateHistoryReconciliationIfCurrent({
+          threadId,
+          instanceId,
+          generation: 3,
+          marker: null,
+          expectedMarkerId: "different-recovery",
+        }),
+      );
+      assert.isTrue(
+        yield* directory.updateHistoryReconciliationIfCurrent({
+          threadId,
+          instanceId,
+          generation: 3,
+          marker: null,
+          expectedMarkerId: marker.eventId,
+        }),
+      );
+      const recovered = Option.getOrThrow(yield* directory.getBinding(threadId));
+      assert.equal(
+        (recovered.runtimePayload as Record<string, unknown>).historyReconciliationRequired,
+        null,
+      );
+    }));
+
   it("upserts and reads thread bindings", () =>
     Effect.gen(function* () {
       const directory = yield* ProviderSessionDirectory;

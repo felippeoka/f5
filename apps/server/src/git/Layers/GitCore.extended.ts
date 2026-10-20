@@ -5,7 +5,16 @@ import { createServer } from "node:http";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, FileSystem, Layer, PlatformError, Scope } from "effect";
+import {
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  PlatformError,
+  Scope,
+  ServiceMap,
+} from "effect";
 import { describe, expect, vi } from "vitest";
 
 import { GitServiceLive } from "./GitService.ts";
@@ -33,7 +42,11 @@ function makeTmpDir(
 ): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem | Scope.Scope> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    return yield* fileSystem.makeTempDirectoryScoped({ prefix });
+    const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix });
+    const core = yield* Effect.serviceOption(GitCore);
+    if (core._tag === "Some" && core.value.drainUpstreamRefreshes)
+      yield* Effect.addFinalizer(() => core.value.drainUpstreamRefreshes!(directory));
+    return directory;
   });
 }
 
@@ -93,73 +106,14 @@ function runShellCommand(input: {
 }
 
 const makeIsolatedGitCore = (gitService: GitServiceShape) =>
-  Effect.promise(async () => {
-    const gitServiceLayer = Layer.succeed(GitService, gitService);
+  Effect.gen(function* () {
     const coreLayer = GitCoreLive.pipe(
       Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "f5-git-core-" })),
-      Layer.provide(gitServiceLayer),
+      Layer.provide(Layer.succeed(GitService, gitService)),
       Layer.provide(NodeServices.layer),
     );
-    const core = await Effect.runPromise(Effect.service(GitCore).pipe(Effect.provide(coreLayer)));
-
-    return {
-      readMoveSnapshot: (cwd) => core.readMoveSnapshot(cwd),
-      copyMoveUntracked: (source, target, files) => core.copyMoveUntracked(source, target, files),
-      stashCreate: (cwd) => core.stashCreate(cwd),
-      stashApplySha: (cwd, sha) => core.stashApplySha(cwd, sha),
-      stashPushAll: (cwd, message) => core.stashPushAll(cwd, message),
-      setMoveRef: (cwd, ref, sha) => core.setMoveRef(cwd, ref, sha),
-      deleteMoveRef: (cwd, ref, sha) => core.deleteMoveRef(cwd, ref, sha),
-      cleanMoveCopies: (cwd, snapshot) => core.cleanMoveCopies(cwd, snapshot),
-      listWorktrees: (cwd) => core.listWorktrees(cwd),
-      isDirty: (cwd) => core.isDirty(cwd),
-      inspectCheckoutIdentity: (path) => core.inspectCheckoutIdentity(path),
-      inspectCheckout: (path, options) => core.inspectCheckout(path, options),
-      clearMissingRegistration: (cwd, path) => core.clearMissingRegistration(cwd, path),
-      fastForwardTo: (cwd, sha) => core.fastForwardTo(cwd, sha),
-      initializeWorktreeSubmodules: (path, policy) =>
-        core.initializeWorktreeSubmodules(path, policy),
-      readWorktreePreparation: (path) => core.readWorktreePreparation(path),
-      allocateWorktreePath: (input) => core.allocateWorktreePath(input),
-      isValidBranchName: (name) => core.isValidBranchName(name),
-      resolveAvailableBranchName: (cwd, name) => core.resolveAvailableBranchName(cwd, name),
-      ensureWorktree: (input) => core.ensureWorktree(input),
-      branchExists: (cwd, branch) => core.branchExists(cwd, branch),
-      status: (input) => core.status(input),
-      statusDetails: (cwd) => core.statusDetails(cwd),
-      prepareCommitContext: (cwd, filePaths?) => core.prepareCommitContext(cwd, filePaths),
-      commit: (cwd, subject, body) => core.commit(cwd, subject, body),
-      pushCurrentBranch: (cwd, fallbackBranch) => core.pushCurrentBranch(cwd, fallbackBranch),
-      pullCurrentBranch: (cwd) => core.pullCurrentBranch(cwd),
-      readRangeContext: (cwd, baseBranch) => core.readRangeContext(cwd, baseBranch),
-      readDefaultBranch: (cwd) => core.readDefaultBranch(cwd),
-      readConfigValue: (cwd, key) => core.readConfigValue(cwd, key),
-      listRemotes: (cwd) => core.listRemotes(cwd),
-      listBranches: (input) => core.listBranches(input),
-      createWorktree: (input) => core.createWorktree(input),
-      hasRemote: (cwd) => core.hasRemote(cwd),
-      fetchRemoteBranchCommit: (input) => core.fetchRemoteBranchCommit(input),
-      fetchPullRequestBranch: (input) => core.fetchPullRequestBranch(input),
-      ensureRemote: (input) => core.ensureRemote(input),
-      fetchRemoteBranch: (input) => core.fetchRemoteBranch(input),
-      setBranchUpstream: (input) => core.setBranchUpstream(input),
-      removeWorktree: (input) => core.removeWorktree(input),
-      resolveCommonDir: (cwd) => core.resolveCommonDir(cwd),
-      pruneWorktrees: (cwd) => core.pruneWorktrees(cwd),
-      resolveCommit: (cwd, revision) => core.resolveCommit(cwd, revision),
-      readOperationInProgress: (cwd) => core.readOperationInProgress(cwd),
-      isAncestor: (cwd, ancestor, descendant) => core.isAncestor(cwd, ancestor, descendant),
-      deleteBranchIfAt: (input) => core.deleteBranchIfAt(input),
-      readFileAtRevision: (input) => core.readFileAtRevision(input),
-      listIgnoredEntries: (cwd) => core.listIgnoredEntries(cwd),
-      renameBranch: (input) => core.renameBranch(input),
-      createBranch: (input) => core.createBranch(input),
-      resolveCheckoutTarget: (input) => core.resolveCheckoutTarget(input),
-      checkoutBranch: (input, options = {}) => core.checkoutBranch(input, options),
-      initRepo: (input) => core.initRepo(input),
-      cloneRepository: (input) => core.cloneRepository(input),
-      listLocalBranchNames: (cwd) => core.listLocalBranchNames(cwd),
-    } satisfies GitCoreShape;
+    // Keep service-scoped refresh fibers alive until the surrounding test ends.
+    return ServiceMap.get(yield* Layer.build(Layer.fresh(coreLayer)), GitCore);
   });
 
 function listGitBranches(input: Parameters<GitCoreShape["listBranches"]>[0]) {
@@ -1079,6 +1033,7 @@ it.layer(TestLayer)("git integration", (it) => {
 
         const realGitService = yield* GitService;
         let refreshFetchAttempts = 0;
+        const refreshAttempted = yield* Deferred.make<void>();
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
@@ -1090,17 +1045,16 @@ it.layer(TestLayer)("git integration", (it) => {
                   cwd: input.cwd,
                   detail: "simulated fetch timeout",
                 }),
-              );
+              ).pipe(Effect.ensuring(Deferred.succeed(refreshAttempted, undefined)));
             }
             return realGitService.execute(input);
           },
         });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
-        yield* Effect.promise(() =>
-          vi.waitFor(() => {
-            expect(refreshFetchAttempts).toBe(1);
-          }),
-        );
+        // Checkout intentionally forks refresh. Synchronize with that work
+        // rather than requiring a loaded CI host to admit it within one second.
+        yield* Deferred.await(refreshAttempted);
+        expect(refreshFetchAttempts).toBe(1);
         expect(yield* git(source, ["branch", "--show-current"])).toBe(featureBranch);
       }),
     );
@@ -1127,6 +1081,7 @@ it.layer(TestLayer)("git integration", (it) => {
 
         const realGitService = yield* GitService;
         let refreshFetchAttempts = 0;
+        const refreshAttempted = yield* Deferred.make<void>();
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
@@ -1138,13 +1093,14 @@ it.layer(TestLayer)("git integration", (it) => {
                   cwd: input.cwd,
                   detail: "simulated fetch timeout",
                 }),
-              );
+              ).pipe(Effect.ensuring(Deferred.succeed(refreshAttempted, undefined)));
             }
             return realGitService.execute(input);
           },
         });
 
         const first = yield* core.statusDetails(source);
+        yield* Deferred.await(refreshAttempted);
         const second = yield* core.statusDetails(source);
 
         expect(first.branch).toBe(featureBranch);
@@ -1250,6 +1206,69 @@ it.layer(TestLayer)("git integration", (it) => {
         expect(yield* git(source, ["branch", "--show-current"])).toBe(featureBranch);
         releaseFetch();
       }),
+    );
+
+    it.effect(
+      "returns local status during a hanging refresh and invalidates only after real refresh",
+      () =>
+        Effect.gen(function* () {
+          const remote = yield* makeTmpDir();
+          const source = yield* makeTmpDir();
+          yield* git(remote, ["init", "--bare"]);
+
+          yield* initRepoWithCommit(source);
+          const defaultBranch = (yield* listGitBranches({ cwd: source })).branches.find(
+            (branch) => branch.current,
+          )!.name;
+          yield* git(source, ["remote", "add", "origin", remote]);
+          yield* git(source, ["push", "-u", "origin", defaultBranch]);
+
+          const featureBranch = "feature/background-refresh";
+          yield* git(source, ["checkout", "-b", featureBranch]);
+          yield* writeTextFile(path.join(source, "feature.txt"), "feature base\n");
+          yield* git(source, ["add", "feature.txt"]);
+          yield* git(source, ["commit", "-m", "feature base"]);
+          yield* git(source, ["push", "-u", "origin", featureBranch]);
+
+          const realGitService = yield* GitService;
+          let fetchStarted = false;
+          let releaseFetch!: () => void;
+          const waitForReleasePromise = new Promise<void>((resolve) => {
+            releaseFetch = resolve;
+          });
+          const core = yield* makeIsolatedGitCore({
+            execute: (input) => {
+              if (input.args[0] === "fetch") {
+                fetchStarted = true;
+                return Effect.promise(() =>
+                  waitForReleasePromise.then(() => ({ code: 0, stdout: "", stderr: "" })),
+                );
+              }
+              return realGitService.execute(input);
+            },
+          });
+          const invalidations: string[] = [];
+          const refreshed = yield* Deferred.make<void>();
+          yield* core.subscribeStatusRefresh!((cwd) => {
+            invalidations.push(cwd);
+            Effect.runSync(Deferred.succeed(refreshed, undefined));
+          });
+          const first = yield* core.statusDetails(source);
+          expect(first.branch).toBe(featureBranch);
+          yield* Effect.promise(() =>
+            vi.waitFor(() => {
+              expect(fetchStarted).toBe(true);
+            }),
+          );
+          const second = yield* core.statusDetails(source);
+          expect(second.branch).toBe(featureBranch);
+          expect(invalidations).toEqual([]);
+          releaseFetch();
+          yield* Deferred.await(refreshed);
+          yield* core.statusDetails(source);
+          yield* Effect.yieldNow;
+          expect(invalidations).toEqual([source]);
+        }),
     );
 
     it.effect("throws when branch does not exist", () =>
@@ -2459,43 +2478,40 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
-    it.effect(
-      "refreshes upstream before statusDetails so behind count reflects remote updates",
-      () =>
-        Effect.gen(function* () {
-          const remote = yield* makeTmpDir();
-          const source = yield* makeTmpDir();
-          const clone = yield* makeTmpDir();
-          yield* git(remote, ["init", "--bare"]);
+    it.effect("eventually refreshes upstream counts after returning local status", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir();
+        const source = yield* makeTmpDir();
+        const clone = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
 
-          yield* initRepoWithCommit(source);
-          const initialBranch = (yield* listGitBranches({ cwd: source })).branches.find(
-            (branch) => branch.current,
-          )!.name;
-          yield* git(source, ["remote", "add", "origin", remote]);
-          yield* git(source, ["push", "-u", "origin", initialBranch]);
+        yield* initRepoWithCommit(source);
+        const initialBranch = (yield* listGitBranches({ cwd: source })).branches.find(
+          (branch) => branch.current,
+        )!.name;
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", initialBranch]);
 
-          yield* git(clone, ["clone", remote, "."]);
-          yield* git(clone, ["config", "user.email", "test@test.com"]);
-          yield* git(clone, ["config", "user.name", "Test"]);
-          yield* git(clone, [
-            "checkout",
-            "-B",
-            initialBranch,
-            "--track",
-            `origin/${initialBranch}`,
-          ]);
-          yield* writeTextFile(path.join(clone, "CHANGELOG.md"), "remote change\n");
-          yield* git(clone, ["add", "CHANGELOG.md"]);
-          yield* git(clone, ["commit", "-m", "remote update"]);
-          yield* git(clone, ["push", "origin", initialBranch]);
+        yield* git(clone, ["clone", remote, "."]);
+        yield* git(clone, ["config", "user.email", "test@test.com"]);
+        yield* git(clone, ["config", "user.name", "Test"]);
+        yield* git(clone, ["checkout", "-B", initialBranch, "--track", `origin/${initialBranch}`]);
+        yield* writeTextFile(path.join(clone, "CHANGELOG.md"), "remote change\n");
+        yield* git(clone, ["add", "CHANGELOG.md"]);
+        yield* git(clone, ["commit", "-m", "remote update"]);
+        yield* git(clone, ["push", "origin", initialBranch]);
 
-          const core = yield* GitCore;
-          const details = yield* core.statusDetails(source);
-          expect(details.branch).toBe(initialBranch);
-          expect(details.aheadCount).toBe(0);
-          expect(details.behindCount).toBe(1);
-        }),
+        const core = yield* GitCore;
+        const refreshed = yield* Deferred.make<void>();
+        yield* core.subscribeStatusRefresh!(() => {
+          Effect.runSync(Deferred.succeed(refreshed, undefined));
+        });
+        const details = yield* core.statusDetails(source);
+        expect(details.branch).toBe(initialBranch);
+        expect(details.aheadCount).toBe(0);
+        yield* Deferred.await(refreshed);
+        expect((yield* core.statusDetails(source)).behindCount).toBe(1);
+      }),
     );
 
     it.effect("prepares commit context by auto-staging and creates commit", () =>

@@ -11,7 +11,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Effect, Fiber, Layer, Schema, ServiceMap, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Schema, ServiceMap, Stream } from "effect";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -89,6 +89,72 @@ const start = (harness: Harness, threadId: ThreadId, runtimeMode = "auto-accept-
   });
 
 it.layer(HarnessLayer)("MuseAdapter", (it) => {
+  it.effect("drains final MSP output before its single terminal lifecycle event", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
+        const mock = new MockMspHost();
+        const adapter = yield* makeMuseAdapter(Schema.decodeSync(MuseSettings)({}), {
+          instanceId: INSTANCE,
+          nativeCommandIds: memoryNativeCommandIdStore(),
+          nativeEventLogger: {
+            filePath: "test-msp.log",
+            close: () => Effect.void,
+            write: (value) =>
+              (value as { event?: { method?: string } }).event?.method === "item/delta"
+                ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+                : Effect.void,
+          },
+          openHost: () =>
+            Effect.gen(function* () {
+              const host = yield* Effect.promise(() =>
+                openMspHost({ transport: mock.transport, clientVersion: "test" }),
+              );
+              yield* Effect.addFinalizer(() => Effect.promise(() => host.close()));
+              return { host, stderrTail: () => "final stderr" };
+            }),
+        });
+        const { events, stop } = yield* collect(adapter);
+        const threadId = ThreadId.make("msp-final-output");
+        yield* adapter.startSession({
+          threadId,
+          provider: "muse",
+          cwd: process.cwd(),
+          runtimeMode: "auto-accept-edits",
+        });
+        yield* adapter.sendTurn({ threadId, input: "work" });
+        mock.notify("turn/started", { turnId: "turn-1" });
+        mock.notify("item/delta", { itemId: "final", delta: "last output" });
+        yield* Deferred.await(entered);
+        mock.end();
+        yield* tick();
+        assert.equal(events.filter((event) => event.type === "session.exited").length, 0);
+        yield* Deferred.succeed(release, undefined);
+        for (
+          let attempt = 0;
+          attempt < 100 && !events.some((event) => event.type === "session.exited");
+          attempt++
+        )
+          yield* tick(1);
+        const ordered = events.filter((event) =>
+          ["content.delta", "turn.completed", "session.exited"].includes(event.type),
+        );
+        assert.deepEqual(
+          ordered.map((event) => event.type),
+          ["content.delta", "turn.completed", "session.exited"],
+        );
+        assert.equal(
+          ordered[0]?.type === "content.delta" && ordered[0].payload.delta,
+          "last output",
+        );
+        assert.isFalse(yield* adapter.hasSession(threadId));
+        yield* stop;
+      }),
+    ),
+  );
+
   it.effect("starts with verified permissions and maps the turn lifecycle", () =>
     Effect.gen(function* () {
       const harness = yield* MuseHarness;

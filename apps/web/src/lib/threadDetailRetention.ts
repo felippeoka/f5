@@ -86,12 +86,17 @@ function estimateListBytes(items: ReadonlyArray<object>): number {
 
 /** Estimated size of the detail bodies eviction would drop. */
 export function estimateThreadDetailBytes(
-  thread: Pick<Thread, "messages" | "commandExecutions" | "turnDiffSummaries">,
+  thread: Pick<Thread, "messages" | "commandExecutions" | "turnDiffSummaries"> &
+    Partial<Pick<Thread, "tasks" | "tasksTracking" | "sessionNotes" | "history">>,
 ): number {
   return (
     estimateListBytes(thread.messages) +
     estimateListBytes(thread.commandExecutions) +
-    estimateListBytes(thread.turnDiffSummaries)
+    estimateListBytes(thread.turnDiffSummaries) +
+    estimateListBytes(thread.tasks ?? []) +
+    (thread.tasksTracking ? estimateObjectBytes(thread.tasksTracking) : 0) +
+    (thread.sessionNotes ? estimateObjectBytes(thread.sessionNotes) : 0) +
+    (thread.history ? estimateObjectBytes(thread.history) : 0)
   );
 }
 
@@ -192,6 +197,13 @@ export function enforceThreadDetailRetention(
     pinnedThreadIds: collectPinnedThreadIds(state),
     lastUsedAtByThreadId,
     limits,
+    estimateBytes: (thread) => {
+      const coverage = state.detailCoverageByThreadId?.get(thread.id);
+      const coverageBytes = coverage
+        ? 64 + [...coverage.entities.keys()].reduce((sum, key) => sum + key.length * 2 + 16, 0)
+        : 0;
+      return estimateThreadDetailBytes(thread) + coverageBytes;
+    },
   });
   pinnedOverBudget = plan.pinnedBytes > limits.maxBytes;
   if (plan.evictThreadIds.length === 0) return [];

@@ -201,6 +201,18 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
     );
 
   return {
+    updateHistoryReconciliationIfCurrent: (input) =>
+      withWrite(input.threadId, repository.updateHistoryReconciliationIfCurrent(input)).pipe(
+        Effect.mapError(
+          toPersistenceError("ProviderSessionDirectory.updateHistoryReconciliationIfCurrent"),
+        ),
+      ),
+    updateTerminalLifecycleIfCurrent: (input) =>
+      withWrite(input.threadId, repository.updateTerminalLifecycleIfCurrent(input)).pipe(
+        Effect.mapError(
+          toPersistenceError("ProviderSessionDirectory.updateTerminalLifecycleIfCurrent"),
+        ),
+      ),
     updateMcpStateIfCurrent: (input) =>
       withWrite(
         input.threadId,

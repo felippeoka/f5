@@ -191,6 +191,24 @@ describe("Claude transcript recovery", () => {
     await writeFile(input.file, '{invalid}\n{"uuid":"new","parentUuid":null}\n');
     await expect(readClaudeTranscript(input.file)).rejects.toThrow("malformed record");
   });
+  it("never reconstructs an assistant from an unterminated crashed log record", async () => {
+    const input = await fixture();
+    const log = path.join(input.providerLogsDir, "thread.log");
+    await writeFile(log, logged("target", [{ type: "text", text: "not committed" }]).trimEnd());
+    await repairClaudeResumePoint(input);
+    // The existing explicit repair may synthesize a transparent placeholder,
+    // but it must never claim the uncommitted assistant text was recovered.
+    expect(await readFile(input.file, "utf8")).not.toContain("not committed");
+    const complete = await fixture();
+    await writeFile(
+      path.join(complete.providerLogsDir, "thread.log"),
+      logged("target", [{ type: "text", text: "committed text" }]),
+    );
+    const result = await repairClaudeResumePoint(complete);
+    expect(result.status).toBe("repaired");
+    expect(hasClaudeParentChain(await readClaudeTranscript(complete.file), "target")).toBe(true);
+    expect(await readFile(complete.file, "utf8")).toContain("committed text");
+  });
   it("quarantines malformed middle records, retaining original bytes and line numbers in the backup receipt", async () => {
     const input = await fixture();
     await appendFile(

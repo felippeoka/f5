@@ -153,6 +153,69 @@ afterEach(() => {
 });
 
 describe("WsTransport", () => {
+  it("cancels hung authentication on its deadline and retries without stale socket creation", async () => {
+    let reply!: (response: Response) => void;
+    const fetcher = vi.fn(
+      (_url: RequestInfo | URL, _options?: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          reply = resolve;
+        }),
+    );
+    globalThis.fetch = fetcher;
+    const transport = new WsTransport();
+    expect(fetcher).toHaveBeenCalledOnce();
+    const signal = fetcher.mock.calls[0]![1]!.signal!;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signal.aborted).toBe(true);
+    expect(getWsConnectionState().lastError).toContain("timed out");
+    reply({ ok: true } as Response);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sockets).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    transport.dispose();
+    expect(fetcher.mock.calls[1]![1]!.signal?.aborted).toBe(true);
+  });
+  it("reconnect cancels older auth attempts and late auth cannot open an old socket", async () => {
+    const replies: ((response: Response) => void)[] = [];
+    const fetcher = vi.fn(
+      (_url: RequestInfo | URL, _options?: RequestInit) =>
+        new Promise<Response>((resolve) => replies.push(resolve)),
+    );
+    globalThis.fetch = fetcher;
+    const transport = new WsTransport();
+    transport.reconnect();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0]![1]!.signal?.aborted).toBe(true);
+    replies[0]!({ ok: true } as Response);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sockets).toHaveLength(0);
+    replies[1]!({ ok: true } as Response);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets).toHaveLength(1);
+    transport.dispose();
+  });
+  it("expires stuck CONNECTING sockets and ignores their late open callbacks", async () => {
+    const transport = new WsTransport("ws://localhost:3020"),
+      old = getSocket();
+    await vi.advanceTimersByTimeAsync(10_500);
+    expect(sockets).toHaveLength(2);
+    old.open();
+    expect(getWsConnectionState().phase).not.toBe("connected");
+    getSocket().open();
+    expect(getWsConnectionState().phase).toBe("connected");
+    transport.dispose();
+  });
+  it("rejects no-timeout requests immediately after disposal", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    transport.dispose();
+    await expect(
+      transport.request(ORCHESTRATION_WS_METHODS.getSnapshot, undefined, { timeoutMs: null }),
+    ).rejects.toThrow("disposed");
+  });
+
   it("applies bounded reconnect jitter around the existing delay ladder", () => {
     expect(jitterReconnectDelay(1_000, () => 0)).toBe(800);
     expect(jitterReconnectDelay(1_000, () => 0.5)).toBe(1_000);
@@ -544,11 +607,11 @@ describe("WsTransport", () => {
     transport.dispose();
   });
 
-  it("ignores manual reconnect while the newest socket is still connecting", async () => {
+  it("replaces a connecting socket when reconnect is requested", async () => {
     const transport = new WsTransport("ws://localhost:3020");
 
     transport.reconnect();
-    expect(sockets).toHaveLength(1);
+    expect(sockets).toHaveLength(2);
 
     transport.dispose();
   });
