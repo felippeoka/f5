@@ -1587,3 +1587,58 @@ built release archive with independently installed dependencies. The required
 full run still fails the same two scripts process-identity recovery cases
 (333 pass), before reaching the exhaustive Git matrix. The per-SHA record stays
 planned while the remaining 15a audit and required release gates remain open.
+
+## fff-node 0.11.0 upgrade blocked by endpoint security (15a; deferred)
+
+The `@ff-labs/fff-node` 0.11.0 upgrade (#14543, #18514) is deferred. On this
+host, Cortex XDR stops `bun add --cwd apps/server --exact @ff-labs/fff-node@0.11.0`
+after the packages are downloaded and extracted and before the lockfile is saved.
+It also terminates the terminal process tree that launched the install. Four
+attempts failed the same way, and `@ff-labs/fff-bin-darwin-arm64@0.11.0` never
+reached Bun's global cache. Other dependency additions in this worktree
+(`undici`, `parse5`) completed normally.
+
+The suspected file is the 0.11.0 `libfff_c.dylib`, sha256
+`d052aae92b8d89f4734399aa53f80a327c4931f1b5dea0a7d96f9c488229ba43`. It is ad-hoc
+signed with a valid signature, and links the same system libraries as 0.9.4.
+This is probably a false positive, but the Cortex security event has not been
+inspected. The worktree was restored to the locked 0.9.4 install with
+`bun install --frozen-lockfile`. Both content-search suites pass on 0.9.4
+(11 tests). Do not retry the install from inside F5. Retry only after a security
+review clears the package, and from a terminal that does not host F5.
+
+## Agent exit without a terminal event (15a, #19131)
+
+Upstream fails a run whose provider stream ends without a terminal event. In F5
+the equivalent boundary is per session: an agent process that dies mid-turn
+must still produce `turn.completed` or `session.exited`, because those are the
+only events that settle the active turn. Claude, Codex, OpenCode, Pi and Muse
+already do. Existing Claude and Codex tests cover a stream abort and an
+app-server exit. OpenCode, Pi and Muse route stream failure or host exit
+through their error stop paths.
+
+The ACP adapters did not. Their ACP event stream never ends on its own, so a
+Cursor, Grok, Antigravity or custom ACP agent that exited during
+`session/prompt` left the session registered as live with a stale active turn.
+Its prompt failed, but no terminal event followed, and every later message was
+sent to the dead process and failed with "ACP process exited". F5 never
+replaced the session because the adapter still reported it.
+
+`AcpSessionRuntime` now exposes `awaitExit`, backed by the child's exit code.
+`CursorAdapter` and `GrokAdapter` watch it. On an exit they did not request,
+they fail the unfinished turn and stop the session with an error-kind,
+recoverable `session.exited`. The next send then starts a fresh session.
+Requested stops mark the session stopped first, so they are unaffected.
+`GrokAdapter` records the turn it last completed, because its active turn id
+survives completion and its prompt count may already have dropped when the
+exit is observed.
+
+The mock ACP agent gained `T3_ACP_EXIT_DURING_PROMPT`. A Cursor test and a
+Grok test each failed before the change (no `turn.completed` for the turn) and
+pass after it. All Cursor and Grok adapter tests (33), the ACP, custom ACP,
+provider-service and runtime-ingestion suites (454 passed, 3 skipped) and all
+eight typechecks pass. Typechecking caught `Effect.forEach(..., stopSessionInternal)`
+call sites that would have passed the element index as the new exit argument;
+they now call it with the session only. The complete server suite passes 5,471
+tests with 14 skipped; it still fails only the three known `launcher.test.ts`
+process-identity cases that need `ps` access this host denies.

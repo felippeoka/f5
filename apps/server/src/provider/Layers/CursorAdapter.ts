@@ -590,7 +590,10 @@ export function makeCursorAdapter(
       return Effect.succeed(ctx);
     };
 
-    const stopSessionInternal = (ctx: CursorSessionContext) =>
+    const stopSessionInternal = (
+      ctx: CursorSessionContext,
+      exit: { readonly reason: string } | undefined = undefined,
+    ) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
         ctx.stopped = true;
@@ -606,9 +609,39 @@ export function makeCursorAdapter(
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
           threadId: ctx.threadId,
-          payload: { exitKind: "graceful" },
+          payload: exit
+            ? { exitKind: "error", reason: exit.reason, recoverable: true }
+            : { exitKind: "graceful" },
         });
       });
+
+    // The ACP event stream never ends on its own, so an agent that dies
+    // mid-turn would otherwise leave a live-looking session whose turn never
+    // settles and whose later prompts all fail.
+    const handleUnexpectedAgentExit = (ctx: CursorSessionContext, code: number | undefined) =>
+      withSessionLock(
+        ctx.threadId,
+        Effect.gen(function* () {
+          if (ctx.stopped || sessions.get(ctx.threadId) !== ctx) return;
+          const reason =
+            code === undefined
+              ? "The Cursor agent exited unexpectedly."
+              : `The Cursor agent exited unexpectedly (code ${code}).`;
+          const turnId = ctx.activeTurnId;
+          if (turnId) {
+            ctx.activeTurnId = undefined;
+            yield* offerRuntimeEvent({
+              type: "turn.completed",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: ctx.threadId,
+              turnId,
+              payload: { state: "failed", errorMessage: reason },
+            });
+          }
+          yield* stopSessionInternal(ctx, { reason });
+        }),
+      );
 
     const startSession: CursorAdapterShape["startSession"] = (input) =>
       withSessionLock(
@@ -1162,6 +1195,14 @@ export function makeCursorAdapter(
           ctx.notificationFiber = nf;
           sessions.set(input.threadId, ctx);
           sessionScopeTransferred = true;
+          const watchedCtx = ctx;
+          // Settle outside the session scope: stopping closes that scope.
+          yield* acp.awaitExit.pipe(
+            Effect.flatMap((code) =>
+              Effect.forkDetach(handleUnexpectedAgentExit(watchedCtx, code)),
+            ),
+            Effect.forkIn(sessionScope),
+          );
 
           yield* offerRuntimeEvent({
             type: "session.started",
@@ -1621,10 +1662,10 @@ export function makeCursorAdapter(
       });
 
     const stopAll: CursorAdapterShape["stopAll"] = () =>
-      Effect.forEach(sessions.values(), stopSessionInternal, { discard: true });
+      Effect.forEach(sessions.values(), (ctx) => stopSessionInternal(ctx), { discard: true });
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(sessions.values(), stopSessionInternal, { discard: true }).pipe(
+      Effect.forEach(sessions.values(), (ctx) => stopSessionInternal(ctx), { discard: true }).pipe(
         Effect.tap(() => PubSub.shutdown(runtimeEventPubSub)),
         Effect.tap(() => managedNativeEventLogger?.close() ?? Effect.void),
       ),

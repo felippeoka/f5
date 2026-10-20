@@ -377,3 +377,60 @@ it.layer(AntigravityAdapterTestLayer)("Antigravity native questions", (it) => {
     }),
   );
 });
+
+const GrokAdapterExitingAgentTestLayer = Layer.effect(
+  GrokAdapter,
+  Effect.gen(function* () {
+    const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "grok-acp-exit-")));
+    const wrapperPath = writeAcpWrapper(path.join(dir, "fake-grok"), mockAgentPath, {
+      env: { T3_ACP_EXIT_DURING_PROMPT: "1" },
+    });
+    const settings = Schema.decodeSync(GrokSettings)({ binaryPath: wrapperPath });
+    return yield* makeGrokAdapter(settings);
+  }),
+).pipe(
+  Layer.provideMerge(
+    ServerConfig.layerTest(process.cwd(), { prefix: "t3code-grok-adapter-exit-test-" }),
+  ),
+  Layer.provideMerge(NodeServices.layer),
+);
+
+it.layer(GrokAdapterExitingAgentTestLayer)("GrokAdapterLive agent exit", (it) => {
+  it.effect("fails the active turn and releases the session when the agent exits", () =>
+    Effect.gen(function* () {
+      const adapter = yield* GrokAdapter;
+      const threadId = ThreadId.make("grok-exit-during-prompt");
+      const events: ProviderRuntimeEvent[] = [];
+      const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => {
+          events.push(event);
+        }),
+      ).pipe(Effect.forkChild);
+      yield* adapter.startSession({
+        threadId,
+        provider: "grok",
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter
+        .sendTurn({ threadId, input: "exit mid-prompt", attachments: [] })
+        .pipe(Effect.exit);
+      const turnId = events.find((event) => event.type === "turn.started")?.turnId;
+      assert.isDefined(turnId);
+      const exited = (event: ProviderRuntimeEvent) =>
+        event.type === "session.exited" && event.threadId === threadId;
+      for (let attempt = 0; attempt < 200 && !events.some(exited); attempt += 1)
+        yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+
+      const completions = events.filter(
+        (event) => event.type === "turn.completed" && event.turnId === turnId,
+      );
+      assert.equal(completions.length, 1);
+      assert.deepInclude(completions[0]!.payload, { state: "failed" });
+      assert.deepInclude(events.find(exited)?.payload, { exitKind: "error", recoverable: true });
+      assert.isFalse(yield* adapter.hasSession(threadId));
+      yield* Fiber.interrupt(eventFiber);
+    }),
+  );
+});

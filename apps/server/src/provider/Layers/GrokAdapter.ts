@@ -153,6 +153,8 @@ interface GrokSessionContext {
   turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
+  /** The last turn this adapter emitted `turn.completed` for. */
+  completedTurnId: TurnId | undefined;
   promptsInFlight: number;
   currentModelId: string | undefined;
   stopped: boolean;
@@ -465,7 +467,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         startupPendingUserInputs.delete(threadId);
       });
 
-    const stopSessionInternal = (ctx: GrokSessionContext) =>
+    const stopSessionInternal = (
+      ctx: GrokSessionContext,
+      exit: { readonly reason: string } | undefined = undefined,
+    ) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
         ctx.stopped = true;
@@ -500,14 +505,22 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             threadId: ctx.threadId,
             turnId: ctx.activeTurnId,
           } as ProviderRuntimeEvent);
-        if (ctx.activeTurnId && ctx.promptsInFlight > 0) {
+        // After an agent exit its failed prompt may already have left the
+        // in-flight count, so an uncompleted active turn is enough.
+        if (
+          ctx.activeTurnId &&
+          (exit ? ctx.completedTurnId !== ctx.activeTurnId : ctx.promptsInFlight > 0)
+        ) {
+          ctx.completedTurnId = ctx.activeTurnId;
           yield* offerRuntimeEvent({
             type: "turn.completed",
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: ctx.threadId,
             turnId: ctx.activeTurnId,
-            payload: { state: "cancelled", stopReason: "cancelled" },
+            payload: exit
+              ? { state: "failed", errorMessage: exit.reason }
+              : { state: "cancelled", stopReason: "cancelled" },
           });
         }
         yield* offerRuntimeEvent({
@@ -515,9 +528,28 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
           threadId: ctx.threadId,
-          payload: { exitKind: "graceful" },
+          payload: exit
+            ? { exitKind: "error", reason: exit.reason, recoverable: true }
+            : { exitKind: "graceful" },
         });
       });
+
+    // The ACP event stream never ends on its own, so an agent that dies
+    // mid-turn would otherwise leave a live-looking session whose turn never
+    // settles and whose later prompts all fail.
+    const handleUnexpectedAgentExit = (ctx: GrokSessionContext, code: number | undefined) =>
+      withThreadLock(
+        ctx.threadId,
+        Effect.gen(function* () {
+          if (ctx.stopped || sessions.get(ctx.threadId) !== ctx) return;
+          yield* stopSessionInternal(ctx, {
+            reason:
+              code === undefined
+                ? `The ${providerLabel} agent exited unexpectedly.`
+                : `The ${providerLabel} agent exited unexpectedly (code ${code}).`,
+          });
+        }),
+      );
 
     const startSession: GrokAdapterShape["startSession"] = (input) =>
       withThreadLock(
@@ -974,6 +1006,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            completedTurnId: undefined,
             promptsInFlight: 0,
             currentModelId: boundModelId,
             stopped: false,
@@ -1123,6 +1156,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           sessions.set(input.threadId, ctx);
           startupPendingUserInputs.delete(input.threadId);
           sessionScopeTransferred = true;
+          const watchedCtx = ctx;
+          // Settle outside the session scope: stopping closes that scope.
+          yield* acp.awaitExit.pipe(
+            Effect.flatMap((code) =>
+              Effect.forkDetach(handleUnexpectedAgentExit(watchedCtx, code)),
+            ),
+            Effect.forkIn(sessionScope),
+          );
 
           yield* offerRuntimeEvent({
             type: "session.started",
@@ -1399,6 +1440,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     turnId: prepared.turnId,
                   } as ProviderRuntimeEvent);
                 yield* settleElicitationsForTurn(input.threadId, prepared.turnId);
+                ctx.completedTurnId = prepared.turnId;
                 yield* offerRuntimeEvent({
                   type: "turn.completed",
                   ...(yield* makeEventStamp()),
@@ -1574,7 +1616,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       });
 
     const stopAll: GrokAdapterShape["stopAll"] = () =>
-      Effect.forEach(Array.from(sessions.values()), stopSessionInternal, { discard: true });
+      Effect.forEach(Array.from(sessions.values()), (ctx) => stopSessionInternal(ctx), {
+        discard: true,
+      });
 
     yield* Effect.addFinalizer(() =>
       Effect.ignore(stopAll()).pipe(

@@ -162,6 +162,12 @@ export interface AcpSessionRuntimeShape {
   readonly handleExtNotification: EffectAcpClient.AcpClientShape["handleExtNotification"];
   readonly start: () => Effect.Effect<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
   readonly getEvents: () => Stream.Stream<AcpParsedSessionEvent, never>;
+  /**
+   * Completes when the agent process exits, with its exit code when known.
+   * The event stream never ends on its own, so adapters watch this to settle
+   * a turn whose agent died before reporting a terminal result.
+   */
+  readonly awaitExit: Effect.Effect<number | undefined>;
   readonly awaitEventBarrier: Effect.Effect<void>;
   readonly getModeState: Effect.Effect<AcpSessionModeState | undefined>;
   readonly getConfigOptions: Effect.Effect<ReadonlyArray<EffectAcpSchema.SessionConfigOption>>;
@@ -978,6 +984,10 @@ const makeAcpSessionRuntime = (
       handleExtNotification: acp.handleExtNotification,
       start: () => start,
       getEvents,
+      awaitExit: child.exitCode.pipe(
+        Effect.map((code): number | undefined => code),
+        Effect.orElseSucceed(() => undefined),
+      ),
       awaitEventBarrier,
       getModeState: Ref.get(modeStateRef),
       getConfigOptions: Ref.get(configOptionsRef),
