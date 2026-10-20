@@ -53,20 +53,11 @@
     },
     {
       "upstreamSha": "edb21555667dc926bec3f8b2fac41db817b16ae9",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): another thread streaming no longer re-renders the app root and thread panels (#20823).",
+      "classification": "equivalent:apps/web/src/routes/__root.tsx:326",
+      "reason": "Equivalent: upstream stopped another thread's streaming from re-rendering the app root and the open thread's panels. f5's root reads only store actions and getState(), and the thread route selects its own thread, so a background thread's token reaches neither. The another-thread render isolation test now also opens the files panel and checks the tab strip does not render. Upstream change: perf(web): another thread streaming no longer re-renders the app root and thread panels (#20823)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20823"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["apps/web/src/components/ChatView.browser.tsx:8367"],
+      "f5Shas": ["d6ec48f17c2808edcd1cffb9db041e0e44bc0e9e"]
     },
     {
       "upstreamSha": "2fae0f9841448e6edb93d0ebe4cbaf2d546bb38c",
@@ -92,20 +83,9 @@
     },
     {
       "upstreamSha": "812b7006f8a12c5c8e55ea65a9cfcebfd328872f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): typing in form dialogs no longer re-renders the dialog chrome (#20842).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20842"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream moved form state into child components so typing in four form dialogs no longer re-renders the dialog chrome. Three of the four dialogs are upstream-only, and f5's plan card has no save dialog. The f5 analogue, ProjectScriptsControl (apps/web/src/components/ProjectScriptsControl.tsx:180), keeps the add-action form state beside its dialog, but a keystroke there re-renders only the header control and the dialog, not the conversation. Restructuring the 647-line component waits for a measured cost. Upstream change: perf(web): typing in form dialogs no longer re-renders the dialog chrome (#20842)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d56c479345312605bda6ce479b58aa97cd2acd11",
@@ -163,20 +143,10 @@
     },
     {
       "upstreamSha": "ecb938da581938e2a4470e2e52092477e9bcfa2f",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): provider status pushes no longer re-render every timeline row (#20854).",
+      "classification": "not-applicable:upstream-only-subsystem:v2-lifecycle-rows",
+      "reason": "Not applicable: upstream removed the provider statuses its V2 lifecycle rows and subagent avatars read from the timeline props, so a provider push re-rendered every row. f5 has neither row type, and its MessagesTimeline takes no provider data; the equal provider snapshot isolation test already passes. Upstream change: perf(web): provider status pushes no longer re-render every timeline row (#20854)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20854"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["apps/web/src/components/chat/MessagesTimeline.tsx:235"]
     },
     {
       "upstreamSha": "1d00edb23ad6bfade33beba927947d09f1beeca4",
@@ -190,17 +160,9 @@
     },
     {
       "upstreamSha": "52d593c1a1f33171f6d846e2cf9711fc8188272c",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(web): chat view no longer renders twice per update (#20847).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20847"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:multi-environment",
+      "reason": "Not applicable: the double renders came from upstream's Effect atom session layer, which built fresh atoms per render for multi-environment settings sync targets and an unstable auto-update environment list. f5 has no atom session layer or multiple environments. Upstream change: fix(web): chat view no longer renders twice per update (#20847)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "89b42bfeb4f79408af72fc7bb7a4482e22bb9493",
@@ -246,20 +208,10 @@
     },
     {
       "upstreamSha": "130f4a2457172eb62bfd53ae9f5fa16cae8be5d5",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): a minute tick no longer re-renders every sidebar thread row (#20814).",
+      "classification": "equivalent:apps/web/src/components/thread/ThreadActivityTime.tsx:17",
+      "reason": "Equivalent: upstream moved the sidebar's minute tick into a label component so only the label re-renders each minute. f5's sidebar rows already render their time through ThreadRelativeActivityTime, which subscribes to the minute tick itself. Upstream change: perf(web): a minute tick no longer re-renders every sidebar thread row (#20814)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20814"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "f5Shas": ["6f5ecc39faaa0e413b7f4a3e455459c2464e59e8"]
     },
     {
       "upstreamSha": "489d08a0549428d3baefd10e610003c10d60e5ef",
@@ -280,20 +232,11 @@
     },
     {
       "upstreamSha": "74ca17b43704051a39c21c22343a9656f91fbddb",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): unchanged model picker rows skip re-rendering while searching (#20838).",
+      "classification": "equivalent:apps/web/src/components/chat/modelPickerSearch.ts:128",
+      "reason": "Equivalent: upstream rebuilt picker items on every search keystroke, which defeated the row memo. f5's ranking returns the original items, and the virtualized list does not re-render unchanged items; the new test counts one render per row across two queries, on the code as it was. Upstream change: perf(web): unchanged model picker rows skip re-rendering while searching (#20838)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20838"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["apps/web/src/components/chat/ProviderModelPicker.browser.tsx:147"],
+      "f5Shas": ["f52d8e6e58ffcccb9116c13182aa4684d0c2b477"]
     },
     {
       "upstreamSha": "734e8876713b0238deb8339ac92982c5bedb02ca",
@@ -322,20 +265,13 @@
     },
     {
       "upstreamSha": "2171c50726d82bab6c12f1398fa5b46b82668f45",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): relative \"checked\" labels re-render only when their text changes (#20819).",
+      "classification": "not-applicable:upstream-only-subsystem:ticking-checked-labels",
+      "reason": "Not applicable: upstream's relative \"checked\" labels in diagnostics and provider settings ticked every second. f5 shows the raw timestamp or formats the age once at render, with no ticking label. Upstream change: perf(web): relative \"checked\" labels re-render only when their text changes (#20819)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20819"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": [
+        "apps/web/src/components/settings/categories/ProvidersSettings.tsx:301",
+        "apps/web/src/components/settings/providerStatus.ts:154"
+      ]
     },
     {
       "upstreamSha": "2fbd4318fc5b610c3e7fcfcbd5bbd80b73521d8f",
@@ -2718,20 +2654,9 @@
     },
     {
       "upstreamSha": "26bea7e62e4fae5d59eeecb74374a87a2287239c",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): diff panel reads its loader and collapse defaults without refs (#20468).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20468"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream removed refs from DiffPanel so the React Compiler can compile it, and added it to its compiled-files allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\"; DiffPanel joins when f5 annotates it. Upstream change: perf(web): diff panel reads its loader and collapse defaults without refs (#20468)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "10d4fab2941f89707f08d441fac1b9b24f48d80c",
@@ -2791,20 +2716,9 @@
     },
     {
       "upstreamSha": "6293119f83e90062001c622e17841dc189efe1b7",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useCopyToClipboard reads its options through useStableCallback (#20460).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20460"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream reads useCopyToClipboard options through a stable callback so the hook compiles, and added it to its compiled-files allowlist. f5 compiles by \"use memo\" annotation (apps/web/vite.config.ts:34); the hook joins when f5 annotates it. Upstream change: perf(web): useCopyToClipboard reads its options through useStableCallback (#20460)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "a17781f638226b2f1c5f46954175e2be969ad112",
@@ -2942,20 +2856,10 @@
     },
     {
       "upstreamSha": "2de98f035c3aa84768c2d3a547ed91f0d3daa83e",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the sidebar compiles with no manual memoization (#20396).",
+      "classification": "equivalent:apps/web/src/components/Sidebar.tsx:148",
+      "reason": "Equivalent: upstream compiles the sidebar with the React Compiler and drops its manual memoization. f5's Sidebar is already compiled through its \"use memo\" annotation. Upstream change: perf(web): the sidebar compiles with no manual memoization (#20396)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20396"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "f5Shas": ["6f5ecc39faaa0e413b7f4a3e455459c2464e59e8"]
     },
     {
       "upstreamSha": "054337764ae8cbb4cb2ba373f2335e8c1e2aefee",
@@ -2975,20 +2879,17 @@
     },
     {
       "upstreamSha": "0912b24577ad39b8820000456f91f00b752b1012",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): stop re-rendering the conversation on streamed tokens, typing and server pushes (#20380).",
+      "classification": "equivalent:apps/web/src/components/ChatMarkdown.tsx:728",
+      "reason": "Equivalent: upstream stopped streamed tokens, typing and server pushes from re-rendering the conversation, mostly in its markdown renderer's server config and text context. f5's markdown has no server config subscription and seals finished blocks, and the isolation tests show zero timeline commits for typing, another thread's token and an equal provider snapshot. Upstream change: perf(web): stop re-rendering the conversation on streamed tokens, typing and server pushes (#20380)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20380"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": [
+        "apps/web/src/components/ChatView.browser.tsx:8506",
+        "apps/web/src/components/ChatView.browser.tsx:8367"
+      ],
+      "f5Shas": [
+        "6f5ecc39faaa0e413b7f4a3e455459c2464e59e8",
+        "03426114ad4010055733237d375bb00db70ac570"
+      ]
     },
     {
       "upstreamSha": "0e95babaf52c0b5625b6a081309f85c0d8b78356",
@@ -10150,20 +10051,10 @@
     },
     {
       "upstreamSha": "f21d6da51c9aa78ea12e7f13a378f55f1e63cb38",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): diff panel no longer re-renders every file header each time a patch arrives (#16033).",
+      "classification": "not-applicable:upstream-only-subsystem:streamed-review-file-patches",
+      "reason": "Not applicable: upstream's diff panel receives patches per file as they arrive, and each arrival re-rendered every file header. f5 loads the whole patch in one query, so no per-file arrival happens. Upstream change: perf(web): diff panel no longer re-renders every file header each time a patch arrives (#16033)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16033"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["apps/web/src/components/DiffPanel.tsx:244"]
     },
     {
       "upstreamSha": "115640ae49924c9e4e6215bd8d911445ad932bff",

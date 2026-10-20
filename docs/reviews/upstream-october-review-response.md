@@ -1846,3 +1846,55 @@ because f5's sidebar width guards measure by writing the app-wide
 `--sidebar-width`. They would break if drags stopped writing it, so the guards
 need reworking first. Three are not applicable: the floating header toggles and
 the docked thread details card (two records) do not exist in f5.
+
+**Batch 11 (15a-3 render isolation, 17 records).** This batch meets the 15a-3
+structural acceptance. With the timeline and composer wrapped in React
+Profiler, ChatView browser tests count zero commits for another thread's
+token, an equal provider snapshot, an unrelated settings write, typing in the
+composer and a right panel toggle. They also count zero timeline commits when
+an image preview or a dialog opens. Five ports, each with a test that failed on
+the old code:
+- [t3code#20848](https://github.com/pingdotgg/t3code/pull/20848): a settings
+  write re-renders only readers whose selected value changed. The conversation,
+  root route, sidebar, command palette, diff panel and always-mounted
+  controllers select their fields through `useAppSettingsSelector`, and writers
+  use `updateAppSettings` without subscribing.
+- [t3code#20853](https://github.com/pingdotgg/t3code/pull/20853): streamed
+  tokens no longer re-render the right panel tab strip, which is now memoized
+  with stable handlers.
+- [t3code#18077](https://github.com/pingdotgg/t3code/pull/18077): opening or
+  closing a right panel no longer re-renders ChatView and the composer.
+  ChatView is memoized, and the header subscribes to its own toggle states.
+- [t3code#20837](https://github.com/pingdotgg/t3code/pull/20837): router
+  updates no longer re-render the sidebar and chat layout, which now read the
+  location when their settings action fires.
+- [t3code#15266](https://github.com/pingdotgg/t3code/pull/15266): command
+  palette results are virtualized. Keyboard navigation reaches unmounted rows,
+  and Enter runs the highlighted item even when its row is not mounted.
+
+Five are equivalent:
+[t3code#20823](https://github.com/pingdotgg/t3code/pull/20823) (the root and
+open panels ignore a background thread's token),
+[t3code#20814](https://github.com/pingdotgg/t3code/pull/20814) (the minute tick
+already lives in a leaf label),
+[t3code#20838](https://github.com/pingdotgg/t3code/pull/20838) (picker rows keep
+their identity while searching; a new test pins it),
+[t3code#20396](https://github.com/pingdotgg/t3code/pull/20396) (the sidebar is
+already compiled), and
+[t3code#20380](https://github.com/pingdotgg/t3code/pull/20380) (the markdown
+renderer has no server config subscription and seals finished blocks).
+Three are deferred.
+[t3code#20842](https://github.com/pingdotgg/t3code/pull/20842)'s only f5
+analogue is the add-action dialog, whose keystrokes stay inside the header
+control.
+[t3code#20468](https://github.com/pingdotgg/t3code/pull/20468) and
+[t3code#20460](https://github.com/pingdotgg/t3code/pull/20460) prepare files
+for upstream's compiler allowlist, while f5 stages compilation by `"use memo"`
+annotation. Four are not applicable:
+[t3code#20854](https://github.com/pingdotgg/t3code/pull/20854) (V2 lifecycle
+rows), [t3code#20847](https://github.com/pingdotgg/t3code/pull/20847) (the
+multi-environment atom session layer),
+[t3code#20819](https://github.com/pingdotgg/t3code/pull/20819) (f5 has no
+ticking "checked" labels) and
+[t3code#16033](https://github.com/pingdotgg/t3code/pull/16033) (f5 loads the
+whole diff patch at once).

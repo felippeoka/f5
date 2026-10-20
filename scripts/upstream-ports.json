@@ -1211,10 +1211,18 @@
     {
       "upstreamSha": "0912b24577ad39b8820000456f91f00b752b1012",
       "subject": "perf(web): stop re-rendering the conversation on streamed tokens, typing and server pushes (#20380)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): stop re-rendering the conversation on streamed tokens, typing and server pushes (#20380).",
+      "reason": "Equivalent: upstream stopped streamed tokens, typing and server pushes from re-rendering the conversation, mostly in its markdown renderer's server config and text context. f5's markdown has no server config subscription and seals finished blocks, and the isolation tests show zero timeline commits for typing, another thread's token and an equal provider snapshot. Upstream change: perf(web): stop re-rendering the conversation on streamed tokens, typing and server pushes (#20380)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "6f5ecc39faaa0e413b7f4a3e455459c2464e59e8",
+        "03426114ad4010055733237d375bb00db70ac570"
+      ],
+      "evidence": [
+        "apps/web/src/components/ChatMarkdown.tsx:728",
+        "apps/web/src/components/ChatView.browser.tsx:8506",
+        "apps/web/src/components/ChatView.browser.tsx:8367"
+      ]
     },
     {
       "upstreamSha": "0929907ff9aecd2541050fe4361ad03199ffbf73",
@@ -2637,10 +2645,11 @@
     {
       "upstreamSha": "130f4a2457172eb62bfd53ae9f5fa16cae8be5d5",
       "subject": "perf(web): a minute tick no longer re-renders every sidebar thread row (#20814)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): a minute tick no longer re-renders every sidebar thread row (#20814).",
+      "reason": "Equivalent: upstream moved the sidebar's minute tick into a label component so only the label re-renders each minute. f5's sidebar rows already render their time through ThreadRelativeActivityTime, which subscribes to the minute tick itself. Upstream change: perf(web): a minute tick no longer re-renders every sidebar thread row (#20814)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["6f5ecc39faaa0e413b7f4a3e455459c2464e59e8"],
+      "evidence": ["apps/web/src/components/thread/ThreadActivityTime.tsx:17"]
     },
     {
       "upstreamSha": "133db22fae34cfb2e62a806e99d22674b0376f35",
@@ -4459,10 +4468,9 @@
     {
       "upstreamSha": "2171c50726d82bab6c12f1398fa5b46b82668f45",
       "subject": "perf(web): relative \"checked\" labels re-render only when their text changes (#20819)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): relative \"checked\" labels re-render only when their text changes (#20819).",
+      "reason": "Not applicable: upstream's relative \"checked\" labels in diagnostics and provider settings ticked every second. f5 shows the raw timestamp or formats the age once at render, with no ticking label. Upstream change: perf(web): relative \"checked\" labels re-render only when their text changes (#20819)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "2182353fdfbac18b7045d213e750cb79f32742ce",
@@ -5237,10 +5245,9 @@
     {
       "upstreamSha": "26bea7e62e4fae5d59eeecb74374a87a2287239c",
       "subject": "perf(web): diff panel reads its loader and collapse defaults without refs (#20468)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): diff panel reads its loader and collapse defaults without refs (#20468).",
+      "reason": "Deferred: upstream removed refs from DiffPanel so the React Compiler can compile it, and added it to its compiled-files allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\"; DiffPanel joins when f5 annotates it. Upstream change: perf(web): diff panel reads its loader and collapse defaults without refs (#20468)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "26c48bbc0a9ddc23acdd20a733fe209d423e848a",
@@ -6334,10 +6341,11 @@
     {
       "upstreamSha": "2de98f035c3aa84768c2d3a547ed91f0d3daa83e",
       "subject": "perf(web): the sidebar compiles with no manual memoization (#20396)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the sidebar compiles with no manual memoization (#20396).",
+      "reason": "Equivalent: upstream compiles the sidebar with the React Compiler and drops its manual memoization. f5's Sidebar is already compiled through its \"use memo\" annotation. Upstream change: perf(web): the sidebar compiles with no manual memoization (#20396)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["6f5ecc39faaa0e413b7f4a3e455459c2464e59e8"],
+      "evidence": ["apps/web/src/components/Sidebar.tsx:148"]
     },
     {
       "upstreamSha": "2deea7abb0f9e4df71ca10da06a8d7268a4b9d42",
@@ -9861,10 +9869,16 @@
     {
       "upstreamSha": "489d08a0549428d3baefd10e610003c10d60e5ef",
       "subject": "perf(web): router updates no longer re-render thread route consumers (#20837)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): router updates no longer re-render thread route consumers (#20837).",
+      "reason": "Ported: the sidebar selected a fresh location object and the chat layout subscribed to the whole location, so both re-rendered on every router update. Both now read router.state.location when their settings action fires; the thread id readers already selected primitives. The new browser test failed before the change. Upstream change: perf(web): router updates no longer re-render thread route consumers (#20837)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["bb440a757af91258e9a62ee42664679f86805003"],
+      "evidence": [
+        "apps/web/src/components/Sidebar.tsx:170",
+        "apps/web/src/routes/_chat.tsx:67",
+        "apps/web/src/components/ChatView.browser.tsx:8523"
+      ]
     },
     {
       "upstreamSha": "48a16040891d90aa87491c9d215e0bdb40cd6573",
@@ -11276,10 +11290,9 @@
     {
       "upstreamSha": "52d593c1a1f33171f6d846e2cf9711fc8188272c",
       "subject": "fix(web): chat view no longer renders twice per update (#20847)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(web): chat view no longer renders twice per update (#20847).",
+      "reason": "Not applicable: the double renders came from upstream's Effect atom session layer, which built fresh atoms per render for multi-environment settings sync targets and an unstable auto-update environment list. f5 has no atom session layer or multiple environments. Upstream change: fix(web): chat view no longer renders twice per update (#20847)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "52e4b4429359904441039a286c61eaafe8474451",
@@ -12621,10 +12634,20 @@
     {
       "upstreamSha": "5c8528fd8a428e88a02b2c920a05fc459608d508",
       "subject": "perf(web): a client setting write only re-renders readers whose value changed (#20848)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): a client setting write only re-renders readers whose value changed (#20848).",
+      "reason": "Ported: a write to any client setting re-rendered every settings reader. useAppSettingsSelector and the selector-aware useSettings re-render a reader only when its selected value changes; the conversation, the root route, the sidebar, the command palette, the diff panel and the always-mounted controllers now select their fields, and writers use updateAppSettings without subscribing. Tests cover selector stability and zero timeline or composer commits on an unrelated settings write. Upstream change: perf(web): a client setting write only re-renders readers whose value changed (#20848)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": [
+        "0897adf7a814e288b530b695538bf867c7e66fc4",
+        "9fdf5c2fb63d2755d38def176d11aa307e68599f"
+      ],
+      "evidence": [
+        "apps/web/src/appSettings.ts:1230",
+        "apps/web/src/routes/__root.tsx:340",
+        "apps/web/src/hooks/useSettings.browser.tsx:202",
+        "apps/web/src/components/ChatView.browser.tsx:8441"
+      ]
     },
     {
       "upstreamSha": "5c9358acaa34f8619513bba1e6821f0fdec27f74",
@@ -13361,10 +13384,9 @@
     {
       "upstreamSha": "6293119f83e90062001c622e17841dc189efe1b7",
       "subject": "perf(web): useCopyToClipboard reads its options through useStableCallback (#20460)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useCopyToClipboard reads its options through useStableCallback (#20460).",
+      "reason": "Deferred: upstream reads useCopyToClipboard options through a stable callback so the hook compiles, and added it to its compiled-files allowlist. f5 compiles by \"use memo\" annotation (apps/web/vite.config.ts:34); the hook joins when f5 annotates it. Upstream change: perf(web): useCopyToClipboard reads its options through useStableCallback (#20460)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "62a5d3720f82f2dc3ace48fcb26c90c6e3976b50",
@@ -16021,10 +16043,14 @@
     {
       "upstreamSha": "74ca17b43704051a39c21c22343a9656f91fbddb",
       "subject": "perf(web): unchanged model picker rows skip re-rendering while searching (#20838)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): unchanged model picker rows skip re-rendering while searching (#20838).",
+      "reason": "Equivalent: upstream rebuilt picker items on every search keystroke, which defeated the row memo. f5's ranking returns the original items, and the virtualized list does not re-render unchanged items; the new test counts one render per row across two queries, on the code as it was. Upstream change: perf(web): unchanged model picker rows skip re-rendering while searching (#20838)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["f52d8e6e58ffcccb9116c13182aa4684d0c2b477"],
+      "evidence": [
+        "apps/web/src/components/chat/modelPickerSearch.ts:128",
+        "apps/web/src/components/chat/ProviderModelPicker.browser.tsx:147"
+      ]
     },
     {
       "upstreamSha": "74dfbb697235b0db87355d3f8575dc2ba45dddf7",
@@ -17559,10 +17585,9 @@
     {
       "upstreamSha": "812b7006f8a12c5c8e55ea65a9cfcebfd328872f",
       "subject": "perf(web): typing in form dialogs no longer re-renders the dialog chrome (#20842)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): typing in form dialogs no longer re-renders the dialog chrome (#20842).",
+      "reason": "Deferred: upstream moved form state into child components so typing in four form dialogs no longer re-renders the dialog chrome. Three of the four dialogs are upstream-only, and f5's plan card has no save dialog. The f5 analogue, ProjectScriptsControl (apps/web/src/components/ProjectScriptsControl.tsx:180), keeps the add-action form state beside its dialog, but a keystroke there re-renders only the header control and the dialog, not the conversation. Restructuring the 647-line component waits for a measured cost. Upstream change: perf(web): typing in form dialogs no longer re-renders the dialog chrome (#20842)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "8130a9f13a1ef506f4393423ded21d71f3c9b5e4",
@@ -31745,10 +31770,9 @@
     {
       "upstreamSha": "ecb938da581938e2a4470e2e52092477e9bcfa2f",
       "subject": "perf(web): provider status pushes no longer re-render every timeline row (#20854)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): provider status pushes no longer re-render every timeline row (#20854).",
+      "reason": "Not applicable: upstream removed the provider statuses its V2 lifecycle rows and subagent avatars read from the timeline props, so a provider push re-rendered every row. f5 has neither row type, and its MessagesTimeline takes no provider data; the equal provider snapshot isolation test already passes. Upstream change: perf(web): provider status pushes no longer re-render every timeline row (#20854)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ecb973a7df86421adce88120d6de41854705d620",
@@ -31937,10 +31961,14 @@
     {
       "upstreamSha": "edb21555667dc926bec3f8b2fac41db817b16ae9",
       "subject": "perf(web): another thread streaming no longer re-renders the app root and thread panels (#20823)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): another thread streaming no longer re-renders the app root and thread panels (#20823).",
+      "reason": "Equivalent: upstream stopped another thread's streaming from re-rendering the app root and the open thread's panels. f5's root reads only store actions and getState(), and the thread route selects its own thread, so a background thread's token reaches neither. The another-thread render isolation test now also opens the files panel and checks the tab strip does not render. Upstream change: perf(web): another thread streaming no longer re-renders the app root and thread panels (#20823)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["d6ec48f17c2808edcd1cffb9db041e0e44bc0e9e"],
+      "evidence": [
+        "apps/web/src/routes/__root.tsx:326",
+        "apps/web/src/components/ChatView.browser.tsx:8367"
+      ]
     },
     {
       "upstreamSha": "edc503a7a8ea5284a2711981c1a10a6b9999f5e4",
@@ -32617,10 +32645,9 @@
     {
       "upstreamSha": "f21d6da51c9aa78ea12e7f13a378f55f1e63cb38",
       "subject": "perf(web): diff panel no longer re-renders every file header each time a patch arrives (#16033)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): diff panel no longer re-renders every file header each time a patch arrives (#16033).",
+      "reason": "Not applicable: upstream's diff panel receives patches per file as they arrive, and each arrival re-rendered every file header. f5 loads the whole patch in one query, so no per-file arrival happens. Upstream change: perf(web): diff panel no longer re-renders every file header each time a patch arrives (#16033)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f22331240ed1a97fae560e314bffb75fe39db8ca",
@@ -33337,10 +33364,16 @@
     {
       "upstreamSha": "f6fa4776e7d748b0af3fdf43bf3af095522a5bd3",
       "subject": "perf(web): panel toggles no longer re-render the timeline and composer (#18077)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): panel toggles no longer re-render the timeline and composer (#18077).",
+      "reason": "Ported: opening or closing a right panel re-rendered ChatView and its unmemoized composer, through the route re-render and ChatView's own header toggle subscriptions. ChatView is memoized and the header subscribes to its toggle states; the new browser test failed before the change. Upstream change: perf(web): panel toggles no longer re-render the timeline and composer (#18077)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["659f0fc6264d70aee063ee297f149d4456e857a2"],
+      "evidence": [
+        "apps/web/src/components/ChatView.tsx:738",
+        "apps/web/src/components/ChatView.tsx:562",
+        "apps/web/src/components/ChatView.browser.tsx:8536"
+      ]
     },
     {
       "upstreamSha": "f708f63fa9bcd7e51f1f62531f6f9ed966b71807",
@@ -33656,10 +33689,16 @@
     {
       "upstreamSha": "f96aebeb4bbdaf2b3d05177bd115dad4b8b41a8b",
       "subject": "perf(web): right panel tabs no longer all re-render on unrelated chat updates (#20853)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): right panel tabs no longer all re-render on unrelated chat updates (#20853).",
+      "reason": "Ported: the thread route re-renders on every streamed token and rebuilt the handlers it passes to the right panel, so the tab strip re-rendered with every token. The strip is now memoized and receives stable handlers; the new browser test failed before the change (4 renders, expected 3). Upstream change: perf(web): right panel tabs no longer all re-render on unrelated chat updates (#20853)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["97f304712822df71f697d2b13a4c9f9faf0726f0"],
+      "evidence": [
+        "apps/web/src/components/RightPanelTabs.tsx:381",
+        "apps/web/src/hooks/useStableCallback.ts:7",
+        "apps/web/src/components/ChatView.browser.tsx:8559"
+      ]
     },
     {
       "upstreamSha": "f9730979c1046e3e69ac89aa86882ebf8b2be9a6",
@@ -34438,10 +34477,17 @@
     {
       "upstreamSha": "fffe6e6c82c12769e0cbc4d89a23ec845c5abed1",
       "subject": "perf(web): virtualize command palette results (#15266)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): virtualize command palette results (#15266).",
+      "reason": "Ported: the palette mounted every result row. Results render through a virtualized list, Base UI navigates the flat item order, keyboard highlights scroll into view and Enter runs the highlighted item even when its row is unmounted. The new browser test failed before the change (60 of 60 rows mounted). Upstream change: perf(web): virtualize command palette results (#15266)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["6ea5b56efbdfbe9515811d82ba0ad598266ec343"],
+      "evidence": [
+        "apps/web/src/components/CommandPaletteResults.tsx:50",
+        "apps/web/src/components/CommandPalette.logic.ts:73",
+        "apps/web/src/components/CommandPalette.tsx:1366",
+        "apps/web/src/components/ThreadSidebar.browser.tsx:1603"
+      ]
     }
   ],
   "intervals": [
