@@ -29,6 +29,15 @@ export function claudeObservedMcpStatus(status: string): McpObservedServerStatus
   }
 }
 
+/**
+ * Codex reports a server that needs (re)authentication as a failed startup whose error
+ * asks the user to run `codex mcp login <name>`. Other wording, such as a wrapped CLI's
+ * "is not logged in", stays a failure: Codex OAuth cannot fix it.
+ */
+export function isCodexMcpLoginRequiredError(error: string | undefined): boolean {
+  return !!error && /\brun `?codex mcp login\b/i.test(error);
+}
+
 export function codexObservedMcpStatus(input: {
   readonly startupStatus?: string;
   readonly authStatus?: string;
@@ -43,13 +52,14 @@ export function codexObservedMcpStatus(input: {
     case "starting":
       return "pending";
     case "failed":
-      return "failed";
+      return isCodexMcpLoginRequiredError(input.error) ? "needs-auth" : "failed";
     case "cancelled":
       return "disabled";
     case "needs-auth":
       return "needs-auth";
   }
   if (input.startupStatus !== undefined) return "unknown";
+  if (isCodexMcpLoginRequiredError(input.error)) return "needs-auth";
   if (trimmed(input.error)) return "failed";
   return input.hasTools ? "connected" : "unknown";
 }

@@ -37,6 +37,26 @@ it("rejects newly appearing node_modules after a manual review", () => {
   ).toEqual(["node_modules/"]);
 });
 
+it("lets storage cleanup delete rebuildable outputs but keeps other ignored files protected", () => {
+  expect(
+    blockingIgnoredEntries(
+      [
+        "apps/web/dist/",
+        ".turbo/",
+        "apps/server/tsconfig.tsbuildinfo",
+        "apps/desktop/native/macos/.build/",
+        "node_modules/",
+        ".DS_Store",
+        ".env",
+        "data.sqlite",
+        "foo/",
+        "dist-private/",
+      ],
+      { kind: "rebuildable" },
+    ),
+  ).toEqual([".env", "data.sqlite", "foo/", "dist-private/"]);
+});
+
 it("ignores approval data in protection mode and retains the node_modules exemption", () => {
   const policy = { kind: "protect", approvedEntries: [".env"] } as IgnoredFilesRemovalPolicy;
   expect(blockingIgnoredEntries([".env", "node_modules/"], policy)).toEqual([".env"]);

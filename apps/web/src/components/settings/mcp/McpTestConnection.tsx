@@ -102,6 +102,13 @@ export function McpTestConnection(props: {
           {result.error ? (
             <p className="whitespace-pre-wrap break-words text-destructive">{result.error}</p>
           ) : null}
+          {result.authRequired ? (
+            <p className="text-muted-foreground">
+              {props.projectId
+                ? "A test can't sign in. Use Sign in on this server when its live status reports it needs sign-in."
+                : "A test can't sign in. Switch the settings scope to a project, or use the sign-in prompt above the composer in a conversation."}
+            </p>
+          ) : null}
           {result.stderrTail ? (
             <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-all">
               {result.stderrTail}

@@ -100,7 +100,7 @@ it.each(["codex", "claudeAgent"] as ProviderKind[])(
       </QueryClientProvider>,
     );
     try {
-      const trigger = page.getByRole("button", { name: "MCP: 1/2 connected" });
+      const trigger = page.getByRole("button", { name: "MCP: 1/2 connected, 1 needs sign-in" });
       trigger.element().focus();
       await userEvent.keyboard("{Enter}");
       await expect.element(page.getByText("docs · ready", { exact: true })).toBeVisible();
@@ -187,7 +187,7 @@ it.each(["codex", "claudeAgent"] as ProviderKind[])(
       </QueryClientProvider>,
     );
     try {
-      await page.getByRole("button", { name: "MCP: 1/2 connected" }).click();
+      await page.getByRole("button", { name: "MCP: 1/2 connected, 1 needs sign-in" }).click();
       expect(document.querySelector('[aria-label="Sign in to docs"]')).toBeNull();
       await page.getByRole("button", { name: "Sign in to search" }).click();
       await vi.waitFor(() =>

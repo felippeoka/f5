@@ -9,6 +9,7 @@ import {
   type ProviderKind,
   type ThreadId,
 } from "@t3tools/contracts";
+import { ChevronDownIcon, KeyRoundIcon } from "lucide-react";
 import { McpSignInControls } from "../settings/mcp/McpSignInButton";
 import { memo, useRef, useState } from "react";
 
@@ -97,13 +98,23 @@ function McpRuntimeChip({
     config.isSuccess && !config.isFetching
       ? createMcpDiagnosticsSanitizer(config.data.servers)
       : null;
+  const needsSignIn = servers.filter((server) => server.status === "needs-auth").length;
+  const signInLabel =
+    needsSignIn > 0 ? `${needsSignIn} ${needsSignIn === 1 ? "needs" : "need"} sign-in` : null;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="shrink-0 rounded px-1 text-2xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={`MCP: ${summary}`}
+        className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border/70 px-1.5 py-px text-2xs outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent"
+        aria-label={`MCP: ${summary}${signInLabel ? `, ${signInLabel}` : ""}`}
       >
         MCP <span className="font-mono text-foreground">{summary}</span>
+        {signInLabel ? (
+          <span className="flex items-center gap-0.5 text-warning-foreground">
+            <KeyRoundIcon aria-hidden="true" className="size-3" />
+            {signInLabel}
+          </span>
+        ) : null}
+        <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
       </PopoverTrigger>
       <PopoverPopup
         side="bottom"

@@ -12,11 +12,17 @@ import { withProviderThreadAccess } from "../provider/providerThreadAccess.ts";
 import { cleanupRequiresTypedDelete } from "@t3tools/shared/storageCleanup";
 import { userFacingCauseMessage } from "../causeMessage.ts";
 import {
+  type DiscardableChanges,
   evaluateWorktreeRemoval,
   removeWorktreeSafely,
   readWorktreeClaims,
   stopDeletedWorktreeClaims,
+  type WorktreeRemovalPolicy,
 } from "../project/worktreeClaims.ts";
+import { refreshDefaultBranch } from "../project/worktreeMerge.ts";
+import { readProjectSettings } from "../project/projectSettings.ts";
+import { canonicalWorktreePath } from "../git/worktreePaths.ts";
+import { pathContains } from "../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { NextTurnQueueStore } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { TerminalManager } from "../terminal/Services/Manager.ts";
 import { stripPathTerminator } from "../git/worktreeList.ts";
@@ -47,6 +53,7 @@ import {
   type StorageGetOperationRequest,
   type StorageGetOperationResult,
   type StoragePathWarning,
+  type StorageScanStatus,
   type StorageUsageReport,
   ThreadId,
 } from "@t3tools/contracts";
@@ -72,7 +79,7 @@ import {
 } from "../attachmentStore.ts";
 import { CheckpointStore } from "../checkpointing/Services/CheckpointStore.ts";
 import { ServerConfig } from "../config.ts";
-import { GitCore } from "../git/Services/GitCore.ts";
+import { GitCore, type RegisteredWorktree } from "../git/Services/GitCore.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
 import { withWorktreeLifecycleLock } from "../project/Layers/WorktreeLifecycleCoordinator.ts";
@@ -114,6 +121,8 @@ import {
 } from "./storagePathSafety.ts";
 
 const USAGE_CACHE_TTL_MS = 10 * 60_000;
+/** Total time a scan may spend refreshing `origin/<default>` across repositories. */
+const REMOTE_REFRESH_BUDGET = "60 seconds";
 const NONCE_TTL_MS = 15 * 60_000;
 const EVENTS_ROTATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const ARCHIVED_THREAD_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -244,6 +253,31 @@ export interface StorageMaintenanceShape {
     readonly modifiedBefore: string;
     readonly includeArchived: boolean;
   }) => Effect.Effect<StorageCleanupCategoryResult, StorageMaintenanceError>;
+  /**
+   * Hourly automation: refresh the default branch of each repository with an
+   * F5 worktree, then remove every eligible inactive F5 worktree and prune
+   * missing registrations inside the F5 worktrees folder, with the same checks
+   * as the Storage settings cleanup. External worktrees are never touched.
+   * Null when a Storage settings cleanup is running.
+   */
+  readonly cleanInactiveWorktreesAutomatically: (input: {
+    readonly operationId: string;
+  }) => Effect.Effect<ReadonlyArray<StorageCleanupCategoryResult> | null, StorageMaintenanceError>;
+  /**
+   * Read-only preview of the hourly run, from the last fetched refs. Each
+   * candidate is removed, or skipped with its reason.
+   */
+  readonly previewInactiveWorktrees: Effect.Effect<
+    ReadonlyArray<InactiveWorktreePreview>,
+    StorageMaintenanceError
+  >;
+}
+
+export interface InactiveWorktreePreview {
+  readonly path: string;
+  readonly kind: "worktree" | "missingRegistration";
+  readonly action: "remove" | "skip";
+  readonly reason: string;
 }
 
 export class StorageMaintenance extends ServiceMap.Service<
@@ -289,6 +323,11 @@ interface WorktreeReview {
   readonly commonDir: string;
   readonly head: string | null;
   readonly registration: string;
+  readonly branch?: string | null;
+  /** Uncommitted changes matching the project's disposable paths, discarded on removal. */
+  readonly discardChanges?: DiscardableChanges;
+  /** External worktrees: the project checkout Git runs in. */
+  readonly projectRoot?: string;
 }
 interface StorageReview {
   readonly worktrees: ReadonlyMap<string, WorktreeReview>;
@@ -307,9 +346,16 @@ interface UsageNonceState {
 
 interface WorktreeRemovalReadiness {
   readonly review?: WorktreeReview;
+  /** The removal policy the gate used, including resolved disposable paths. */
+  readonly policy?: WorktreeRemovalPolicy;
   readonly commandCwd: string | null;
   readonly disabledReason?: string;
   readonly warnings: ReadonlyArray<StoragePathWarning>;
+  /**
+   * Whether the branch may be deleted after removal. Kept out of the hashed
+   * review: a fetch between scan and confirmation must not invalidate it.
+   */
+  readonly branchDeletable?: boolean;
 }
 
 function storageCauseMessage(cause: Cause.Cause<unknown>): string {
@@ -739,16 +785,186 @@ const makeStorageMaintenance = Effect.gen(function* () {
 
   const retainedWorkflowThreadIds = () => engine.getReadModel().pipe(Effect.map(workflowRetention));
 
+  const canonicalOrNull = (path: string) =>
+    Effect.tryPromise(() => canonicalWorktreePath(path)).pipe(
+      Effect.orElseSucceed(() => null as string | null),
+    );
+
+  /** Non-deleted projects with their canonical workspace roots (null when unresolvable). */
+  const listProjectRoots = () =>
+    Effect.gen(function* () {
+      const projects = (yield* engine.getReadModel()).projects.filter(
+        (project) => project.deletedAt === null,
+      );
+      return yield* Effect.forEach(projects, (project) =>
+        canonicalOrNull(project.workspaceRoot).pipe(Effect.map((root) => ({ project, root }))),
+      );
+    });
+
+  const commonDirOf = (cwd: string) =>
+    git.resolveCommonDir(cwd).pipe(
+      Effect.flatMap(canonicalOrNull),
+      Effect.orElseSucceed(() => null),
+    );
+
+  /** Each project's repository common dir and disposable paths (null when unreadable). */
+  const readProjectDisposablePaths = Effect.gen(function* () {
+    if (settingsService._tag === "None") return [];
+    const global = yield* settingsService.value.getSettings.pipe(Effect.orElseSucceed(() => null));
+    if (global === null) return [];
+    return yield* Effect.forEach(
+      (yield* listProjectRoots()).filter((entry) => entry.root !== null),
+      ({ project }) =>
+        Effect.all({
+          commonDir: commonDirOf(project.workspaceRoot),
+          paths: readProjectSettings(global, project).pipe(
+            Effect.map(
+              (resolved): ReadonlyArray<string> | null => resolved.settings.worktreeDisposablePaths,
+            ),
+            Effect.catchCause(() => Effect.succeed(null)),
+          ),
+        }),
+      { concurrency: 4 },
+    );
+  });
+
+  /**
+   * A lookup of the disposable worktree paths of the projects in a worktree's
+   * repository, matched by Git common dir so subdirectory and linked-worktree
+   * projects count. With several projects, only patterns they all list apply.
+   * No matching project, or unreadable settings, means nothing is discardable.
+   * Project ownership and settings are read once per lookup, so create one per
+   * scan or cleanup pass: a later pass sees settings changes.
+   */
+  const makeDisposablePathsLookup = Effect.gen(function* () {
+    const projects = yield* Effect.cached(readProjectDisposablePaths);
+    return (commandCwd: string): Effect.Effect<ReadonlyArray<string>> =>
+      Effect.gen(function* () {
+        const commonDir = yield* commonDirOf(commandCwd);
+        if (commonDir === null) return [];
+        const owners = (yield* projects).filter((entry) => entry.commonDir === commonDir);
+        if (owners.some((entry) => entry.paths === null)) return [];
+        const [first, ...rest] = owners.map((entry) => entry.paths ?? []);
+        return (first ?? []).filter((pattern) => rest.every((paths) => paths.includes(pattern)));
+      });
+  });
+
+  /** Set by a forced scan (Rescan): refresh `origin/<default>` before measuring. */
+  let refreshRemotesBeforeNextScan = false;
+
+  /**
+   * Refresh each project repository's default branch once; failures become
+   * warnings. Repositories without `origin` are skipped, and `onlyCommonDirs`
+   * limits the refresh to repositories that own a candidate.
+   */
+  const refreshProjectRemotes = (
+    onlyCommonDirs?: ReadonlySet<string>,
+  ): Effect.Effect<ReadonlyArray<StoragePathWarning>> =>
+    Effect.gen(function* () {
+      const seen = new Set<string>();
+      const roots: string[] = [];
+      for (const { project, root } of yield* listProjectRoots()) {
+        if (root === null) continue;
+        const commonDir = yield* commonDirOf(project.workspaceRoot);
+        if (commonDir === null || seen.has(commonDir)) continue;
+        seen.add(commonDir);
+        if (onlyCommonDirs && !onlyCommonDirs.has(commonDir)) continue;
+        const hasOrigin = yield* git.listRemotes(project.workspaceRoot).pipe(
+          Effect.map((remotes) => remotes.some((remote) => remote.name === "origin")),
+          Effect.orElseSucceed(() => false),
+        );
+        if (hasOrigin) roots.push(project.workspaceRoot);
+      }
+      const warnings: StoragePathWarning[] = [];
+      yield* Effect.forEach(
+        roots,
+        (root) =>
+          refreshDefaultBranch(git, root).pipe(
+            Effect.map((message) => {
+              if (message) warnings.push(warningFor(root, message));
+            }),
+          ),
+        { concurrency: 2, discard: true },
+      ).pipe(
+        Effect.timeout(REMOTE_REFRESH_BUDGET),
+        Effect.catchCause(() =>
+          Effect.sync(() => {
+            warnings.push(
+              warningFor(
+                "origin",
+                "Refreshing remotes took too long; merge checks use refs from the last fetch.",
+              ),
+            );
+          }),
+        ),
+      );
+      return warnings;
+    });
+
+  /**
+   * Delete the removed worktree's local branch when it was merged at review,
+   * no thread still references the worktree (an archived thread recreates its
+   * checkout from the branch), and no other worktree has it checked out.
+   * The default branch and branches with a live upstream are always kept.
+   */
+  const deleteMergedBranch = (input: {
+    readonly cwd: string;
+    readonly review: WorktreeReview | undefined;
+    readonly branchDeletable: boolean;
+    readonly referencedByThreads: boolean;
+  }): Effect.Effect<"deleted" | "kept" | undefined> =>
+    Effect.gen(function* () {
+      const { review } = input;
+      if (!review?.branch) return undefined;
+      if (!input.branchDeletable || !review.head || input.referencedByThreads)
+        return "kept" as const;
+      const defaultBranch = yield* git
+        .readDefaultBranch(input.cwd)
+        .pipe(Effect.orElseSucceed(() => null));
+      if (defaultBranch === null || defaultBranch === review.branch) return "kept" as const;
+      const registrations = yield* git
+        .listWorktrees(input.cwd)
+        .pipe(Effect.orElseSucceed(() => null));
+      if (registrations === null || registrations.some((entry) => entry.branch === review.branch))
+        return "kept" as const;
+      const deleted = yield* git
+        .deleteBranchIfAt({ cwd: input.cwd, branch: review.branch, expectedSha: review.head })
+        .pipe(Effect.orElseSucceed(() => false));
+      return deleted ? ("deleted" as const) : ("kept" as const);
+    });
+
+  const discardDetail = (review: WorktreeReview | undefined): string | null => {
+    const paths = review?.discardChanges?.paths;
+    if (!paths?.length) return null;
+    const shown = paths.slice(0, 3).join(", ");
+    return `Discards ${paths.length} changed file${paths.length === 1 ? "" : "s"}: ${shown}${
+      paths.length > 3 ? "…" : ""
+    }`;
+  };
+
+  const homeRelative = (value: string) => {
+    const relative = Path.relative(OS.homedir(), value);
+    return relative.length > 0 && !relative.startsWith("..") && !Path.isAbsolute(relative)
+      ? Path.join("~", relative)
+      : value;
+  };
+
   const inspectWorktreeRemovalReadiness = (input: {
     readonly targetPath: string;
     readonly metadataOperation: string;
     readonly metadataDisabledReason: string;
+    /** Defaults to storage maintenance, or legacy cleanup for legacy operations. */
+    readonly policy?: WorktreeRemovalPolicy;
+    /** The repository checkout to run Git in; resolved from `.git` when omitted. */
+    readonly commandCwd?: string;
+    /** Resolves the owning project's disposable paths once the repository is known. */
+    readonly disposablePaths?: (commandCwd: string) => Effect.Effect<ReadonlyArray<string>>;
   }): Effect.Effect<WorktreeRemovalReadiness, never> =>
     Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [];
       const commandCwdExit = yield* Effect.exit(
         Effect.tryPromise({
-          try: () => resolveWorktreeRemoveCwd(input.targetPath),
+          try: async () => input.commandCwd ?? (await resolveWorktreeRemoveCwd(input.targetPath)),
           catch: (cause) =>
             new StorageMaintenanceError({
               operation: input.metadataOperation,
@@ -775,13 +991,19 @@ const makeStorageMaintenance = Effect.gen(function* () {
         };
       }
 
+      const basePolicy: WorktreeRemovalPolicy = input.policy ?? {
+        kind: input.metadataOperation.includes("legacy") ? "legacyCleanup" : "storageMaintenance",
+        ownThreadId: null,
+      };
+      const policy: WorktreeRemovalPolicy =
+        (basePolicy.kind === "storageMaintenance" || basePolicy.kind === "externalCleanup") &&
+        input.disposablePaths
+          ? { ...basePolicy, disposablePaths: yield* input.disposablePaths(commandCwd) }
+          : basePolicy;
       const gate = yield* evaluateWorktreeRemoval({
         projectCwd: commandCwd,
         path: input.targetPath,
-        policy: {
-          kind: input.metadataOperation.includes("legacy") ? "legacyCleanup" : "storageMaintenance",
-          ownThreadId: null,
-        },
+        policy,
       }).pipe(Effect.provideServices(removalServices));
       if (gate.blockedReasons.length)
         return {
@@ -794,6 +1016,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
       return {
         commandCwd,
         warnings,
+        policy,
+        branchDeletable: gate.branchDeletable,
         ...(gate.registration
           ? {
               review: {
@@ -801,6 +1025,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
                 commonDir: yield* git.resolveCommonDir(commandCwd),
                 head: gate.registration.headSha,
                 registration: gate.registration.path,
+                branch: gate.branch,
+                ...(gate.discardChanges ? { discardChanges: gate.discardChanges } : {}),
+                ...(policy.kind === "externalCleanup" ? { projectRoot: commandCwd } : {}),
               },
             }
           : {}),
@@ -998,15 +1225,20 @@ const makeStorageMaintenance = Effect.gen(function* () {
       return clampBytes((rows[0]?.pageSize ?? 0) * (freeRows[0]?.freelistCount ?? 0));
     }).pipe(Effect.catch(() => Effect.succeed(0)));
 
-  const computeF5WorktreeTargets = (scan?: {
-    threads: ReadonlyArray<ThreadRow>;
-    paths: ReadonlyArray<string>;
-    byCheckpoint: Map<string, { bytes: number; latestMtimeMs: number }>;
-    worktreeReviews: Map<string, WorktreeReview>;
-  }) =>
+  const computeF5WorktreeTargets = (
+    scan?: {
+      threads: ReadonlyArray<ThreadRow>;
+      paths: ReadonlyArray<string>;
+      byCheckpoint: Map<string, { bytes: number; latestMtimeMs: number }>;
+      worktreeReviews: Map<string, WorktreeReview>;
+    },
+    /** Cleanup re-measures each target as it removes it, so it skips sizing here. */
+    options?: { readonly skipSizing?: boolean },
+  ) =>
     Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [];
       const allThreads = scan?.threads ?? (yield* queryThreadRows());
+      const disposablePathsFor = yield* makeDisposablePathsLookup;
       const listed = scan
         ? { paths: scan.paths, warnings: [] }
         : yield* Effect.tryPromise({
@@ -1031,9 +1263,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
             const usageExit = yield* Effect.exit(
               Effect.tryPromise({
                 try: () =>
-                  scan
+                  scan || options?.skipSizing
                     ? Promise.resolve({
-                        bytes: scan.byCheckpoint.get(Path.resolve(targetPath))?.bytes ?? 0,
+                        bytes: scan?.byCheckpoint.get(Path.resolve(targetPath))?.bytes ?? 0,
                         errors: [] as ReadonlyArray<StoragePathWarning>,
                         fileCount: 0,
                         directoryCount: 0,
@@ -1066,6 +1298,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
             );
 
             let disabledReason: string | undefined;
+            let review: WorktreeReview | undefined;
             if (Path.resolve(targetPath) === Path.resolve(config.worktreesDir)) {
               disabledReason = "Refused to delete the configured F5 worktrees root.";
             } else if (!isPathWithinRoot({ root: config.worktreesDir, target: targetPath })) {
@@ -1077,11 +1310,14 @@ const makeStorageMaintenance = Effect.gen(function* () {
                 targetPath,
                 metadataOperation: "StorageMaintenance.inspect.f5Worktrees.cwd",
                 metadataDisabledReason: GIT_WORKTREE_METADATA_UNRESOLVED,
+                disposablePaths: disposablePathsFor,
               });
               warnings.push(...readiness.warnings);
               disabledReason = readiness.disabledReason;
+              review = readiness.review;
               if (readiness.review) scan?.worktreeReviews.set(targetPath, readiness.review);
             }
+            const discards = disabledReason === undefined ? discardDetail(review) : null;
 
             const relativeLabel = Path.relative(config.worktreesDir, targetPath);
             const contextThread = nonDeletedReferences.toSorted((a, b) =>
@@ -1103,18 +1339,189 @@ const makeStorageMaintenance = Effect.gen(function* () {
               bytes,
               safeToDelete: disabledReason === undefined,
               ...(disabledReason ? { disabledReason } : {}),
-              detail:
+              detail: [
                 archivedReferences.length > 0
                   ? `Referenced by ${archivedReferences.length} archived thread${
                       archivedReferences.length === 1 ? "" : "s"
                     }.`
                   : "Orphaned F5 worktree.",
+                discards,
+              ]
+                .filter(Boolean)
+                .join(" · "),
             } satisfies StorageCleanupTarget;
           }),
         { concurrency: 4 },
       );
 
       return { targets, warnings };
+    });
+
+  /** Registered linked worktrees of each project repository, read once per repository. */
+  const listProjectRegistrations = () =>
+    Effect.gen(function* () {
+      const warnings: StoragePathWarning[] = [];
+      const projects = yield* listProjectRoots();
+      const seen = new Set<string>();
+      const registrations: Array<{
+        readonly entry: RegisteredWorktree;
+        readonly projectRoot: string;
+        readonly projectName: string;
+      }> = [];
+      for (const { project, root } of projects) {
+        if (root === null) continue;
+        const entries = yield* git.listWorktrees(project.workspaceRoot).pipe(
+          Effect.catch((error) =>
+            Effect.sync(() => {
+              if (!/not a git repository/i.test(error.detail))
+                warnings.push(warningFor(project.workspaceRoot, error.detail));
+              return [] as ReadonlyArray<RegisteredWorktree>;
+            }),
+          ),
+        );
+        for (const entry of entries) {
+          if (entry.isMain || entry.bare || seen.has(entry.canonicalPath)) continue;
+          seen.add(entry.canonicalPath);
+          registrations.push({
+            entry,
+            projectRoot: project.workspaceRoot,
+            projectName: project.title,
+          });
+        }
+      }
+      return {
+        registrations,
+        projectRoots: projects.flatMap((entry) => (entry.root ? [entry.root] : [])),
+        warnings,
+      };
+    });
+
+  /**
+   * Linked worktrees of project repositories that live outside the F5 and
+   * legacy T3 worktrees folders (temporary directories, other tools' folders,
+   * sibling checkouts). Removed only with `git worktree remove`, per target.
+   */
+  const computeExternalWorktreeTargets = (scan?: {
+    readonly threads: ReadonlyArray<ThreadRow>;
+    readonly worktreeReviews: Map<string, WorktreeReview>;
+    readonly signal?: AbortSignal | undefined;
+  }) =>
+    Effect.gen(function* () {
+      const warnings: StoragePathWarning[] = [];
+      const allThreads = scan?.threads ?? (yield* queryThreadRows());
+      const managedRoot = yield* canonicalOrNull(config.worktreesDir);
+      const legacyRoot = yield* canonicalOrNull(Path.join(legacyT3BaseDir(), "worktrees"));
+      const disposablePathsFor = yield* makeDisposablePathsLookup;
+      const listed = yield* listProjectRegistrations();
+      warnings.push(...listed.warnings);
+      const candidates: Array<(typeof listed.registrations)[number]> = [];
+      for (const registration of listed.registrations) {
+        const canonicalPath = registration.entry.canonicalPath;
+        if (managedRoot && pathContains(managedRoot, canonicalPath)) continue;
+        if (legacyRoot && pathContains(legacyRoot, canonicalPath)) continue;
+        if (listed.projectRoots.includes(canonicalPath)) continue;
+        const stat = yield* Effect.tryPromise(() => safeLstat(registration.entry.path)).pipe(
+          Effect.orElseSucceed(() => null),
+        );
+        if (stat?.isDirectory() && !stat.isSymbolicLink()) candidates.push(registration);
+      }
+      const targets = yield* Effect.forEach(
+        candidates,
+        ({ entry, projectRoot, projectName }) =>
+          Effect.gen(function* () {
+            const targetPath = entry.path;
+            const usage = yield* Effect.tryPromise(() =>
+              recursiveSize(targetPath, scan?.signal ? { signal: scan.signal } : {}),
+            ).pipe(Effect.orElseSucceed(() => null));
+            if (usage) warnings.push(...usage.errors);
+            else warnings.push(warningFor(targetPath, "Failed to size external worktree."));
+            const references = allThreads.filter(
+              (thread) =>
+                thread.deletedAt === null &&
+                thread.worktreePath !== null &&
+                (pathsOverlap(targetPath, thread.worktreePath) ||
+                  pathsOverlap(entry.canonicalPath, thread.worktreePath)),
+            );
+            let disabledReason: string | undefined;
+            let review: WorktreeReview | undefined;
+            if (references.some(isActiveStorageThread)) {
+              disabledReason = "Referenced by an active thread.";
+            } else {
+              const readiness = yield* inspectWorktreeRemovalReadiness({
+                targetPath,
+                metadataOperation: "StorageMaintenance.inspect.externalWorktrees.cwd",
+                metadataDisabledReason: GIT_WORKTREE_METADATA_UNRESOLVED,
+                policy: { kind: "externalCleanup", ownThreadId: null },
+                commandCwd: projectRoot,
+                disposablePaths: disposablePathsFor,
+              });
+              warnings.push(...readiness.warnings);
+              disabledReason = readiness.disabledReason;
+              review = readiness.review;
+              if (readiness.review) scan?.worktreeReviews.set(targetPath, readiness.review);
+            }
+            const contextThread = references.toSorted((a, b) =>
+              b.lastInteractionAt.localeCompare(a.lastInteractionAt),
+            )[0];
+            return {
+              id: targetPath,
+              label: homeRelative(targetPath),
+              projectName,
+              ...(contextThread ? { threadTitle: contextThread.title } : {}),
+              path: targetPath,
+              bytes: usage?.bytes ?? 0,
+              safeToDelete: disabledReason === undefined,
+              ...(disabledReason ? { disabledReason } : {}),
+              detail: [
+                `External · ${entry.branch ?? "detached"}`,
+                disabledReason === undefined ? discardDetail(review) : null,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            } satisfies StorageCleanupTarget;
+          }),
+        { concurrency: 4 },
+      );
+      return { targets, warnings };
+    });
+
+  /** Unlocked worktree registrations whose directory no longer exists. */
+  const computeStaleRegistrationTargets = (threads?: ReadonlyArray<ThreadRow>) =>
+    Effect.gen(function* () {
+      const allThreads = threads ?? (yield* queryThreadRows());
+      const listed = yield* listProjectRegistrations();
+      const targets: Array<StorageCleanupTarget & { readonly projectRoot: string }> = [];
+      for (const { entry, projectRoot, projectName } of listed.registrations) {
+        if (entry.locked !== null) continue;
+        const missing = yield* Effect.tryPromise(() => safeLstat(entry.path)).pipe(
+          Effect.map((stat) => stat === null),
+          Effect.orElseSucceed(() => false),
+        );
+        if (!missing) continue;
+        const active = allThreads.some(
+          (thread) =>
+            isActiveStorageThread(thread) &&
+            thread.worktreePath !== null &&
+            Path.resolve(thread.worktreePath) === Path.resolve(entry.path),
+        );
+        targets.push({
+          id: entry.path,
+          label: homeRelative(entry.path),
+          projectName,
+          path: entry.path,
+          projectRoot,
+          bytes: 0,
+          safeToDelete: !active,
+          ...(active
+            ? {
+                disabledReason:
+                  "Referenced by an active thread. Recreate or remove it from the thread.",
+              }
+            : {}),
+          detail: `Missing folder · ${entry.branch ?? "detached"}`,
+        });
+      }
+      return { targets, warnings: listed.warnings };
     });
 
   const enrichLegacyWorktreeTargets = (
@@ -1166,10 +1573,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
   /** The read-only scan behind a usage report, without its confirmation nonce. */
   const scanUsage = (
     signal?: AbortSignal,
-    progress: (
-      phase: "database" | "files" | "worktrees" | "legacy" | "providers" | "finalizing",
-      entries?: number,
-    ) => void = () => {},
+    progress: (phase: NonNullable<StorageScanStatus["phase"]>, entries?: number) => void = () => {},
   ) =>
     Effect.gen(function* () {
       const nowMs = Date.now();
@@ -1186,6 +1590,12 @@ const makeStorageMaintenance = Effect.gen(function* () {
         progress(next, entries);
       };
       const warnings: StoragePathWarning[] = [];
+      if (refreshRemotesBeforeNextScan) {
+        refreshRemotesBeforeNextScan = false;
+        phase("remotes");
+        warnings.push(...(yield* refreshProjectRemotes()));
+        phase("database");
+      }
       const allThreads = yield* queryThreadRows();
       const archivedThreadCutoffIso = new Date(nowMs - ARCHIVED_THREAD_RETENTION_MS).toISOString();
       const retained = yield* retainedWorkflowThreadIds();
@@ -1436,6 +1846,14 @@ const makeStorageMaintenance = Effect.gen(function* () {
         worktreeReviews,
       });
       warnings.push(...f5WorktreeCandidates.warnings);
+      const externalWorktreeCandidates = yield* computeExternalWorktreeTargets({
+        threads: allThreads,
+        worktreeReviews,
+        signal,
+      });
+      warnings.push(...externalWorktreeCandidates.warnings);
+      const staleRegistrationCandidates = yield* computeStaleRegistrationTargets(allThreads);
+      warnings.push(...staleRegistrationCandidates.warnings);
       const vacuumBytes = yield* computeVacuumReclaimableBytes();
       phase("providers", measured.entries);
       const codexLeftovers = yield* computeCodexMarketplaceLeftovers(signal);
@@ -1549,12 +1967,43 @@ const makeStorageMaintenance = Effect.gen(function* () {
           section: "worktrees",
           title: "Delete inactive F5 worktrees",
           description:
-            "Removes clean F5 worktrees that are orphaned or referenced only by archived threads.",
+            "Removes merged or pushed F5 worktrees that are orphaned or referenced only by archived threads. Build output is deleted; other uncommitted work keeps a worktree. Merged branches are deleted unless an archived thread needs them.",
           bytes: worktreesUsage.bytes,
           reclaimableBytes: f5WorktreeReclaimableBytes,
           defaultSelected: false,
           impact: "high",
           targets: f5WorktreeCandidates.targets,
+        }),
+        categoryUsage({
+          id: "externalWorktrees",
+          section: "worktrees",
+          title: "Delete external worktrees",
+          description:
+            "Removes merged or pushed worktrees of your projects that live outside F5's worktrees folder, such as temporary or other tools' checkouts, with git worktree remove. Merged branches are deleted.",
+          bytes: externalWorktreeCandidates.targets.reduce(
+            (total, target) => total + target.bytes,
+            0,
+          ),
+          reclaimableBytes: externalWorktreeCandidates.targets
+            .filter((target) => target.safeToDelete)
+            .reduce((total, target) => total + target.bytes, 0),
+          defaultSelected: false,
+          impact: "high",
+          targets: externalWorktreeCandidates.targets,
+        }),
+        categoryUsage({
+          id: "staleWorktreeRegistrations",
+          section: "worktrees",
+          title: "Prune missing worktree entries",
+          description:
+            "Forgets Git worktree registrations whose folder no longer exists. Nothing on disk is deleted.",
+          bytes: 0,
+          reclaimableBytes: 0,
+          defaultSelected: true,
+          impact: "none",
+          targets: staleRegistrationCandidates.targets.map(
+            ({ projectRoot: _projectRoot, ...target }) => target,
+          ),
         }),
         categoryUsage({
           id: "providerLogsForTerminalThreads",
@@ -1943,6 +2392,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
   const getUsage: StorageMaintenanceShape["getUsage"] = (request = {}) =>
     Effect.gen(function* () {
       pruneConfirmations();
+      if (request.force) refreshRemotesBeforeNextScan = true;
       let state = yield* coordinator.snapshot;
       if (
         request.force ||
@@ -2006,6 +2456,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
     });
   const inspect: StorageMaintenanceShape["inspect"] = (request = {}) =>
     Effect.gen(function* () {
+      if (request.force) refreshRemotesBeforeNextScan = true;
       yield* coordinator.request(request.force);
       const latest = yield* coordinator.awaitLatest;
       if (!latest)
@@ -2101,7 +2552,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
       }
       for (const categoryId of requested) {
         if (
-          (categoryId === "legacyT3Worktrees" || categoryId === "inactiveF5Worktrees") &&
+          (categoryId === "legacyT3Worktrees" ||
+            categoryId === "inactiveF5Worktrees" ||
+            categoryId === "externalWorktrees") &&
           !targetSelections.has(categoryId)
         ) {
           return yield* new StorageMaintenanceError({
@@ -2758,22 +3211,342 @@ const makeStorageMaintenance = Effect.gen(function* () {
       });
     });
 
-  /** Remove reviewed checkouts after revalidating identity, claims and cancellation. */
-  const cleanF5Worktrees = (
+  type StorageWorktreeRemoval =
+    | { readonly kind: "skipped"; readonly warnings: ReadonlyArray<StoragePathWarning> }
+    | {
+        readonly kind: "removed";
+        readonly warnings: ReadonlyArray<StoragePathWarning>;
+        readonly bytes: number;
+        readonly branch: "deleted" | "kept" | undefined;
+      };
+
+  /**
+   * Remove one storage-cleanup worktree. The reference re-check and the
+   * removal run under the worktree lifecycle lock, so a send, terminal open or
+   * recreation that claims the path meanwhile is seen before anything is
+   * removed. Without a scan review (automatic runs) the checks made under the
+   * lock are the review.
+   */
+  const removeStorageWorktree = (input: {
+    readonly operationId: string;
+    readonly targetPath: string;
+    readonly kind: "storageMaintenance" | "externalCleanup";
+    /** External worktrees: the project checkout recorded at review. */
+    readonly commandCwd?: string;
+  }): Effect.Effect<StorageWorktreeRemoval, StorageMaintenanceError> =>
+    Effect.gen(function* () {
+      const { operationId, targetPath } = input;
+      const operationLabel =
+        input.kind === "externalCleanup" ? "externalWorktrees" : "inactiveF5Worktrees";
+      const before = yield* Effect.tryPromise({
+        try: () => recursiveSize(targetPath),
+        catch: (cause) =>
+          new StorageMaintenanceError({
+            operation: `StorageMaintenance.cleanup.${operationLabel}.size`,
+            message: "Failed to size the worktree before deletion.",
+            cause,
+          }),
+      });
+      const claims = yield* readWorktreeClaims(targetPath).pipe(
+        Effect.provideServices(removalServices),
+      );
+      const stopped = yield* stopDeletedWorktreeClaims(claims.deletedThreadIds).pipe(
+        Effect.provideServices(removalServices),
+        Effect.exit,
+      );
+      if (Exit.isFailure(stopped))
+        return {
+          kind: "skipped",
+          warnings: [
+            warningFor(
+              targetPath,
+              `Could not stop deleted conversation processes: ${storageCauseMessage(stopped.cause)}`,
+            ),
+          ],
+        };
+      let branch: "deleted" | "kept" | undefined;
+      return yield* withWorktreeLifecycleLock(
+        targetPath,
+        Effect.gen(function* () {
+          if (checkCancelled(operationId)) return { kind: "skipped" as const, warnings: [] };
+          if (input.kind === "storageMaintenance") {
+            const reviewedPath = yield* Effect.promise(() =>
+              validateDeletablePath({
+                path: targetPath,
+                allowedRoot: config.worktreesDir,
+                expectedIdentity: reviewIdentity(operationId, targetPath),
+                directoryIdentityOnly: true,
+              }),
+            );
+            if (reviewedPath.kind !== "validated")
+              return {
+                kind: "skipped" as const,
+                warnings: reviewedPath.warning ? [reviewedPath.warning] : [],
+              };
+          }
+          const reviewed = operationReviews.get(operationId)?.worktrees.get(targetPath);
+          if (input.kind === "externalCleanup" && !reviewed)
+            return {
+              kind: "skipped" as const,
+              warnings: [warningFor(targetPath, "Rescan to review this worktree before removal.")],
+            };
+          const readiness = yield* inspectWorktreeRemovalReadiness({
+            targetPath,
+            metadataOperation: `StorageMaintenance.cleanup.${operationLabel}.cwd`,
+            metadataDisabledReason: GIT_WORKTREE_METADATA_UNRESOLVED,
+            policy: { kind: input.kind, ownThreadId: null },
+            ...(input.commandCwd ? { commandCwd: input.commandCwd } : {}),
+            // Fresh under the lock, so a settings change since the scan applies.
+            disposablePaths: yield* makeDisposablePathsLookup,
+          });
+          if (readiness.disabledReason || !readiness.commandCwd)
+            return {
+              kind: "skipped" as const,
+              warnings: [
+                ...readiness.warnings,
+                warningFor(
+                  targetPath,
+                  readiness.disabledReason ?? GIT_WORKTREE_METADATA_UNRESOLVED,
+                ),
+              ],
+            };
+          if (reviewed && canonicalJsonHash(readiness.review) !== canonicalJsonHash(reviewed))
+            return {
+              kind: "skipped" as const,
+              warnings: [
+                warningFor(
+                  targetPath,
+                  "Worktree repository, registration, HEAD, or local changes changed since review. Rescan to retry.",
+                ),
+              ],
+            };
+          const review = reviewed ?? readiness.review;
+          const commandCwd = readiness.commandCwd;
+          const removeExit = yield* Effect.exit(
+            removeWorktreeSafely({
+              projectCwd: commandCwd,
+              path: targetPath,
+              policy: readiness.policy ?? { kind: input.kind, ownThreadId: null },
+              expectedRootIdentity: reviewIdentity(operationId, targetPath),
+              isCancelled: () => checkCancelled(operationId),
+              ...(review ? { expectedHead: review.head } : {}),
+              expectedDiscardChanges: review?.discardChanges,
+              afterRemoval: () =>
+                deleteMergedBranch({
+                  cwd: commandCwd,
+                  review,
+                  // Re-evaluated under the lock just now, not taken from the scan.
+                  branchDeletable: readiness.branchDeletable === true,
+                  referencedByThreads: claims.threadIds.length > 0,
+                }).pipe(
+                  Effect.map((outcome) => {
+                    branch = outcome;
+                  }),
+                ),
+            }).pipe(
+              Effect.provideServices(removalServices),
+              Effect.flatMap((result) =>
+                result.blockedReasons.length
+                  ? Effect.fail(new Error(result.blockedReasons.join("; ")))
+                  : Effect.void,
+              ),
+            ),
+          );
+          if (Exit.isFailure(removeExit))
+            return {
+              kind: "skipped" as const,
+              warnings: [
+                ...readiness.warnings,
+                warningFor(
+                  targetPath,
+                  `git worktree remove failed: ${storageCauseMessage(removeExit.cause)}`,
+                ),
+              ],
+            };
+          return {
+            kind: "removed" as const,
+            warnings: readiness.warnings,
+            bytes: before.bytes,
+            branch,
+          };
+        }),
+      ).pipe(
+        Effect.catchTag("RepositoryLifecycleError", (error) =>
+          Effect.succeed({
+            kind: "skipped" as const,
+            warnings: [warningFor(targetPath, error.message)],
+          }),
+        ),
+      );
+    });
+
+  /** Remove reviewed external worktrees, revalidating identity, claims and cancellation. */
+  const cleanExternalWorktrees = (
     request: CleanupInput,
     context: StorageCleanupContext | undefined,
     selectedTargetIds: ReadonlySet<string> | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const warnings: StoragePathWarning[] = [];
+      const perTargetReclaimed: PerTargetReclaimed = [];
+      const reviews = operationReviews.get(request.operationId)?.worktrees;
+      const targetPaths = [...(selectedTargetIds ?? [])];
+      let completedTargets = 0;
+      for (const targetPath of targetPaths) {
+        if (checkCancelled(request.operationId)) break;
+        yield* publishProgress(request, context, {
+          categoryId: "externalWorktrees",
+          phase: "deleting",
+          message: `Deleting ${homeRelative(targetPath)}`,
+          completedTargets,
+          totalTargets: targetPaths.length,
+        });
+        completedTargets += 1;
+        const projectRoot = reviews?.get(targetPath)?.projectRoot;
+        if (!projectRoot) {
+          warnings.push(warningFor(targetPath, "Rescan to review this worktree before removal."));
+          continue;
+        }
+        const targetStat = yield* Effect.tryPromise(() => safeLstat(targetPath)).pipe(
+          Effect.orElseSucceed(() => null),
+        );
+        if (!targetStat || targetStat.isSymbolicLink() || !targetStat.isDirectory()) {
+          warnings.push(
+            warningFor(
+              targetPath,
+              "Refused to remove a missing, symlinked, or non-directory worktree.",
+            ),
+          );
+          continue;
+        }
+        const outcome = yield* removeStorageWorktree({
+          operationId: request.operationId,
+          targetPath,
+          kind: "externalCleanup",
+          commandCwd: projectRoot,
+        });
+        warnings.push(...outcome.warnings);
+        if (outcome.kind === "skipped") continue;
+        markStorageMutation(request.operationId);
+        perTargetReclaimed.push({
+          id: targetPath,
+          path: targetPath,
+          reclaimedBytes: outcome.bytes,
+          status: "Removed",
+          ...(outcome.branch ? { branch: outcome.branch } : {}),
+        });
+      }
+      return resultFor({
+        categoryId: "externalWorktrees",
+        status:
+          perTargetReclaimed.length > 0 ? "Cleaned" : warnings.length > 0 ? "Failed" : "Skipped",
+        reclaimedBytes: perTargetReclaimed.reduce(
+          (total, target) => total + target.reclaimedBytes,
+          0,
+        ),
+        perTargetReclaimed,
+        warnings,
+        ...(targetPaths.length === 0
+          ? { message: "No selected external worktrees were found." }
+          : {}),
+      });
+    });
+
+  /** Missing worktree folders that were inside the F5 worktrees folder. */
+  const isManagedWorktreePath = (path: string) =>
+    Effect.gen(function* () {
+      const managedRoot = yield* canonicalOrNull(config.worktreesDir);
+      const resolved = Path.resolve(path);
+      return (
+        pathContains(Path.resolve(config.worktreesDir), resolved) ||
+        (managedRoot !== null && pathContains(managedRoot, resolved))
+      );
+    });
+
+  /**
+   * Forget registrations whose folder is still missing, one at a time.
+   * `managedOnly` (the hourly run) leaves entries outside the F5 worktrees
+   * folder alone: an unmounted disk must not lose its checkout's registration.
+   */
+  const clearStaleRegistrations = (
+    request: CleanupOperation,
+    context: StorageCleanupContext | undefined,
+    selectedTargetIds: ReadonlySet<string> | undefined,
+    options?: { readonly managedOnly?: boolean },
+  ) =>
+    Effect.gen(function* () {
+      const warnings: StoragePathWarning[] = [];
+      const perTargetReclaimed: PerTargetReclaimed = [];
+      const candidates = yield* computeStaleRegistrationTargets();
+      warnings.push(...candidates.warnings);
+      const targets = yield* Effect.filter(candidates.targets, (target) =>
+        selectedTargetIds !== undefined && !selectedTargetIds.has(target.id)
+          ? Effect.succeed(false)
+          : options?.managedOnly
+            ? isManagedWorktreePath(target.id)
+            : Effect.succeed(true),
+      );
+      let completedTargets = 0;
+      for (const target of targets) {
+        if (checkCancelled(request.operationId)) break;
+        yield* publishProgress(request, context, {
+          categoryId: "staleWorktreeRegistrations",
+          phase: "deleting",
+          message: `Pruning ${target.label}`,
+          completedTargets,
+          totalTargets: targets.length,
+        });
+        completedTargets += 1;
+        if (!target.safeToDelete) {
+          warnings.push(warningFor(target.id, target.disabledReason ?? "Target is not safe."));
+          continue;
+        }
+        // Re-checks under the repository lock that the folder is still missing.
+        const cleared = yield* git
+          .clearMissingRegistration(target.projectRoot, target.id)
+          .pipe(Effect.exit);
+        if (Exit.isFailure(cleared)) {
+          warnings.push(warningFor(target.id, storageCauseMessage(cleared.cause)));
+          continue;
+        }
+        markStorageMutation(request.operationId);
+        perTargetReclaimed.push({
+          id: target.id,
+          path: target.id,
+          reclaimedBytes: 0,
+          status: "Removed",
+        });
+      }
+      return resultFor({
+        categoryId: "staleWorktreeRegistrations",
+        status:
+          perTargetReclaimed.length > 0 ? "Cleaned" : warnings.length > 0 ? "Failed" : "Skipped",
+        perTargetReclaimed,
+        warnings,
+        ...(targets.length === 0 ? { message: "No missing worktree entries were found." } : {}),
+      });
+    });
+
+  /** Remove reviewed checkouts after revalidating identity, claims and cancellation. */
+  const cleanF5Worktrees = (
+    request: CleanupOperation,
+    context: StorageCleanupContext | undefined,
+    selectedTargetIds: ReadonlySet<string> | undefined,
     preflightWarnings: ReadonlyArray<StoragePathWarning>,
+    /** Automatic runs: act on every eligible target and skip blocked ones silently. */
+    options?: { readonly eligibleOnly?: boolean },
   ) =>
     Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [...preflightWarnings];
       const perTargetReclaimed: PerTargetReclaimed = [];
-      const candidates = yield* computeF5WorktreeTargets();
+      const candidates = yield* computeF5WorktreeTargets(undefined, { skipSizing: true });
       warnings.push(...candidates.warnings);
       const targets =
         selectedTargetIds !== undefined
           ? candidates.targets.filter((target) => selectedTargetIds.has(target.id))
-          : candidates.targets;
+          : options?.eligibleOnly
+            ? candidates.targets.filter((target) => target.safeToDelete)
+            : candidates.targets;
       if (targets.length === 0) {
         return resultFor({
           categoryId: "inactiveF5Worktrees",
@@ -2839,125 +3612,11 @@ const makeStorageMaintenance = Effect.gen(function* () {
           continue;
         }
 
-        // The reference re-check and the removal run under the worktree
-        // lifecycle lock, so a send, terminal open or recreation that claims
-        // the path meanwhile is seen before anything is removed.
-        const before = yield* Effect.tryPromise({
-          try: () => recursiveSize(targetPath),
-          catch: (cause) =>
-            new StorageMaintenanceError({
-              operation: "StorageMaintenance.cleanup.inactiveF5Worktrees.size",
-              message: "Failed to size F5 worktree before deletion.",
-              cause,
-            }),
-        });
-        const claims = yield* readWorktreeClaims(targetPath).pipe(
-          Effect.provideServices(removalServices),
-        );
-        const stopped = yield* stopDeletedWorktreeClaims(claims.deletedThreadIds).pipe(
-          Effect.provideServices(removalServices),
-          Effect.exit,
-        );
-        if (Exit.isFailure(stopped)) {
-          warnings.push(
-            warningFor(
-              targetPath,
-              `Could not stop deleted conversation processes: ${storageCauseMessage(stopped.cause)}`,
-            ),
-          );
-          completedTargets += 1;
-          continue;
-        }
-        const outcome = yield* withWorktreeLifecycleLock(
+        const outcome = yield* removeStorageWorktree({
+          operationId: request.operationId,
           targetPath,
-          Effect.gen(function* () {
-            if (checkCancelled(request.operationId))
-              return { kind: "skipped" as const, warnings: [] };
-            const reviewedPath = yield* Effect.promise(() =>
-              validateDeletablePath({
-                path: targetPath,
-                allowedRoot: config.worktreesDir,
-                expectedIdentity: reviewIdentity(request.operationId, targetPath),
-                directoryIdentityOnly: true,
-              }),
-            );
-            if (reviewedPath.kind !== "validated")
-              return {
-                kind: "skipped" as const,
-                warnings: reviewedPath.warning ? [reviewedPath.warning] : [],
-              };
-            const readiness = yield* inspectWorktreeRemovalReadiness({
-              targetPath,
-              metadataOperation: "StorageMaintenance.cleanup.inactiveF5Worktrees.cwd",
-              metadataDisabledReason: GIT_WORKTREE_METADATA_UNRESOLVED,
-            });
-            if (readiness.disabledReason || !readiness.commandCwd) {
-              return {
-                kind: "skipped" as const,
-                warnings: [
-                  ...readiness.warnings,
-                  warningFor(
-                    targetPath,
-                    readiness.disabledReason ?? GIT_WORKTREE_METADATA_UNRESOLVED,
-                  ),
-                ],
-              };
-            }
-
-            const reviewed = operationReviews.get(request.operationId)?.worktrees.get(targetPath);
-            if (reviewed && canonicalJsonHash(readiness.review) !== canonicalJsonHash(reviewed))
-              return {
-                kind: "skipped" as const,
-                warnings: [
-                  warningFor(
-                    targetPath,
-                    "Worktree repository, registration, or HEAD changed since review. Rescan to retry.",
-                  ),
-                ],
-              };
-            const removeExit = yield* Effect.exit(
-              removeWorktreeSafely({
-                projectCwd: readiness.commandCwd,
-                path: targetPath,
-                policy: { kind: "storageMaintenance", ownThreadId: null },
-                expectedRootIdentity: reviewIdentity(request.operationId, targetPath),
-                isCancelled: () => checkCancelled(request.operationId),
-                ...(reviewed ? { expectedHead: reviewed.head } : {}),
-              }).pipe(
-                Effect.provideServices(removalServices),
-                Effect.flatMap((result) =>
-                  result.blockedReasons.length
-                    ? Effect.fail(new Error(result.blockedReasons.join("; ")))
-                    : Effect.void,
-                ),
-              ),
-            );
-            if (Exit.isFailure(removeExit)) {
-              return {
-                kind: "skipped" as const,
-                warnings: [
-                  ...readiness.warnings,
-                  warningFor(
-                    targetPath,
-                    `git worktree remove failed: ${storageCauseMessage(removeExit.cause)}`,
-                  ),
-                ],
-              };
-            }
-            return {
-              kind: "removed" as const,
-              warnings: readiness.warnings,
-              bytes: before.bytes,
-            };
-          }),
-        ).pipe(
-          Effect.catchTag("RepositoryLifecycleError", (error) =>
-            Effect.succeed({
-              kind: "skipped" as const,
-              warnings: [warningFor(targetPath, error.message)],
-            }),
-          ),
-        );
+          kind: "storageMaintenance",
+        });
         warnings.push(...outcome.warnings);
         if (outcome.kind === "skipped") {
           completedTargets += 1;
@@ -2969,6 +3628,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
           id: target.id,
           path: targetPath,
           reclaimedBytes: outcome.bytes,
+          status: "Removed",
+          ...(outcome.branch ? { branch: outcome.branch } : {}),
         });
         completedTargets += 1;
       }
@@ -3518,6 +4179,10 @@ const makeStorageMaintenance = Effect.gen(function* () {
                   targetSelections.get(categoryId),
                   f5WorktreeReferenceWarnings,
                 );
+              case "externalWorktrees":
+                return cleanExternalWorktrees(request, context, targetSelections.get(categoryId));
+              case "staleWorktreeRegistrations":
+                return clearStaleRegistrations(request, context, targetSelections.get(categoryId));
               case "providerLogsForTerminalThreads":
                 return pruneProviderLogsForTerminalThreads(
                   request,
@@ -3878,6 +4543,69 @@ const makeStorageMaintenance = Effect.gen(function* () {
       Effect.mapError(toStorageMaintenanceError("StorageMaintenance.listTerminalThreadLogs")),
     );
 
+  const cleanInactiveWorktreesAutomatically: StorageMaintenanceShape["cleanInactiveWorktreesAutomatically"] =
+    (input) =>
+      Effect.gen(function* () {
+        // A Storage settings cleanup owns the profile while it runs.
+        if (cleanupStatus && activeStates.has(cleanupStatus.state)) return null;
+        // Fetch only repositories that own an F5 worktree.
+        const owners = new Set<string>();
+        for (const { entry, projectRoot } of (yield* listProjectRegistrations()).registrations) {
+          if (!(yield* isManagedWorktreePath(entry.canonicalPath))) continue;
+          const commonDir = yield* commonDirOf(projectRoot);
+          if (commonDir !== null) owners.add(commonDir);
+        }
+        const fetchWarnings = owners.size > 0 ? yield* refreshProjectRemotes(owners) : [];
+        const removed = yield* cleanF5Worktrees(
+          { operationId: input.operationId },
+          undefined,
+          undefined,
+          fetchWarnings,
+          { eligibleOnly: true },
+        );
+        const pruned = yield* clearStaleRegistrations(
+          { operationId: input.operationId },
+          undefined,
+          undefined,
+          { managedOnly: true },
+        );
+        return [removed, pruned];
+      }).pipe(
+        Effect.ensuring(finishStorageMutation(input.operationId)),
+        Effect.mapError(
+          toStorageMaintenanceError("StorageMaintenance.cleanInactiveWorktreesAutomatically"),
+        ),
+      );
+
+  const previewInactiveWorktrees: StorageMaintenanceShape["previewInactiveWorktrees"] = Effect.gen(
+    function* () {
+      const previews: InactiveWorktreePreview[] = [];
+      const worktrees = yield* computeF5WorktreeTargets(undefined, { skipSizing: true });
+      for (const target of worktrees.targets) {
+        previews.push({
+          path: target.path ?? target.id,
+          kind: "worktree",
+          action: target.safeToDelete ? "remove" : "skip",
+          reason: target.safeToDelete
+            ? ["inactive worktree", target.detail].filter(Boolean).join(" · ")
+            : (target.disabledReason ?? "Target is not safe."),
+        });
+      }
+      for (const target of (yield* computeStaleRegistrationTargets()).targets) {
+        if (!(yield* isManagedWorktreePath(target.id))) continue;
+        previews.push({
+          path: target.id,
+          kind: "missingRegistration",
+          action: target.safeToDelete ? "remove" : "skip",
+          reason: target.safeToDelete
+            ? "the worktree folder is missing; its registration would be pruned"
+            : (target.disabledReason ?? "Target is not safe."),
+        });
+      }
+      return previews;
+    },
+  ).pipe(Effect.mapError(toStorageMaintenanceError("StorageMaintenance.previewInactiveWorktrees")));
+
   const pruneTerminalThreadLogs: StorageMaintenanceShape["pruneTerminalThreadLogs"] = (input) =>
     Effect.gen(function* () {
       // Enumerate outside the engine gate; each unlink revalidates eligibility
@@ -4193,6 +4921,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
     reclaimDatabaseSpace,
     listTerminalThreadLogs,
     pruneTerminalThreadLogs,
+    cleanInactiveWorktreesAutomatically,
+    previewInactiveWorktrees,
   } satisfies StorageMaintenanceShape;
 });
 

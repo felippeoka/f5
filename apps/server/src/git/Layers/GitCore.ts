@@ -101,6 +101,11 @@ interface ExecuteGitOptions {
   onStderrChunk?: ((chunk: Uint8Array) => void) | undefined;
 }
 
+function sameStringSet(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+  const expected = new Set(right);
+  return new Set(left).size === expected.size && left.every((value) => expected.has(value));
+}
+
 function parseBranchAb(value: string): { ahead: number; behind: number } {
   const match = value.match(/^\+(\d+)\s+-(\d+)$/);
   if (!match) return { ahead: 0, behind: 0 };
@@ -2307,7 +2312,8 @@ const makeGitCore = Effect.gen(function* () {
         // Stream the index: ordinary repositories can exceed the buffered output cap.
         // Retain only gitlinks and the current (possibly split) NUL-delimited record.
         const gitlinks: string[] = [];
-        const indexFingerprint = options?.recoveryFingerprint ? createHash("sha256") : null;
+        const indexFingerprint =
+          options?.recoveryFingerprint || options?.changesFingerprint ? createHash("sha256") : null;
         const decoder = new TextDecoder();
         let pending = "";
         yield* git.execute({
@@ -2345,10 +2351,18 @@ const makeGitCore = Effect.gen(function* () {
         const status = (yield* executeGit(
           "GitCore.inspectCheckout",
           cwd,
-          ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+          [
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            // Exact discard needs every untracked file, not a collapsed `dir/`.
+            options?.changesFingerprint ? "--untracked-files=all" : "--untracked-files=normal",
+          ],
           { timeoutMs: options?.statusTimeoutMs ?? 30_000 },
         )).stdout;
         const changedPaths: string[] = [];
+        const untrackedPaths: string[] = [];
         let hasTrackedChanges = false;
         let hasUntrackedChanges = false;
         const records = status.split("\0");
@@ -2356,8 +2370,10 @@ const makeGitCore = Effect.gen(function* () {
           const record = records[i]!;
           if (!record) continue;
           changedPaths.push(record.slice(3));
-          if (record.startsWith("??")) hasUntrackedChanges = true;
-          else {
+          if (record.startsWith("??")) {
+            hasUntrackedChanges = true;
+            untrackedPaths.push(record.slice(3));
+          } else {
             hasTrackedChanges = true;
             if (/^[RC]|^.[RC]/.test(record)) {
               if (records[i + 1]) changedPaths.push(records[i + 1]!);
@@ -2365,6 +2381,16 @@ const makeGitCore = Effect.gen(function* () {
             }
           }
         }
+        const indexDigest = indexFingerprint?.digest() ?? new Uint8Array();
+        // Only the changed paths: ignored build output can hold far more files than fit the
+        // budget. The index is included so content staged after review is detected too.
+        const changesFingerprint = options?.changesFingerprint
+          ? yield* Effect.tryPromise({
+              try: () => checkoutFingerprint(cwd, changedPaths, indexDigest, status),
+              catch: (cause) =>
+                createGitCommandError("GitCore.inspectCheckout", cwd, [], String(cause)),
+            })
+          : null;
         const ignored = yield* listIgnoredEntries(cwd);
         if (options?.recoveryFingerprint && ignored.truncated)
           return yield* createGitCommandError(
@@ -2373,13 +2399,13 @@ const makeGitCore = Effect.gen(function* () {
             [],
             "The ignored-file listing is incomplete; recovery inspection cannot verify all local files.",
           );
-        const localFingerprint = indexFingerprint
+        const localFingerprint = options?.recoveryFingerprint
           ? yield* Effect.tryPromise({
               try: () =>
                 checkoutFingerprint(
                   cwd,
                   [...changedPaths, ...ignored.entries],
-                  indexFingerprint.digest(),
+                  indexDigest,
                   status,
                 ),
               catch: (cause) =>
@@ -2419,6 +2445,9 @@ const makeGitCore = Effect.gen(function* () {
           hasInitializedSubmodules,
           hasTrackedChanges,
           hasUntrackedChanges,
+          changedPaths,
+          untrackedPaths,
+          ...(changesFingerprint ? { changesFingerprint } : {}),
           ignoredEntries: ignored.entries,
           ignoredTruncated: ignored.truncated,
           upstreamRef,
@@ -2733,7 +2762,10 @@ const makeGitCore = Effect.gen(function* () {
           ["worktree", "remove", "--", input.path],
           `The target ${input.path} is not an unlocked linked worktree.`,
         );
-      const inspection = yield* inspectCheckout(target);
+      const inspection = yield* inspectCheckout(
+        target,
+        input.discardChanges ? { changesFingerprint: true } : undefined,
+      );
       if (inspection.hasInitializedSubmodules)
         return yield* createGitCommandError(
           "GitCore.removeWorktree",
@@ -2742,14 +2774,20 @@ const makeGitCore = Effect.gen(function* () {
           "Initialized submodules prevent safe removal. Deinitialize them after preserving their local work, then retry.",
         );
       const expectedCommon = yield* resolveCommonDir(input.cwd).pipe(Effect.flatMap(canonicalPath));
+      const hasChanges = inspection.hasTrackedChanges || inspection.hasUntrackedChanges;
+      // Discarding is allowed only for the exact reviewed change set, unchanged since review.
+      const discardsReviewedChanges =
+        hasChanges &&
+        input.discardChanges !== undefined &&
+        inspection.changesFingerprint === input.discardChanges.fingerprint &&
+        sameStringSet(inspection.changedPaths ?? [], input.discardChanges.paths);
       if (
         inspection.commonDir !== expectedCommon ||
         inspection.canonicalRoot !== target ||
         inspection.registration?.canonicalPath !== target ||
-        inspection.branch === null ||
+        (inspection.branch === null && input.allowDetachedHead !== true) ||
         inspection.operation !== null ||
-        inspection.hasTrackedChanges ||
-        inspection.hasUntrackedChanges ||
+        (hasChanges && !discardsReviewedChanges) ||
         inspection.ignoredTruncated ||
         blockingIgnoredEntries(inspection.ignoredEntries, input.ignoredFiles).length > 0
       ) {
@@ -2760,11 +2798,48 @@ const makeGitCore = Effect.gen(function* () {
           "Checkout identity, local changes, or protected ignored files prevent removal.",
         );
       }
+      if (discardsReviewedChanges) {
+        // Discard exactly the reviewed paths instead of forcing removal: a file
+        // an editor or watcher writes after the review stays a local change, and
+        // the plain `worktree remove` below then refuses.
+        const untracked = new Set(inspection.untrackedPaths ?? []);
+        const tracked = (inspection.changedPaths ?? []).filter((path) => !untracked.has(path));
+        if (tracked.length > 0)
+          yield* executeGit(
+            "GitCore.removeWorktree.restore",
+            target,
+            [
+              "--literal-pathspecs",
+              "restore",
+              "--source=HEAD",
+              "--staged",
+              "--worktree",
+              "--",
+              ...tracked,
+            ],
+            { timeoutMs: 60_000 },
+          );
+        if (untracked.size > 0)
+          yield* executeGit(
+            "GitCore.removeWorktree.clean",
+            target,
+            ["--literal-pathspecs", "clean", "-f", "-q", "--", ...untracked],
+            { timeoutMs: 60_000 },
+          );
+      }
       yield* executeGit(
         "GitCore.removeWorktree",
         input.cwd,
         ["worktree", "remove", "--", entry.path],
-        { timeoutMs: 300_000 },
+        {
+          timeoutMs: 300_000,
+          ...(discardsReviewedChanges
+            ? {
+                fallbackErrorMessage:
+                  "The reviewed changes were discarded, but new local changes appeared, so the worktree was kept.",
+              }
+            : {}),
+        },
       );
       yield* finishRemoval;
     });
