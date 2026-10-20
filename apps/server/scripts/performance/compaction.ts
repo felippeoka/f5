@@ -36,7 +36,7 @@ export async function measureCompaction(filename: string, method: typeof fixture
               yield* sql`WITH RECURSIVE entries(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM entries WHERE n < ${MAX_EVENTS_PER_GROUP})
         INSERT INTO orchestration_events(event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,actor_kind,payload_json,metadata_json)
         SELECT 'perf-' || n,'thread','perf',n,'thread.message-sent',${fixture.epoch},'provider',
-          json_object('messageId','perf-message','threadId','perf','turnId','perf-turn','role','assistant','text',CASE WHEN n = ${MAX_EVENTS_PER_GROUP} THEN '' ELSE 'x' END,'streaming',json(CASE WHEN n = ${MAX_EVENTS_PER_GROUP} THEN 'false' ELSE 'true' END),'createdAt',${fixture.epoch}),'{}' FROM entries`;
+          json_object('messageId','perf-message','threadId','perf','turnId','perf-turn','role','assistant','text',CASE WHEN n = ${MAX_EVENTS_PER_GROUP} THEN '' ELSE ${"x".repeat(fixture.assistantStream.maxDeltaChars)} END,'streaming',json(CASE WHEN n = ${MAX_EVENTS_PER_GROUP} THEN 'false' ELSE 'true' END),'createdAt',${fixture.epoch}),'{}' FROM entries`;
             }),
           )
           .pipe(Effect.asVoid),
@@ -96,7 +96,12 @@ export async function measureCompaction(filename: string, method: typeof fixture
     );
     return {
       samples,
-      diagnostics: { maxWriterWaitMs, maxTransactionMs, groupEvents: MAX_EVENTS_PER_GROUP },
+      diagnostics: {
+        maxWriterWaitMs,
+        maxTransactionMs,
+        groupEvents: MAX_EVENTS_PER_GROUP,
+        deltaCharacters: fixture.assistantStream.maxDeltaChars,
+      },
     };
   } finally {
     await runtime.dispose();
