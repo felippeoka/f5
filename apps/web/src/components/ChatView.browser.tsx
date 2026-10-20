@@ -8503,6 +8503,23 @@ describe("ChatView timeline (full app)", () => {
       }
     });
 
+    it("does not commit the timeline while typing in the composer", async () => {
+      const { mounted } = await mountIsolatedChatView();
+      try {
+        const editor = await waitForComposerEditor();
+        editor.focus();
+        await waitForRenderQuiet();
+        resetRenderCommits();
+        await userEvent.keyboard("draft text");
+        await vi.waitFor(() => expect(editor.textContent).toContain("draft text"));
+        await waitForRenderQuiet();
+        expect(renderCommits.composer).toBeGreaterThan(0);
+        expect(renderCommits.timeline).toBe(0);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
     it("does not re-render the sidebar for a router update that keeps the location", async () => {
       const { mounted } = await mountIsolatedChatView();
       try {
