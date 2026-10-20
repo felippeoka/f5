@@ -4536,17 +4536,10 @@
     },
     {
       "upstreamSha": "2cde3f770bbf7a6ed9d52a6b1f64a471c0303a5a",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal tells the shell its new width as soon as you release a resize drag (#19395).",
+      "classification": "equivalent:apps/web/src/components/ThreadTerminalDrawer.tsx:840",
+      "reason": "Equivalent: upstream removed a debounce so the shell learns its new width on drag release. f5 never debounced: every drawer height change fits xterm and sends the PTY resize on the next animation frame. Upstream change: fix(web): terminal tells the shell its new width as soon as you release a resize drag (#19395)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19395"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "7fd2ba7526b94080810de575f5ab15fe96d2bb5d",
@@ -5136,17 +5129,9 @@
     },
     {
       "upstreamSha": "1ce8089ebd3317dad220f49deb541654c2f05fb5",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): scroll terminal output with touch gestures (#11305).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-11305"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:ghostty-terminal",
+      "reason": "Not-applicable: Ghostty terminal renderer change; f5 uses xterm.js. Upstream change: fix(web): scroll terminal output with touch gestures (#11305)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9c9ae43d80fa0e7a697257dc4cc9be950e534747",
@@ -5473,20 +5458,9 @@
     },
     {
       "upstreamSha": "540a3e89ed15a78129ff6bc91f561abddba8f6d8",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): collect active tool calls without array shifts (#18853).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18853"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:timeline-prepend-grouping",
+      "reason": "Not-applicable: avoids unshift when upstream prepends older timeline rows into groups; f5's timeline grouping only appends and never prepends. Upstream change: perf(web): collect active tool calls without array shifts (#18853)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5070a83a3248c537d3baaf063e719f179c49bb52",
@@ -5835,17 +5809,9 @@
     },
     {
       "upstreamSha": "37e2acda5118d13c144efb009d4911ff8f65d6ed",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal colors no longer look washed out (#17168).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17168"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:ghostty-terminal",
+      "reason": "Not-applicable: Ghostty terminal renderer change; f5 uses xterm.js. Upstream change: fix(web): terminal colors no longer look washed out (#17168)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "19bef8c1d5724953f8866b19e9e8c382bd99315f",
@@ -5997,20 +5963,9 @@
     },
     {
       "upstreamSha": "6bbb72c61dfcbd3b7f9398ca8ce99b86c6bdefdb",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): Thinking shimmer steps instead of drawing every frame (#18191).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18191"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:live-activity-shimmer",
+      "reason": "Not-applicable: pauses upstream's live-activity shimmer animation offscreen; f5 has no shimmer animation. Upstream change: perf(web): Thinking shimmer steps instead of drawing every frame (#18191)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "fded2cac5f83e8aea0a4bccd5545e724da33eb0f",
@@ -6233,17 +6188,9 @@
     },
     {
       "upstreamSha": "9e8c7206c873fc2e4c042a442abce269c20b5cd8",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal selection drags scroll at the window edge (#17653).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17653"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:ghostty-terminal",
+      "reason": "Not-applicable: Ghostty terminal renderer change; f5 uses xterm.js. Upstream change: fix(web): terminal selection drags scroll at the window edge (#17653)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "55fc13ff68d2598b0613721041533dd1160bc5bd",
@@ -12413,20 +12360,9 @@
     },
     {
       "upstreamSha": "39efcd855833a1486ff7662e2efcedeeee6be0cc",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): DOM changes no longer restyle the whole page (#15265).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-15265"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:composer-banner",
+      "reason": "Not-applicable: replaces sibling :has() selectors around upstream's ComposerBanner; f5 has neither the banner nor any sibling :has() selectors in the composer. Upstream change: perf(web): DOM changes no longer restyle the whole page (#15265)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "70e5a40c20ddbaab7831ab36e17e64c9908269a5",
@@ -13554,17 +13490,9 @@
     },
     {
       "upstreamSha": "ed57bed8e71b2e89a9350c94bda0dacc71cd4817",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(web): skip unchanged shortcut modifier updates - 195x typing latency improvement (#13884).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13884"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:shortcut-modifier-hints",
+      "reason": "Not-applicable: fixes upstream's held-modifier shortcut hint overlay getting stuck; f5 has no held-modifier hint state. Upstream change: fix(web): skip unchanged shortcut modifier updates - 195x typing latency improvement (#13884)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d15210cd3da79f9a1a495a6309d912d76362a046",
@@ -13983,20 +13911,9 @@
     },
     {
       "upstreamSha": "6989856aa630611dd7d6dcc8cfe9f97456816284",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): hidden terminal drawers no longer keep full thread history in memory (#13686).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13686"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:background-terminal-drawers",
+      "reason": "Not-applicable: stops hidden terminal drawers from rendering in the background. f5 mounts only the active thread's drawer, and only while it is open (apps/web/src/components/ChatView.tsx:7905). Upstream change: perf(web): hidden terminal drawers no longer keep full thread history in memory (#13686)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b2577d6eface9589d120bdc53e4ec0431b1e9331",

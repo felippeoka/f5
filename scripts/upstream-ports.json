@@ -3917,10 +3917,9 @@
     {
       "upstreamSha": "1ce8089ebd3317dad220f49deb541654c2f05fb5",
       "subject": "fix(web): scroll terminal output with touch gestures (#11305)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): scroll terminal output with touch gestures (#11305).",
+      "reason": "Not-applicable: Ghostty terminal renderer change; f5 uses xterm.js. Upstream change: fix(web): scroll terminal output with touch gestures (#11305)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1ced38a6647b7f466b535b4b413ca4a74303da8e",
@@ -6117,10 +6116,11 @@
     {
       "upstreamSha": "2cde3f770bbf7a6ed9d52a6b1f64a471c0303a5a",
       "subject": "fix(web): terminal tells the shell its new width as soon as you release a resize drag (#19395)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal tells the shell its new width as soon as you release a resize drag (#19395).",
+      "reason": "Equivalent: upstream removed a debounce so the shell learns its new width on drag release. f5 never debounced: every drawer height change fits xterm and sends the PTY resize on the next animation frame. Upstream change: fix(web): terminal tells the shell its new width as soon as you release a resize drag (#19395)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/components/ThreadTerminalDrawer.tsx:840"]
     },
     {
       "upstreamSha": "2ce3e4ae74deb63bda7aaf059949a12aaaefed56",
@@ -7573,10 +7573,9 @@
     {
       "upstreamSha": "37e2acda5118d13c144efb009d4911ff8f65d6ed",
       "subject": "fix(web): terminal colors no longer look washed out (#17168)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal colors no longer look washed out (#17168).",
+      "reason": "Not-applicable: Ghostty terminal renderer change; f5 uses xterm.js. Upstream change: fix(web): terminal colors no longer look washed out (#17168)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "37ea8a88dee3fe3256e6333e10dd43c214ec660c",
@@ -7938,10 +7937,9 @@
     {
       "upstreamSha": "39efcd855833a1486ff7662e2efcedeeee6be0cc",
       "subject": "perf(web): DOM changes no longer restyle the whole page (#15265)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): DOM changes no longer restyle the whole page (#15265).",
+      "reason": "Not-applicable: replaces sibling :has() selectors around upstream's ComposerBanner; f5 has neither the banner nor any sibling :has() selectors in the composer. Upstream change: perf(web): DOM changes no longer restyle the whole page (#15265)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3a02c9cf1d6767cad60e5056cb5b722931f6cc5d",
@@ -9124,10 +9122,15 @@
     {
       "upstreamSha": "42e1a0fba2938bd56761db63f466962342d7b779",
       "subject": "fix(web): terminal drawer keeps its height after the window shrinks (#17658)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal drawer keeps its height after the window shrinks (#17658).",
+      "reason": "Ported: the window resize handler synced the window-capped height back as the stored preference, so shrinking the window permanently shortened the drawer. The drawer keeps the preference separate from the window cap and renders the minimum; only drags persist a new height. Upstream change: fix(web): terminal drawer keeps its height after the window shrinks (#17658)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["62f5fc6b171b227d0ea1e2e91c8ac9bdbdef958c"],
+      "evidence": [
+        "apps/web/src/components/ThreadTerminalDrawer.tsx:990",
+        "apps/web/src/components/ThreadTerminalDrawer.test.ts:141"
+      ]
     },
     {
       "upstreamSha": "42f71dfe0768ee768283d50140e7d360a635ee28",
@@ -11432,10 +11435,9 @@
     {
       "upstreamSha": "540a3e89ed15a78129ff6bc91f561abddba8f6d8",
       "subject": "perf(web): collect active tool calls without array shifts (#18853)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): collect active tool calls without array shifts (#18853).",
+      "reason": "Not-applicable: avoids unshift when upstream prepends older timeline rows into groups; f5's timeline grouping only appends and never prepends. Upstream change: perf(web): collect active tool calls without array shifts (#18853)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "542287245dc93186a0d11f347e786d4264d547df",
@@ -14314,10 +14316,9 @@
     {
       "upstreamSha": "6989856aa630611dd7d6dcc8cfe9f97456816284",
       "subject": "perf(web): hidden terminal drawers no longer keep full thread history in memory (#13686)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): hidden terminal drawers no longer keep full thread history in memory (#13686).",
+      "reason": "Not-applicable: stops hidden terminal drawers from rendering in the background. f5 mounts only the active thread's drawer, and only while it is open (apps/web/src/components/ChatView.tsx:7905). Upstream change: perf(web): hidden terminal drawers no longer keep full thread history in memory (#13686)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "699da956899fb4db219b827855610095568e5a7c",
@@ -14617,10 +14618,9 @@
     {
       "upstreamSha": "6bbb72c61dfcbd3b7f9398ca8ce99b86c6bdefdb",
       "subject": "perf(web): Thinking shimmer steps instead of drawing every frame (#18191)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): Thinking shimmer steps instead of drawing every frame (#18191).",
+      "reason": "Not-applicable: pauses upstream's live-activity shimmer animation offscreen; f5 has no shimmer animation. Upstream change: perf(web): Thinking shimmer steps instead of drawing every frame (#18191)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6bc6cb6be4ebecd5bd7a3b7b88f07cb61815ded5",
@@ -16793,10 +16793,12 @@
     {
       "upstreamSha": "7ab28a3b2e8837bb919c9b83b4b463b6ebf85c4a",
       "subject": "perf(web): reuse the collator when sorting diff files (#18420)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): reuse the collator when sorting diff files (#18420).",
+      "reason": "Ported: diff file sorting created a new Intl collator per comparison through localeCompare options. The diff panel, inline diffs, the changed-file tree and turnDiffTree now share module-level numeric collators. Upstream change: perf(web): reuse the collator when sorting diff files (#18420)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["95182948d2608a42dae39dcdaa9452d3ec6c6feb"],
+      "evidence": ["apps/web/src/lib/filePathCollator.ts:8"]
     },
     {
       "upstreamSha": "7ab800a43c770b2c48a2d9306c89b6177f61ad4a",
@@ -18118,10 +18120,12 @@
     {
       "upstreamSha": "8569ce962a072cfd3943519f81645d6e51d8a03f",
       "subject": "perf(web): avoid quadratic markdown link scans (#18387)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): avoid quadratic markdown link scans (#18387).",
+      "reason": "Ported: the markdown link href scan in ChatMarkdown used a backtracking regex that went quadratic on long unclosed brackets. collectMarkdownLinkHrefs now scans once with precomputed next-index tables; the tests check parity with the old regex on 2,000 generated strings and a linear-time bound. Upstream change: perf(web): avoid quadratic markdown link scans (#18387)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["cd286adfd3e47b15e3b4d4251dca2d8cf98ff7e9"],
+      "evidence": ["apps/web/src/markdown-links.ts:183", "apps/web/src/markdown-links.test.ts:10"]
     },
     {
       "upstreamSha": "8583eac643b8c248bcd835e8de81c7c0d7182ad3",
@@ -18883,10 +18887,12 @@
     {
       "upstreamSha": "8bc9b78f827072a89707f6e4b577710e27263697",
       "subject": "fix(web): terminal links drop a trailing colon (#13408)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal links drop a trailing colon (#13408).",
+      "reason": "Ported: terminal path links kept a trailing colon (e.g. `src/a.ts:` from compiler output), so the link opened a nonexistent path. Trailing punctuation now includes the colon; the new tests failed before the change (5 failures). Upstream change: fix(web): terminal links drop a trailing colon (#13408)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["67a37a3110d62e52420a0039738b5b194e3ae24d"],
+      "evidence": ["apps/web/src/terminal-links.ts:27", "apps/web/src/terminal-links.test.ts:346"]
     },
     {
       "upstreamSha": "8bd544cdfd22aa38ab82bc1adc0b851755a299ef",
@@ -21413,10 +21419,9 @@
     {
       "upstreamSha": "9e8c7206c873fc2e4c042a442abce269c20b5cd8",
       "subject": "fix(web): terminal selection drags scroll at the window edge (#17653)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): terminal selection drags scroll at the window edge (#17653).",
+      "reason": "Not-applicable: Ghostty terminal renderer change; f5 uses xterm.js. Upstream change: fix(web): terminal selection drags scroll at the window edge (#17653)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9ea892e3b365faff31eed294ac38f70d122656b2",
@@ -31860,10 +31865,9 @@
     {
       "upstreamSha": "ed57bed8e71b2e89a9350c94bda0dacc71cd4817",
       "subject": "fix(web): skip unchanged shortcut modifier updates - 195x typing latency improvement (#13884)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(web): skip unchanged shortcut modifier updates - 195x typing latency improvement (#13884).",
+      "reason": "Not-applicable: fixes upstream's held-modifier shortcut hint overlay getting stuck; f5 has no held-modifier hint state. Upstream change: fix(web): skip unchanged shortcut modifier updates - 195x typing latency improvement (#13884)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ed6fe339d71863f39a1d5405554a3bac892e55b6",

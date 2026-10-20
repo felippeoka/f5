@@ -1766,3 +1766,24 @@ feature workstreams:
 favorites) to 15k and
 [t3code#18740](https://github.com/pingdotgg/t3code/pull/18740) (revealing
 running terminals) to 15p.
+
+**Batch 8 (web rendering and terminal, 13 records).** Four ports.
+[t3code#18387](https://github.com/pingdotgg/t3code/pull/18387) replaces the
+backtracking markdown link regex with a single linear scan, checked for parity
+against the old regex on 2,000 generated strings.
+[t3code#18420](https://github.com/pingdotgg/t3code/pull/18420) sorts diff
+files with shared collators instead of building one per comparison.
+[t3code#13408](https://github.com/pingdotgg/t3code/pull/13408) drops a
+trailing colon from terminal path links (5 new tests failed first).
+[t3code#17658](https://github.com/pingdotgg/t3code/pull/17658) keeps the
+terminal drawer's stored height when the window shrinks: f5 synced the
+window-capped height back as the preference, so the drawer stayed short after
+the window grew again. One is equivalent:
+[t3code#19395](https://github.com/pingdotgg/t3code/pull/19395) removes a
+resize debounce f5 never had. Eight change things f5 does not have: the
+held-modifier shortcut hints, the composer banner's sibling `:has()`
+selectors, timeline prepending, the live-activity shimmer, background
+terminal drawers (f5 mounts only the open drawer of the active thread), and
+three Ghostty renderer changes (f5 uses xterm.js). The four new reason keys
+use the `upstream-only-subsystem:` prefix, because the plan validator accepts
+only that prefix outside its fixed key list.
