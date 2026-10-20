@@ -371,10 +371,9 @@
     {
       "upstreamSha": "033866c7aa55c53593ca31538f7d8ac99fdfe0fd",
       "subject": "perf(web): sidebar drags restyle only the sidebar (#17659)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): sidebar drags restyle only the sidebar (#17659).",
+      "reason": "Deferred: upstream stops writing the app-wide --sidebar-width on every drag frame and sizes only the sidebar gap and container. f5 width guards test a candidate width by writing --sidebar-width on the wrapper and measuring the layout (apps/web/src/threadSidebarWidth.ts:41, apps/web/src/routes/_chat.$threadId.tsx:218); with inline widths on the gap and container those writes stop moving the layout, so the guards would measure stale widths. The guards need reworking before this can be ported. Upstream change: perf(web): sidebar drags restyle only the sidebar (#17659)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "035058a23e651ea5f407c9ab73cf5329cc40c102",
@@ -4271,10 +4270,9 @@
     {
       "upstreamSha": "20012ebd80b06a4c10ab0e78893822e7f873b2a8",
       "subject": "fix(web): keep the terminal toggle clear of the last header action (#13426)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keep the terminal toggle clear of the last header action (#13426).",
+      "reason": "Not-applicable: widens the padding upstream's chat header reserves for its floating panel toggles. f5's terminal and panel toggles are laid out in the header's own flex row (apps/web/src/components/chat/ChatHeader.tsx:225), so there is no reserved gap to tune. Upstream change: fix(web): keep the terminal toggle clear of the last header action (#13426)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "200fa826b02cf0503c6f6c2bd7250a58747bff2d",
@@ -6247,10 +6245,11 @@
     {
       "upstreamSha": "2d81e4c27559bbd78564bc8cc3b38a0011814361",
       "subject": "fix(web): clear stale chat action shortcuts (#15394)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): clear stale chat action shortcuts (#15394).",
+      "reason": "Equivalent: upstream now removes an action's keybinding when the action is deleted or its shortcut cleared. f5's persistProjectScripts already removes every custom rule for the action's command before adding the new one, and deletion passes the command with a null shortcut. f5 has no global default actions, so upstream's keep-if-used-elsewhere check has nothing to protect. Upstream change: fix(web): clear stale chat action shortcuts (#15394)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["337287aaa8c469e28a5efeccca6f98dd6f5f83b5"],
+      "evidence": ["apps/web/src/components/ChatView.tsx:3255"]
     },
     {
       "upstreamSha": "2d8378b4404888f0d5458e8fc9c83b1032e21290",
@@ -9034,10 +9033,9 @@
     {
       "upstreamSha": "429c625a8515f9c2e4af28c488fbf32ce7789645",
       "subject": "fix(web): workspace card docks beside chat when the window is narrow (#14992)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): workspace card docks beside chat when the window is narrow (#14992).",
+      "reason": "Not-applicable: reworks how upstream's workspace/thread details card docks beside the chat canvas on narrow windows; f5 has neither the details card nor the ChatCanvas layout. Upstream change: fix(web): workspace card docks beside chat when the window is narrow (#14992)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "429d66c13666c4e243065bbd02bee48e1eea2307",
@@ -9475,10 +9473,12 @@
     {
       "upstreamSha": "45b5993a527fd51813393c3bafcddab430b3a8e1",
       "subject": "fix(web): text generation no longer falls back to the expensive flagship model (#19722)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): text generation no longer falls back to the expensive flagship model (#19722).",
+      "reason": "Ported: when the saved text generation model left the catalog, the fallback picked the catalog's preferred model, the flagship chat model. It now tries the driver's text generation default first; the new test failed before the change (got the flagship). Upstream change: fix(web): text generation no longer falls back to the expensive flagship model (#19722)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["8ec04538fa7217623a254d8076e478930400ad60"],
+      "evidence": ["apps/web/src/modelSelection.ts:299", "apps/web/src/modelSelection.test.ts:465"]
     },
     {
       "upstreamSha": "45bd3b631bf1e84520c90ebdfdd1b135871ced14",
@@ -9649,10 +9649,11 @@
     {
       "upstreamSha": "472ea7ec5f67fae660dc606b82698d15a2bc850f",
       "subject": "fix(web): find update settings from the command palette (#17396)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): find update settings from the command palette (#17396).",
+      "reason": "Equivalent: upstream registers its update-track and app-version rows with settings search. f5's settings search already indexes Updates, Beta updates (channel, prerelease) and Application version. Upstream change: fix(web): find update settings from the command palette (#17396)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["228a562fb986de9ab76d0dc751f886002acf7963"],
+      "evidence": ["apps/web/src/components/settings/categories/AboutSettings.descriptors.ts:13"]
     },
     {
       "upstreamSha": "4749035bda13b4b6260499caedbc0d69a2f60e6f",
@@ -10841,10 +10842,11 @@
     {
       "upstreamSha": "4f909be2c1a2eb4a88e6a51c8d0ef25e47a027d2",
       "subject": "fix(web): settings save again after a stored value fails decode (#19312)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings save again after a stored value fails decode (#19312).",
+      "reason": "Equivalent: upstream re-read and decoded the stored value on every functional write, so a blob that no longer matched its schema blocked all later writes. f5 never re-reads storage on write: setValue updates from React state, and app settings fall back to defaults when the stored blob fails to decode. Upstream change: fix(web): settings save again after a stored value fails decode (#19312)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/hooks/useLocalStorage.ts:121", "apps/web/src/appSettings.ts:846"]
     },
     {
       "upstreamSha": "4fb03aff0bcddf3379e9f9277a87e8eae994a2ae",
@@ -22451,10 +22453,15 @@
     {
       "upstreamSha": "a6aebbe2e06e6f2fb247a291272dcfbedb8ed63f",
       "subject": "fix(web): size the model picker to its content (#15152)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): size the model picker to its content (#15152).",
+      "reason": "Ported: the picker always rendered at its 384px cap, so a provider with few models showed a mostly empty list. The list now fits its rows up to the cap, and the picker holds its height while searching (f5 also hides the provider sidebar then). Covered by a new browser test. Upstream change: fix(web): size the model picker to its content (#15152)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["72a4f0b2bf158d295791aeabe630cd8cffcbebea"],
+      "evidence": [
+        "apps/web/src/components/chat/ModelPickerContent.tsx:253",
+        "apps/web/src/components/chat/ProviderModelPicker.browser.tsx:318"
+      ]
     },
     {
       "upstreamSha": "a6c9b41f902fba2a4137806c09e829935e91baac",
@@ -26468,10 +26475,9 @@
     {
       "upstreamSha": "c5d4d2d04cce7c7fa60ac1c51974c4328cbaa8e5",
       "subject": "fix(web): keep chat banners inside the lane beside the docked details card (#17094)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keep chat banners inside the lane beside the docked details card (#17094).",
+      "reason": "Not-applicable: keeps chat banners inside the lane beside upstream's docked thread details card; f5 has no docked details card. Upstream change: fix(web): keep chat banners inside the lane beside the docked details card (#17094)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c5d7309152f2c93f7334afe54f99c41372e15d10",
@@ -26933,10 +26939,15 @@
     {
       "upstreamSha": "c9181d81a8f026f39679ef2363c976d581268b35",
       "subject": "fix(web): scrolling over the thread minimap scrolls the chat (#17652)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): scrolling over the thread minimap scrolls the chat (#17652).",
+      "reason": "Ported: the turn rail and the minimap float beside the timeline's scroll container, so a wheel over either scrolled nothing. Both now replay the wheel on the timeline and scroll it; the new browser test failed before the change. Upstream change: fix(web): scrolling over the thread minimap scrolls the chat (#17652)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["dbc6b5448422c9833b41d604348b6fcd247841b2"],
+      "evidence": [
+        "apps/web/src/components/chat/timelineMinimapWheel.ts:6",
+        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:641"
+      ]
     },
     {
       "upstreamSha": "c91e93c231e7ae6ec993f8496120ef04dd5fe24d",
@@ -27012,10 +27023,16 @@
     {
       "upstreamSha": "ca40de081c3ab087cd6458ce9bef12e43c5a7233",
       "subject": "fix(web): right panel and terminal drawer follow the pointer while dragging (#17657)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): right panel and terminal drawer follow the pointer while dragging (#17657).",
+      "reason": "Ported the terminal drawer half: every pointer move re-rendered the drawer and refit xterm, so the edge trailed the pointer. A drag now writes the height to the drawer and commits state, fit and persistence on release; the new browser test failed before the change. The side-panel half was already in place: f5's resizable panels use SidebarRail, which writes --sidebar-width to the DOM each frame without re-rendering. Upstream change: fix(web): right panel and terminal drawer follow the pointer while dragging (#17657)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["61e23312731eb5245bfcc346f7a8bc561265fbb5"],
+      "evidence": [
+        "apps/web/src/components/ThreadTerminalDrawer.tsx:1203",
+        "apps/web/src/components/ThreadTerminalDrawer.browser.tsx:65",
+        "apps/web/src/components/ui/sidebar.tsx:568"
+      ]
     },
     {
       "upstreamSha": "ca4f84e702428656665d53635e16251112091657",
@@ -30024,10 +30041,11 @@
     {
       "upstreamSha": "dff750b1b8818eb004b8c3d060edcdc09f88a07f",
       "subject": "fix(web): stop question answers from resetting the editor caret (#11337)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): stop question answers from resetting the editor caret (#11337).",
+      "reason": "Equivalent: upstream stopped its question-answer change handler from refocusing the editor at a computed offset, which reset the caret. f5's handler only stores the answer, cursor and trigger state and never moves the editor selection. Upstream change: fix(web): stop question answers from resetting the editor caret (#11337)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/components/ChatView.tsx:2195"]
     },
     {
       "upstreamSha": "dffb4cd3b16dc6f41aced99922950ee3083082c6",
@@ -31958,10 +31976,16 @@
     {
       "upstreamSha": "ede3f2d6ba4943ba0a14aa4af656cfa537a1efe6",
       "subject": "fix(web): model picker search lists newest models first (#18494)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): model picker search lists newest models first (#18494).",
+      "reason": "Ported: model picker search penalized match position and name length and broke ties alphabetically, so older or shorter names outranked the newest model in a family. It now scores by match tier only and keeps the provider's newest-first order among equal matches; exact names still win. 7 of the new ranking tests failed under the old scoring. Upstream change: fix(web): model picker search lists newest models first (#18494)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["0c999e38d3a8f69562e2b9776837275c828e2fa1"],
+      "evidence": [
+        "apps/web/src/components/chat/modelPickerSearch.ts:110",
+        "packages/shared/src/searchRanking.ts:100",
+        "apps/web/src/components/chat/modelPickerSearch.test.ts:120"
+      ]
     },
     {
       "upstreamSha": "ee150e178be5e0484a588a8fe7ad98fd6b858973",
@@ -34037,10 +34061,16 @@
     {
       "upstreamSha": "fd465100581055383126aab922a8da2c5d7952fd",
       "subject": "fix(web): keep sidebar terminal pulses in sync (#12962)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keep sidebar terminal pulses in sync (#12962).",
+      "reason": "Ported: each running-terminal icon in the sidebar started its pulse when its row mounted, so rows pulsed out of step. A started pulse is now pinned to the document timeline, and it respects prefers-reduced-motion. f5 shows the terminal pulse only in sidebar thread rows. Upstream change: fix(web): keep sidebar terminal pulses in sync (#12962)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["43ca20c2bcee953397f24b9121ba929537f7d80f"],
+      "evidence": [
+        "apps/web/src/lib/statusPulse.ts:7",
+        "apps/web/src/components/sidebar/SidebarThreadRow.tsx:417",
+        "apps/web/src/lib/statusPulse.test.ts:7"
+      ]
     },
     {
       "upstreamSha": "fd51561b4e2de1893cb7eb4069937256d702572c",

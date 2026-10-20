@@ -4780,17 +4780,11 @@
     },
     {
       "upstreamSha": "4f909be2c1a2eb4a88e6a51c8d0ef25e47a027d2",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings save again after a stored value fails decode (#19312).",
+      "classification": "equivalent:apps/web/src/hooks/useLocalStorage.ts:121",
+      "reason": "Equivalent: upstream re-read and decoded the stored value on every functional write, so a blob that no longer matched its schema blocked all later writes. f5 never re-reads storage on write: setValue updates from React state, and app settings fall back to defaults when the stored blob fails to decode. Upstream change: fix(web): settings save again after a stored value fails decode (#19312)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19312"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "evidence": ["apps/web/src/appSettings.ts:846"],
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "2d14185f32b6c0141a3f1192caf4a8d181cbe10f",
@@ -5072,17 +5066,10 @@
     },
     {
       "upstreamSha": "dff750b1b8818eb004b8c3d060edcdc09f88a07f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): stop question answers from resetting the editor caret (#11337).",
+      "classification": "equivalent:apps/web/src/components/ChatView.tsx:2195",
+      "reason": "Equivalent: upstream stopped its question-answer change handler from refocusing the editor at a computed offset, which reset the caret. f5's handler only stores the answer, cursor and trigger state and never moves the editor selection. Upstream change: fix(web): stop question answers from resetting the editor caret (#11337)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-11337"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "109aaae6cd251e1d3aa595624209758a164d8b33",
@@ -7418,17 +7405,10 @@
     },
     {
       "upstreamSha": "472ea7ec5f67fae660dc606b82698d15a2bc850f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): find update settings from the command palette (#17396).",
+      "classification": "equivalent:apps/web/src/components/settings/categories/AboutSettings.descriptors.ts:13",
+      "reason": "Equivalent: upstream registers its update-track and app-version rows with settings search. f5's settings search already indexes Updates, Beta updates (channel, prerelease) and Application version. Upstream change: fix(web): find update settings from the command palette (#17396)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17396"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "f5Shas": ["228a562fb986de9ab76d0dc751f886002acf7963"]
     },
     {
       "upstreamSha": "e1ad595e0f10cc16d66fe54b4ee195435dd3cc0d",
@@ -7942,20 +7922,9 @@
     },
     {
       "upstreamSha": "033866c7aa55c53593ca31538f7d8ac99fdfe0fd",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): sidebar drags restyle only the sidebar (#17659).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17659"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream stops writing the app-wide --sidebar-width on every drag frame and sizes only the sidebar gap and container. f5 width guards test a candidate width by writing --sidebar-width on the wrapper and measuring the layout (apps/web/src/threadSidebarWidth.ts:41, apps/web/src/routes/_chat.$threadId.tsx:218); with inline widths on the gap and container those writes stop moving the layout, so the guards would measure stale widths. The guards need reworking before this can be ported. Upstream change: perf(web): sidebar drags restyle only the sidebar (#17659)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "42e1a0fba2938bd56761db63f466962342d7b779",
@@ -8436,17 +8405,9 @@
     },
     {
       "upstreamSha": "c5d4d2d04cce7c7fa60ac1c51974c4328cbaa8e5",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keep chat banners inside the lane beside the docked details card (#17094).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17094"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:thread-details-card",
+      "reason": "Not-applicable: keeps chat banners inside the lane beside upstream's docked thread details card; f5 has no docked details card. Upstream change: fix(web): keep chat banners inside the lane beside the docked details card (#17094)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2cf0ff0643e23d13658114fbf3a7e76753559755",
@@ -12003,17 +11964,10 @@
     },
     {
       "upstreamSha": "2d81e4c27559bbd78564bc8cc3b38a0011814361",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): clear stale chat action shortcuts (#15394).",
+      "classification": "equivalent:apps/web/src/components/ChatView.tsx:3255",
+      "reason": "Equivalent: upstream now removes an action's keybinding when the action is deleted or its shortcut cleared. f5's persistProjectScripts already removes every custom rule for the action's command before adding the new one, and deletion passes the command with a null shortcut. f5 has no global default actions, so upstream's keep-if-used-elsewhere check has nothing to protect. Upstream change: fix(web): clear stale chat action shortcuts (#15394)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-15394"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "f5Shas": ["337287aaa8c469e28a5efeccca6f98dd6f5f83b5"]
     },
     {
       "upstreamSha": "d3071275d576bb289a6cb177c6cc28fff8e95015",
@@ -12156,17 +12110,9 @@
     },
     {
       "upstreamSha": "429c625a8515f9c2e4af28c488fbf32ce7789645",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): workspace card docks beside chat when the window is narrow (#14992).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14992"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:thread-details-card",
+      "reason": "Not-applicable: reworks how upstream's workspace/thread details card docks beside the chat canvas on narrow windows; f5 has neither the details card nor the ChatCanvas layout. Upstream change: fix(web): workspace card docks beside chat when the window is narrow (#14992)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0cfa113be597af3a1b2fe905a58a5b583f8089b8",
@@ -12769,17 +12715,9 @@
     },
     {
       "upstreamSha": "20012ebd80b06a4c10ab0e78893822e7f873b2a8",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keep the terminal toggle clear of the last header action (#13426).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13426"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:floating-panel-toggles",
+      "reason": "Not-applicable: widens the padding upstream's chat header reserves for its floating panel toggles. f5's terminal and panel toggles are laid out in the header's own flex row (apps/web/src/components/chat/ChatHeader.tsx:225), so there is no reserved gap to tune. Upstream change: fix(web): keep the terminal toggle clear of the last header action (#13426)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "fa6262db3107a4c95b6ff611113e6fa0753e5948",

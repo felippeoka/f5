@@ -1809,3 +1809,40 @@ upstream pieces f5 does not have:
 - the client connection registry
 - the local font picker
 - the shortcut recorder (f5 takes shortcuts as typed text)
+
+**Batch 10 (web behavior fixes, 14 records).** Six ports, each with a test:
+- [t3code#19722](https://github.com/pingdotgg/t3code/pull/19722): when the
+  saved text generation model left the catalog, f5 fell back to the flagship
+  chat model. It now tries the driver's cheap text generation default first.
+- [t3code#17652](https://github.com/pingdotgg/t3code/pull/17652): a wheel over
+  the turn rail or the minimap now scrolls the chat. Both float beside the
+  scroll container, so before this the wheel scrolled nothing.
+- [t3code#12962](https://github.com/pingdotgg/t3code/pull/12962): running
+  terminal icons in the sidebar pulse in step and respect reduced motion.
+- [t3code#18494](https://github.com/pingdotgg/t3code/pull/18494): model picker
+  search keeps the provider's newest-first order among equal matches. The
+  shared `scoreQueryMatch` gains an opt-in `ignorePosition`; other callers are
+  unchanged.
+- [t3code#15152](https://github.com/pingdotgg/t3code/pull/15152): the model
+  picker fits short lists instead of always rendering at its 384px cap.
+- The terminal drawer half of
+  [t3code#17657](https://github.com/pingdotgg/t3code/pull/17657): a drag writes
+  the height to the drawer directly and commits once on release. Its new
+  browser test also covers batch 8's
+  [t3code#17658](https://github.com/pingdotgg/t3code/pull/17658), and both
+  cases failed on the old drawer.
+
+Four are equivalent:
+[t3code#19312](https://github.com/pingdotgg/t3code/pull/19312) (f5 never
+re-reads storage on write),
+[t3code#11337](https://github.com/pingdotgg/t3code/pull/11337) (f5 never moves
+the editor caret from the answer handler),
+[t3code#15394](https://github.com/pingdotgg/t3code/pull/15394) (f5 already
+removes an action's old keybindings on every save), and
+[t3code#17396](https://github.com/pingdotgg/t3code/pull/17396) (update
+settings are already searchable).
+[t3code#17659](https://github.com/pingdotgg/t3code/pull/17659) is deferred,
+because f5's sidebar width guards measure by writing the app-wide
+`--sidebar-width`. They would break if drags stopped writing it, so the guards
+need reworking first. Three are not applicable: the floating header toggles and
+the docked thread details card (two records) do not exist in f5.
