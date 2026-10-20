@@ -81,9 +81,9 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "electron-builder": "26.15.3",
-    "oxfmt": "^0.40.0",
-    "oxlint": "^1.55.0",
-    "turbo": "^2.9.5",
+    "oxfmt": "^0.73.0",
+    "oxlint": "^1.88.0",
+    "turbo": "^2.11.9",
     "vitest": "catalog:"
   },
   "overrides": {
