@@ -41,10 +41,12 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import type { LegendListRef } from "@legendapp/list/react";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useShortcutsDialogStore } from "../shortcutsDialogStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -89,6 +91,7 @@ import { useWorkflowCreateDialogStore } from "../workflowCreateDialogStore";
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
+  buildCommandPaletteRows,
   buildFileSearchActionItems,
   buildProjectActionItems,
   buildRootGroups,
@@ -98,12 +101,13 @@ import {
   type CommandPaletteView,
   filterBrowseEntries,
   filterCommandPaletteGroups,
+  findHighlightedCommandPaletteItem,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
 } from "./CommandPalette.logic";
-import { CommandPaletteResults } from "./CommandPaletteResults";
+import { CommandPaletteResults, scrollCommandPaletteRowIntoView } from "./CommandPaletteResults";
 import { resolveSettingsNavigationSearch } from "./settings/settingsRouting";
 import { resolvePrimaryNewThreadProjectId } from "./Sidebar.logic";
 import {
@@ -272,6 +276,7 @@ function OpenCommandPaletteDialog(props: {
   const isActionsOnly = searchMode === "all" && deferredQuery.startsWith(">");
   const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
+  const resultListRef = useRef<LegendListRef | null>(null);
   const settings = useAppSettingsSelector(selectCommandPaletteSettings);
   const { theme, setTheme } = useTheme();
   const { activeDraftThread, activeThread, handleNewThread, routeThreadId } = useHandleNewThread();
@@ -1233,6 +1238,7 @@ function OpenCommandPaletteDialog(props: {
   if (isBrowsing) {
     displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
   }
+  const resultRows = buildCommandPaletteRows(displayedGroups);
 
   const inputPlaceholder =
     searchMode === "files"
@@ -1279,6 +1285,28 @@ function OpenCommandPaletteDialog(props: {
     if (event.key === "Backspace" && query === "" && isSubmenu) {
       event.preventDefault();
       popView();
+      return;
+    }
+
+    // Base UI clicks the highlighted row on Enter, which does nothing once the
+    // virtualized list has unmounted it, so run the tracked highlight directly.
+    // Modified Enter keeps its own meaning (the browse submit above).
+    if (
+      event.key === "Enter" &&
+      !(event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) &&
+      !event.nativeEvent.isComposing &&
+      event.keyCode !== 229
+    ) {
+      const highlightedItem = findHighlightedCommandPaletteItem(
+        displayedGroups,
+        highlightedItemValue,
+      );
+      if (highlightedItem) {
+        (event as typeof event & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
+        event.preventDefault();
+        event.stopPropagation();
+        executeItem(highlightedItem);
+      }
     }
   }
 
@@ -1335,8 +1363,14 @@ function OpenCommandPaletteDialog(props: {
         aria-label="Command palette"
         autoHighlight={isBrowsing ? false : "always"}
         mode="none"
-        onItemHighlighted={(value) => {
+        items={resultRows.itemValues}
+        virtualized
+        onItemHighlighted={(value, eventDetails) => {
           setHighlightedItemValue(typeof value === "string" ? value : null);
+          const rowIndex = resultRows.rowIndexByItemIndex[eventDetails.index];
+          if (eventDetails.reason === "keyboard" && rowIndex !== undefined) {
+            scrollCommandPaletteRowIntoView(resultListRef.current, rowIndex);
+          }
         }}
         onValueChange={handleQueryChange}
         value={query}
@@ -1403,7 +1437,8 @@ function OpenCommandPaletteDialog(props: {
         </div>
         <CommandPanel className="max-h-[min(28rem,70vh)]">
           <CommandPaletteResults
-            groups={displayedGroups}
+            rows={resultRows.rows}
+            listRef={resultListRef}
             highlightedItemValue={highlightedItemValue}
             isActionsOnly={isActionsOnly}
             keybindings={keybindings}

@@ -1600,6 +1600,81 @@ describe("Thread sidebar", () => {
     }
   });
 
+  it("virtualizes long palette results and runs an off-screen row from the keyboard", async () => {
+    const matchCount = 60;
+    const mounted = await mountApp({
+      width: 1_400,
+      initialEntries: [`/${THREAD_ID}`],
+      configureFixture: (nextFixture) => {
+        nextFixture.resolveWsRequest = (body) => {
+          if (body._tag !== WS_METHODS.projectsSearchContents) return null;
+          return {
+            type: "result",
+            result: {
+              requestId: body.requestId,
+              matches: Array.from({ length: matchCount }, (_, index) => ({
+                path: `src/match-${index}.ts`,
+                lineNumber: 1,
+                lineContent: "const needle = true;",
+                matchRanges: [{ start: 6, end: 12 }],
+              })),
+              truncated: false,
+              indexedPathCount: matchCount,
+              indexTruncated: false,
+            },
+          };
+        };
+      },
+    });
+
+    try {
+      useCommandPaletteStore.getState().toggleMode("content");
+      const palette = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            '[data-testid="command-palette"][data-palette-mode="content"]',
+          ),
+        "Content palette should open in content mode.",
+      );
+      const input = palette.querySelector<HTMLInputElement>("input");
+      if (!input) throw new Error("Content palette input should render.");
+      setInputValue(input, "needle");
+      await vi.waitFor(() => expect(palette.textContent).toContain("src/match-0.ts:1"), {
+        timeout: 4_000,
+        interval: 16,
+      });
+
+      const renderedRows = () => palette.querySelectorAll('[data-slot="command-item"]').length;
+      expect(renderedRows()).toBeGreaterThan(0);
+      expect(renderedRows()).toBeLessThan(matchCount);
+
+      input.focus();
+      await vi.waitFor(() => expect(document.activeElement).toBe(input));
+      for (let step = 1; step < matchCount; step += 1) {
+        await userEvent.keyboard("{ArrowDown}");
+      }
+      const lastRow = await waitForElement(
+        () =>
+          Array.from(palette.querySelectorAll<HTMLElement>('[data-slot="command-item"]')).find(
+            (row) => row.textContent?.includes(`src/match-${matchCount - 1}.ts:1`),
+          ) ?? null,
+        "Arrowing to the last match should mount its row.",
+      );
+      await vi.waitFor(() => expect(lastRow.hasAttribute("data-highlighted")).toBe(true));
+
+      await userEvent.keyboard("{Enter}");
+      await vi.waitFor(
+        () =>
+          expect(JSON.stringify(mounted.router.state.location.search)).toContain(
+            `src/match-${matchCount - 1}.ts`,
+          ),
+        { timeout: 4_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("searches project files and contents from dedicated palette modes", async () => {
     const mounted = await mountApp({
       width: 1_400,
