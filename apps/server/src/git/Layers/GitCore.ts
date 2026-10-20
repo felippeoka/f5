@@ -596,7 +596,7 @@ const makeGitCore = Effect.gen(function* () {
     });
 
   const sweptStatusRepositories = new Set<string>();
-  let warnedUnsupportedStatusFetch = false;
+  let legacyStatusFetch = false;
   const sweepStatusRefs = (cwd: string) =>
     Effect.gen(function* () {
       const commonDir = yield* canonicalPath(yield* resolveCommonDir(cwd));
@@ -666,37 +666,42 @@ const makeGitCore = Effect.gen(function* () {
         Effect.succeed(temporary),
         (ref) =>
           Effect.gen(function* () {
-            const fetched = yield* executeGit(
-              operation,
-              cwd,
-              [
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                "--no-write-fetch-head",
-                "--no-auto-maintenance",
-                "--refmap=",
-                upstream.remoteName,
-                `+refs/heads/${upstream.upstreamBranch}:${ref}`,
-              ],
-              {
-                timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
-                env,
-                allowNonZeroExit: true,
-              },
-            );
-            if (fetched.code !== 0) {
-              if (
-                !warnedUnsupportedStatusFetch &&
-                /(?:unknown|unrecognized) option/i.test(fetched.stderr)
-              ) {
-                warnedUnsupportedStatusFetch = true;
-                yield* Effect.logWarning(
-                  "Background Git refresh requires Git 2.29 or later; fetch options are unsupported. Upgrade Git to restore automatic upstream refresh.",
-                );
-              }
-              return false;
+            const fetch = (legacy: boolean) =>
+              executeGit(
+                operation,
+                cwd,
+                [
+                  "fetch",
+                  "--quiet",
+                  "--no-tags",
+                  ...(legacy ? [] : ["--no-write-fetch-head", "--no-auto-maintenance"]),
+                  "--refmap=",
+                  upstream.remoteName,
+                  `+refs/heads/${upstream.upstreamBranch}:${ref}`,
+                ],
+                {
+                  timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
+                  env,
+                  allowNonZeroExit: true,
+                },
+              );
+            // Older Git cannot isolate FETCH_HEAD. Serialize its compatibility
+            // path with user fetch/pull operations, retaining the temporary ref/CAS.
+            const compatibleFetch = () =>
+              withRepositoryLock(operation, cwd, fetch(true), "background");
+            let fetched = yield* legacyStatusFetch ? compatibleFetch() : fetch(false);
+            if (
+              fetched.code !== 0 &&
+              /(?:unknown|unrecognized) option/i.test(fetched.stderr) &&
+              !legacyStatusFetch
+            ) {
+              legacyStatusFetch = true;
+              yield* Effect.logWarning(
+                "Background Git refresh is using compatibility mode; fetch is serialized with repository writes.",
+              );
+              fetched = yield* compatibleFetch();
             }
+            if (fetched.code !== 0) return false;
             const head = yield* runGitStdout(operation, cwd, ["rev-parse", "--verify", ref]);
             if (head.trim() === previous) return true;
             return yield* withRepositoryLock(

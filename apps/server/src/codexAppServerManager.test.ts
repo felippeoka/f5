@@ -4424,7 +4424,11 @@ describe("Codex process settlement and source draining", () => {
     const reject = vi.fn();
     const timeout = setTimeout(() => reject(new Error("late timeout")), 60_000);
     const context = {
-      session: { threadId: "draining", status: "running" },
+      session: {
+        threadId: "draining",
+        status: "running",
+        activeTurnId: TurnId.makeUnsafe("draining-turn"),
+      },
       stopping: false,
       output,
       child,
@@ -4483,6 +4487,13 @@ describe("Codex process settlement and source draining", () => {
     f.output.emit("close");
     f.child.stderr.emit("end");
     expect(f.lifecycle).toHaveBeenCalledTimes(1);
+    expect(f.lifecycle).toHaveBeenCalledWith(
+      f.context,
+      "session/exited",
+      expect.any(String),
+      TurnId.makeUnsafe("draining-turn"),
+    );
+    expect(f.context.session.activeTurnId).toBeUndefined();
     expect(f.internal.sessions.size).toBe(0);
     expect(f.context.pending.size).toBe(0);
     expect(f.child.eventNames()).toEqual([]);

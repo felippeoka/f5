@@ -3030,8 +3030,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       context.child.off("exit", onExit);
       context.child.off("close", onClose);
       context.child.off("error", onError);
+      const retiredTurnId = context.session.activeTurnId;
       this.updateSession(context, { status: "closed", activeTurnId: undefined });
-      this.emitLifecycleEvent(context, terminal.method, terminal.message);
+      this.emitLifecycleEvent(context, terminal.method, terminal.message, retiredTurnId);
       if (isCurrent()) this.sessions.delete(context.session.threadId);
       context.output.close();
       // Descendants can inherit pipes after the provider exits. At EOF/the
@@ -3811,13 +3812,19 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     });
   }
 
-  private emitLifecycleEvent(context: CodexSessionContext, method: string, message: string): void {
+  private emitLifecycleEvent(
+    context: CodexSessionContext,
+    method: string,
+    message: string,
+    turnId?: TurnId,
+  ): void {
     this.emitEvent({
       ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "session",
       provider: "codex",
       threadId: context.session.threadId,
+      ...(turnId ? { turnId } : {}),
       createdAt: new Date().toISOString(),
       method,
       message,

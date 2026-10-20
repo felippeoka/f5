@@ -1742,6 +1742,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         provider: "codex",
         threadId: asThreadId("thread-1"),
         createdAt: new Date().toISOString(),
+        turnId: asTurnId("retired-turn"),
         method: "session/closed",
         message: "Session stopped",
       };
@@ -1758,6 +1759,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         return;
       }
       assert.equal(firstEvent.value.threadId, "thread-1");
+      assert.equal(firstEvent.value.turnId, "retired-turn");
       assert.equal(firstEvent.value.payload.reason, "Session stopped");
     }),
   );

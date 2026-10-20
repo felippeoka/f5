@@ -1097,7 +1097,7 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
-    it.effect("warns once when background refresh uses unsupported Git options", () => {
+    it.effect("falls back on older Git, promotes tracking refs and warns once", () => {
       const messages: string[] = [];
       return Effect.gen(function* () {
         const remote = yield* makeTmpDir(),
@@ -1109,28 +1109,42 @@ it.layer(TestLayer)("git integration", (it) => {
         yield* git(source, ["remote", "add", "origin", remote]);
         yield* git(source, ["push", "-u", "origin", branch]);
         yield* git(other, ["clone", source, "."]);
+        yield* writeTextFile(path.join(source, "legacy-refresh.txt"), "new upstream commit");
+        yield* git(source, ["add", "legacy-refresh.txt"]);
+        yield* git(source, ["commit", "-m", "legacy refresh update"]);
+        yield* git(source, ["push", "origin", branch]);
+        const expected = (yield* git(source, ["rev-parse", "HEAD"])).trim();
         const realGitService = yield* GitService;
-        let fetches = 0;
+        let fetches = 0,
+          legacyFetches = 0;
         const core = yield* makeIsolatedGitCore({
           execute: (input) =>
-            input.args[0] === "fetch"
-              ? Effect.sync(() => {
-                  fetches++;
-                  return {
-                    code: 129,
-                    stdout: "",
-                    stderr: "error: unknown option no-write-fetch-head",
-                  };
-                })
-              : realGitService.execute(input),
+            Effect.suspend(() => {
+              if (input.args[0] !== "fetch") return realGitService.execute(input);
+              fetches++;
+              if (input.args.includes("--no-write-fetch-head"))
+                return Effect.succeed({
+                  code: 129,
+                  stdout: "",
+                  stderr: "error: unknown option no-write-fetch-head",
+                });
+              legacyFetches++;
+              return realGitService.execute(input);
+            }),
         });
         for (const cwd of [source, other]) {
           yield* core.statusDetails(cwd);
           yield* core.drainUpstreamRefreshes!(cwd);
         }
-        expect(fetches).toBe(2);
+        expect(fetches).toBe(3);
+        expect(legacyFetches).toBe(2);
+        expect((yield* git(other, ["rev-parse", `refs/remotes/origin/${branch}`])).trim()).toBe(
+          expected,
+        );
+        for (const cwd of [source, other])
+          expect((yield* git(cwd, ["for-each-ref", "refs/f5/status/"])).trim()).toBe("");
         expect(
-          messages.filter((message) => message.includes("fetch options are unsupported")),
+          messages.filter((message) => message.includes("using compatibility mode")),
         ).toHaveLength(1);
       }).pipe(
         Effect.provide(

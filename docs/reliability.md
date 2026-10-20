@@ -65,8 +65,22 @@ observed tracking SHA. A concurrent pull keeps its newer ref; cleanup removes th
 temporary ref. Network waits do not hold the shared user-operation lock. First-use
 cleanup examines up to 256 namespace refs and removes only refs older than thirty
 minutes, with a compare-and-set for each deletion. Recent refs from other profiles
-are preserved. Legacy UUID refs use filesystem age, never commit age. Unsupported
-fetch options emit one actionable Git 2.29+ upgrade warning per server lifetime.
+are preserved. Legacy UUID refs use filesystem age, never commit age. Git versions
+without the isolation options use a compatible refspec fetch under the repository
+lock, with one compatibility warning. This older-Git path can hold the lock during
+a bounded network fetch; it prevents concurrent user fetch/pull metadata races.
+
+Temporary `refs/f5/status/*` refs are ordinary Git refs: they can appear in
+`git log --all`, `for-each-ref`, backups and mirror pushes. Git has no portable ref
+namespace ignored by all of those tools. Normal completion removes the temporary
+ref; after a crash it can remain until this repository's next first-use sweep, and
+recent refs are retained for thirty minutes to protect other live profiles.
+
+A stop, archive or thread-wide interruption cancels older admitted, unstarted
+starts and steers. A claimed queue prompt cancelled this way stays visible as
+failed with its original text and requires explicit Retry. Automatic retry would
+resurrect work the user just stopped; ordinary capacity overload still retries
+without consuming a provider-delivery attempt.
 
 Codex process exit/error rejects pending RPCs immediately, including contexts
 replaced by a new session. Written requests reject even if their responses remain
@@ -298,3 +312,11 @@ Codex snapshot backfill preserves leading/trailing whitespace and line endings
 exactly. This also applies to the existing assistant-delta backfill path, whose
 historical trimming could change provider-authored content. Persisted messages
 are not rewritten solely to normalize their whitespace.
+
+Terminal ingestion never waits for a provider launch lock in the shared worker.
+If the source's thread is busy, its durable receipt remains pending for the next
+retry tick without consuming a failure attempt; startup input and other threads
+continue. Retired receipts flush and complete only their originating turn's output
+before acknowledgement, preserving the replacement session and active streams.
+Runtime receipt recovery reports exhausted receipts only. Orphan session/turn
+classification runs once at startup and skips launches already in progress.

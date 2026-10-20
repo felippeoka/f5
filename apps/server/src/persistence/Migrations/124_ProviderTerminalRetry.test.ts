@@ -183,7 +183,7 @@ it.layer(ProviderTerminalEventRepositoryLive.pipe(Layer.provideMerge(SqlitePersi
         assert.isString(rows[0]?.event_json);
         assert.deepStrictEqual(yield* repository.listDue("9999-12-31"), []);
         yield* repository.markApplied(eventId);
-        assert.deepStrictEqual(yield* repository.takeRecoveryThreadIds, [threadId]);
+        assert.deepStrictEqual(yield* repository.takeRecoveryThreadIds, []);
       }),
     );
     it.effect(

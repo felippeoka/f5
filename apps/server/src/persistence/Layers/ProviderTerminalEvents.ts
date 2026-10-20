@@ -31,6 +31,8 @@ import { Metric } from "effect";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Emit the trusted numeric constant as SQL so partial-index predicates match.
+  const receiptAttemptLimit = sql.literal(String(MAX_TERMINAL_RECEIPT_ATTEMPTS));
   const recoveryThreads = new Set<ThreadId>();
   let recoveryOverflow = false;
   let initialRecovery = true;
@@ -83,7 +85,7 @@ const make = Effect.gen(function* () {
         SET attempt = attempt + 1, last_error = ${input.error.slice(0, 4096)},
           next_due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now',
             ('+' || MIN(30.0, (1 << MIN(attempt, 5)) * ${0.8 + Math.random() * 0.4}) || ' seconds'))
-        WHERE event_id = ${input.eventId} AND applied_at IS NULL AND attempt < ${MAX_TERMINAL_RECEIPT_ATTEMPTS}
+        WHERE event_id = ${input.eventId} AND applied_at IS NULL AND attempt < ${receiptAttemptLimit}
         RETURNING thread_id AS "threadId", attempt
       `;
       for (const row of rows)
@@ -135,14 +137,14 @@ const make = Effect.gen(function* () {
     now = new Date().toISOString(),
   ) =>
     sql<Record<string, unknown>>`
-    SELECT ${columns} FROM provider_terminal_events WHERE applied_at IS NULL AND attempt < ${MAX_TERMINAL_RECEIPT_ATTEMPTS} AND next_due_at <= ${now}
+    SELECT ${columns} FROM provider_terminal_events WHERE applied_at IS NULL AND attempt < ${receiptAttemptLimit} AND next_due_at <= ${now}
     ORDER BY next_due_at, received_at, event_id LIMIT 64
   `.pipe(
       Effect.flatMap(decodePage),
       Effect.tap(() =>
         sql<{
           oldest: string | null;
-        }>`SELECT MIN(received_at) AS oldest FROM provider_terminal_events WHERE applied_at IS NULL AND attempt < 10`.pipe(
+        }>`SELECT MIN(received_at) AS oldest FROM provider_terminal_events WHERE applied_at IS NULL AND attempt < ${receiptAttemptLimit}`.pipe(
           Effect.flatMap((rows) =>
             Metric.update(
               terminalReceiptOldestPendingMs,
@@ -159,7 +161,7 @@ const make = Effect.gen(function* () {
     origin,
   ) =>
     sql`
-    SELECT 1 FROM provider_terminal_events WHERE applied_at IS NULL AND attempt < ${MAX_TERMINAL_RECEIPT_ATTEMPTS}
+    SELECT 1 FROM provider_terminal_events WHERE applied_at IS NULL AND attempt < ${receiptAttemptLimit}
       AND thread_id = ${threadId} AND (turn_id = ${turnId} OR turn_id IS NULL)
       AND (origin_provider_instance_id IS NULL OR origin_provider_instance_id IS ${origin.providerInstanceId})
       AND (origin_session_generation = ${origin.sessionGeneration}
@@ -169,7 +171,7 @@ const make = Effect.gen(function* () {
       Effect.mapError(mapError("ProviderTerminalEventRepository.hasPending")),
     );
   const hasExhausted: ProviderTerminalEventRepositoryShape["hasExhausted"] = (threadId) =>
-    sql`SELECT 1 FROM provider_terminal_events WHERE applied_at IS NULL AND attempt >= 10 ${threadId === undefined ? sql`` : sql`AND thread_id = ${threadId}`} LIMIT 1`.pipe(
+    sql`SELECT 1 FROM provider_terminal_events WHERE applied_at IS NULL AND attempt >= ${receiptAttemptLimit} ${threadId === undefined ? sql`` : sql`AND thread_id = ${threadId}`} LIMIT 1`.pipe(
       Effect.map((rows) => rows.length > 0),
       Effect.mapError(mapError("ProviderTerminalEventRepository.hasExhausted")),
     );
@@ -188,15 +190,7 @@ const make = Effect.gen(function* () {
       SET applied_at = ${new Date().toISOString()}, last_error = NULL
       WHERE event_id = ${eventId} AND applied_at IS NULL
       RETURNING thread_id AS "threadId"
-    `.pipe(
-      Effect.tap((rows) =>
-        Effect.sync(() => {
-          for (const row of rows) scheduleRecovery(ThreadId.makeUnsafe(row.threadId));
-        }),
-      ),
-      Effect.asVoid,
-      Effect.mapError(mapError("ProviderTerminalEventRepository.markApplied")),
-    );
+    `.pipe(Effect.asVoid, Effect.mapError(mapError("ProviderTerminalEventRepository.markApplied")));
 
   return {
     record,

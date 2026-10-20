@@ -2,7 +2,7 @@ import { LosslessCommandAdmission } from "../commandAdmission.ts";
 import { startTerminalReceiptRetries } from "../terminalReceiptRecovery.ts";
 import { PerformanceStageProbe } from "../../observability/Metrics.ts";
 import { registerShutdown, AcceptedShutdownWork } from "../../shutdown.ts";
-import { withProviderThreadAccess } from "../../provider/providerThreadAccess.ts";
+import { tryWithProviderThreadAccess } from "../../provider/providerThreadAccess.ts";
 import { readPersistedSessionGeneration } from "../../provider/sessionCapabilities.ts";
 import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
 import { isPreparedComputerEvent } from "../../provider/prepareAutomationRuntimeEvent";
@@ -2628,6 +2628,15 @@ const make = Effect.gen(function* () {
     lookup: () => Effect.succeed(new Set<MessageId>()),
   });
 
+  const runtimeOriginByTurnKey = yield* Cache.make<
+    string,
+    { generation: number; instanceId?: ProviderInstanceId }
+  >({
+    capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
+    timeToLive: TURN_MESSAGE_IDS_BY_TURN_TTL,
+    lookup: () => Effect.succeed({ generation: -1 }),
+  });
+
   const bufferedAssistantTextByMessageId = yield* Cache.make<MessageId, string>({
     capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
     timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
@@ -3993,6 +4002,63 @@ const make = Effect.gen(function* () {
             currentInstance != null &&
             currentInstance !== event.providerInstanceId);
         if (staleOrigin) {
+          // Retired output remains authoritative for its own turn. Finalize it
+          // before acknowledging the receipt, without touching replacement state.
+          const retiredTurns = new Set<TurnId>();
+          if (event.turnId) retiredTurns.add(TurnId.makeUnsafe(event.turnId));
+          else if (event.sessionGeneration !== undefined) {
+            const prefix = `${thread.id}:`;
+            for (const key of Array.from(yield* Cache.keys(runtimeOriginByTurnKey))) {
+              if (!key.startsWith(prefix)) continue;
+              const origin = Option.getOrUndefined(
+                yield* Cache.getOption(runtimeOriginByTurnKey, key),
+              );
+              if (
+                origin?.generation === event.sessionGeneration &&
+                (event.providerInstanceId === undefined ||
+                  origin.instanceId === event.providerInstanceId)
+              )
+                retiredTurns.add(TurnId.makeUnsafe(key.slice(prefix.length)));
+            }
+          }
+          for (const turnId of retiredTurns) {
+            if (thread.session?.activeTurnId === turnId) continue;
+            const ids = new Set(yield* getAssistantMessageIdsForTurn(thread.id, turnId));
+            for (const message of thread.messages)
+              if (message.role === "assistant" && message.streaming && message.turnId === turnId)
+                ids.add(message.id);
+            for (const messageId of ids)
+              yield* finalizeAssistantMessage({
+                event,
+                threadId: thread.id,
+                messageId,
+                turnId,
+                createdAt: event.createdAt,
+                commandTag: "retired-assistant-complete",
+                finalDeltaCommandTag: "retired-assistant-flush",
+              });
+            yield* finalizeOpenCommandExecutions({
+              event,
+              threadId: thread.id,
+              turnId,
+              status:
+                event.type === "turn.completed" && runtimeTurnState(event) === "failed"
+                  ? "failed"
+                  : "interrupted",
+              updatedAt: event.createdAt,
+              commandTag: "retired-command-finalize",
+            });
+            yield* finalizePendingFileChanges({
+              event,
+              threadId: thread.id,
+              turnId,
+              status: "interrupted",
+              updatedAt: event.createdAt,
+              commandTag: "retired-file-change-finalize",
+            });
+            yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
+            yield* Cache.invalidate(runtimeOriginByTurnKey, providerTurnKey(thread.id, turnId));
+          }
           // Usage is historical and idempotent; lifecycle and thread-wide cleanup belong
           // only to the originating session. Never clear the replacement's active turn.
           const usageFact =
@@ -4042,6 +4108,19 @@ const make = Effect.gen(function* () {
         )
           return;
       }
+      if (
+        !isProviderTerminalRuntimeEvent(event) &&
+        event.turnId &&
+        event.sessionGeneration !== undefined
+      )
+        yield* Cache.set(
+          runtimeOriginByTurnKey,
+          providerTurnKey(thread.id, TurnId.makeUnsafe(event.turnId)),
+          {
+            generation: event.sessionGeneration,
+            ...(event.providerInstanceId ? { instanceId: event.providerInstanceId } : {}),
+          },
+        );
       const previousLimit = thread.session?.usageLimit;
       if (
         (event.type === "runtime.error" || event.type === "turn.completed") &&
@@ -5816,8 +5895,11 @@ const make = Effect.gen(function* () {
                   : flushAllCommandExecutionOutput();
 
   const pendingTerminalEventIds = new Set<string>();
-  const processInputSafely = (input: RuntimeIngestionInput) =>
-    processInput(input).pipe(
+  const processInputSafely = (
+    input: RuntimeIngestionInput,
+    process: ReturnType<typeof processInput> = processInput(input),
+  ) =>
+    process.pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
@@ -5875,9 +5957,21 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeBackgroundWorker(
     (input: RuntimeIngestionInput) =>
-      (input.source === "runtime" && isProviderTerminalRuntimeEvent(input.event)
-        ? withProviderThreadAccess(input.event.threadId, processInputSafely(input))
-        : processInputSafely(input)
+      processInputSafely(
+        input,
+        input.source === "runtime" && isProviderTerminalRuntimeEvent(input.event)
+          ? tryWithProviderThreadAccess(input.event.threadId, processInput(input)).pipe(
+              Effect.flatMap((processed) =>
+                Option.isSome(processed)
+                  ? Effect.void
+                  : // A launch can need an elicitation queued behind this event. Never
+                    // wait on its lock in the shared worker; retry the durable receipt.
+                    providerTerminalEventRepository.record(
+                      input.event as import("../../persistence/Services/ProviderTerminalEvents.ts").ProviderTerminalRuntimeEvent,
+                    ),
+              ),
+            )
+          : processInput(input),
       ).pipe(
         Effect.provideService(AcceptedShutdownWork, true),
         Effect.provideService(LosslessCommandAdmission, true),
@@ -5935,7 +6029,43 @@ const make = Effect.gen(function* () {
     enqueueBackgroundWork(worker.enqueue({ source: "command-output-flush", commandExecutionId }));
   };
 
-  const reconcileOrphanedProviderTurnsOnStartup = (threadIds?: ReadonlySet<ThreadId>) =>
+  const surfaceExhaustedTerminalReceipts = (threadIds?: ReadonlySet<ThreadId>) =>
+    Effect.gen(function* () {
+      // Normal completions do not scan bindings/sessions. A full repair scan is
+      // reserved for startup or dirty-set overflow, and only reads exhausted ids.
+      if (!(yield* providerTerminalEventRepository.hasExhausted())) return;
+      const readModel = yield* orchestrationEngine.getReadModel();
+      for (const thread of readModel.threads) {
+        if (thread.deletedAt !== null || (threadIds && !threadIds.has(thread.id))) continue;
+        if (!(yield* providerTerminalEventRepository.hasExhausted(thread.id))) continue;
+        const currentBinding = Option.getOrUndefined(
+          yield* providerSessionDirectory.getBinding(thread.id),
+        );
+        const origin = {
+          sessionGeneration: readPersistedSessionGeneration(currentBinding?.runtimePayload),
+        };
+        const repairId = `server:terminal-receipt-repair:${thread.id}:${origin.sessionGeneration}`;
+        const repairedAt = new Date().toISOString();
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.makeUnsafe(repairId),
+          threadId: thread.id,
+          createdAt: repairedAt,
+          activity: {
+            id: EventId.makeUnsafe(repairId),
+            kind: "provider.receipt.repair-required",
+            tone: "error",
+            summary:
+              "Provider completion could not be recovered. History repair is required before retrying an uncertain turn.",
+            payload: { requiresHistoryRepair: true },
+            turnId: thread.session?.activeTurnId ?? null,
+            createdAt: repairedAt,
+          },
+        });
+      }
+    });
+
+  const reconcileOrphanedProviderTurnsOnStartup = () =>
     Effect.gen(function* () {
       const [readModel, bindings, liveSessions] = yield* Effect.all([
         orchestrationEngine.getReadModel(),
@@ -5945,35 +6075,14 @@ const make = Effect.gen(function* () {
       const bindingsByThreadId = new Map(bindings.map((binding) => [binding.threadId, binding]));
       const liveThreadIds = new Set(liveSessions.map((session) => session.threadId));
       let recoveredCount = 0;
-      const needsRepair = yield* providerTerminalEventRepository.hasExhausted();
-
       for (const thread of readModel.threads) {
-        if (threadIds && !threadIds.has(thread.id)) continue;
+        if (thread.deletedAt !== null || providerService.getStartingSessionIdentity?.(thread.id))
+          continue;
         const currentBinding = bindingsByThreadId.get(thread.id);
         const origin = {
           providerInstanceId: currentBinding?.providerInstanceId ?? null,
           sessionGeneration: readPersistedSessionGeneration(currentBinding?.runtimePayload),
         };
-        if (needsRepair && (yield* providerTerminalEventRepository.hasExhausted(thread.id))) {
-          const repairId = `server:terminal-receipt-repair:${thread.id}:${origin.sessionGeneration}`;
-          const repairedAt = new Date().toISOString();
-          yield* orchestrationEngine.dispatch({
-            type: "thread.activity.append",
-            commandId: CommandId.makeUnsafe(repairId),
-            threadId: thread.id,
-            createdAt: repairedAt,
-            activity: {
-              id: EventId.makeUnsafe(repairId),
-              kind: "provider.receipt.repair-required",
-              tone: "error",
-              summary:
-                "Provider completion could not be recovered. History repair is required before retrying an uncertain turn.",
-              payload: { requiresHistoryRepair: true },
-              turnId: thread.session?.activeTurnId ?? null,
-              createdAt: repairedAt,
-            },
-          });
-        }
         // Sessions can be orphaned before a turn id was allocated. They have no
         // terminal receipt to replay, but must not remain "starting" forever.
         if (
@@ -5989,7 +6098,12 @@ const make = Effect.gen(function* () {
             yield* providerSessionDirectory.upsert({
               ...binding,
               status: "stopped",
-              runtimePayload: { activeTurnId: null },
+              runtimePayload: {
+                ...(binding.runtimePayload && typeof binding.runtimePayload === "object"
+                  ? binding.runtimePayload
+                  : {}),
+                activeTurnId: null,
+              },
             });
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
@@ -6120,6 +6234,13 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(providerService.streamEvents, (event) => enqueueRuntimeEvent(event)),
     );
+    yield* reconcileOrphanedProviderTurnsOnStartup().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("failed to reconcile provider turns at startup", {
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
     const recoveryThreadIds = new Set<ThreadId>();
     let recoverAllThreads = false;
     yield* startTerminalReceiptRetries(
@@ -6136,7 +6257,7 @@ const make = Effect.gen(function* () {
         if (recoverAllThreads || recoveryThreadIds.size > 0) {
           // Keep candidates until all repair effects succeed, so a transient
           // dispatch/storage failure cannot consume the only recovery wakeup.
-          yield* reconcileOrphanedProviderTurnsOnStartup(
+          yield* surfaceExhaustedTerminalReceipts(
             recoverAllThreads ? undefined : recoveryThreadIds,
           );
           recoveryThreadIds.clear();
