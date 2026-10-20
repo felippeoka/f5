@@ -105,6 +105,33 @@ it("links repository references in rendered chat without changing code or existi
   expect(html).not.toContain("/issues/789");
 });
 
+describe("ChatMarkdown unclosed local file links", () => {
+  const render = async (text: string) => {
+    const { default: ChatMarkdown } = await import("./ChatMarkdown");
+    return renderToStaticMarkup(<ChatMarkdown text={text} cwd="/tmp/project" />);
+  };
+
+  it("closes a local file destination whose angle bracket never closed", async () => {
+    const html = await render("See [notes](</tmp/project/my notes.md) and [app](<./app.ts).");
+    expect(html.match(/chat-markdown-file-link"/g)).toHaveLength(2);
+    expect(html).toContain("my notes.md");
+    expect(html).not.toContain("](&lt;");
+  });
+
+  it("leaves code, escapes, images, URLs and unfinished text alone", async () => {
+    for (const text of [
+      "`[app](<./app.ts)`",
+      "\\[app](<./app.ts)",
+      "![app](<./app.png)",
+      "[site](<https://example.com)",
+      "[app](<./app.ts)x",
+      "[app](<./app.ts",
+    ]) {
+      expect(await render(text)).not.toContain("chat-markdown-file-link");
+    }
+  });
+});
+
 describe("ChatMarkdown external-bot policy", () => {
   const render = async (text: string) => {
     const { default: ChatMarkdown } = await import("./ChatMarkdown");
