@@ -24,7 +24,7 @@ import {
 import { isArchivedWorkflow } from "@t3tools/shared/workflowArchive";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { useAppSettings } from "../appSettings";
+import { type AppSettings, useAppSettingsSelector } from "../appSettings";
 import { selectProjectDraftThread, useComposerDraftStore } from "../composerDraftStore";
 import { useStartupReady } from "../lib/startupReady";
 import { cn, newCommandId } from "../lib/utils";
@@ -135,6 +135,15 @@ async function deleteProjectWithThreads(input: {
   });
 }
 
+function selectSidebarSettings(settings: AppSettings) {
+  return {
+    sidebarThreadPreviewCount: settings.sidebarThreadPreviewCount,
+    confirmThreadDelete: settings.confirmThreadDelete,
+    gitStatusAutoRefreshIntervalSeconds: settings.gitStatusAutoRefreshIntervalSeconds,
+    expandWorkflowThreadsByDefault: settings.expandWorkflowThreadsByDefault,
+  };
+}
+
 export default function Sidebar() {
   "use memo";
   const testRenderCountProps = useTestRenderCountProps();
@@ -166,7 +175,7 @@ export default function Sidebar() {
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const isOnUsage = useLocation({ select: (loc) => loc.pathname === "/usage" });
   const pathname = useLocation({ select: (loc) => loc.pathname });
-  const { settings: appSettings } = useAppSettings();
+  const appSettings = useAppSettingsSelector(selectSidebarSettings);
   const threadPreviewLimit = appSettings.sidebarThreadPreviewCount;
   const wsConnectionState = useWsConnectionState();
   const wsInteractionBlocked = isWsInteractionBlocked(wsConnectionState.phase);

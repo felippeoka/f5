@@ -49,7 +49,7 @@ import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useShortcutsDialogStore } from "../shortcutsDialogStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOpenGlobalSearchResult } from "../hooks/useOpenGlobalSearchResult";
-import { useAppSettings } from "../appSettings";
+import { type AppSettings, updateAppSettings, useAppSettingsSelector } from "../appSettings";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -232,6 +232,13 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   );
 }
 
+function selectCommandPaletteSettings(settings: AppSettings) {
+  return {
+    addProjectBaseDirectory: settings.addProjectBaseDirectory,
+    customThemes: settings.customThemes,
+  };
+}
+
 function CommandPaletteDialog() {
   const open = useCommandPaletteStore((store) => store.open);
   const mode = useCommandPaletteStore((store) => store.mode);
@@ -265,7 +272,7 @@ function OpenCommandPaletteDialog(props: {
   const isActionsOnly = searchMode === "all" && deferredQuery.startsWith(">");
   const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
-  const { settings, updateSettings } = useAppSettings();
+  const settings = useAppSettingsSelector(selectCommandPaletteSettings);
   const { theme, setTheme } = useTheme();
   const { activeDraftThread, activeThread, handleNewThread, routeThreadId } = useHandleNewThread();
   const projects = useStore((store) => store.projects);
@@ -1056,7 +1063,7 @@ function OpenCommandPaletteDialog(props: {
             </span>
           ),
           run: async () => {
-            updateSettings({ themeId: palette.id });
+            updateAppSettings({ themeId: palette.id });
           },
         })),
       },

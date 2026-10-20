@@ -30,7 +30,7 @@ import { threadFileChangeQueryOptions } from "~/lib/orchestrationReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { reviewPreviewDiffQueryOptions } from "~/lib/reviewReactQuery";
 import { cn } from "~/lib/utils";
-import { useAppSettings } from "../appSettings";
+import { type AppSettings, updateAppSettings, useAppSettingsSelector } from "../appSettings";
 import { readNativeApi } from "../nativeApi";
 import { resolvePathLinkTarget } from "../terminal-links";
 import { clearTurnDiffSearchParams, parseDiffRouteSearch } from "../diffRouteSearch";
@@ -72,10 +72,22 @@ export {
   resolveFileDiffPath,
 } from "../lib/diffPatch";
 
+function selectDiffPanelSettings(settings: AppSettings) {
+  return {
+    diffFileDefaultState: settings.diffFileDefaultState,
+    diffIgnoreWhitespace: settings.diffIgnoreWhitespace,
+    diffRenderMode: settings.diffRenderMode,
+    diffWordWrap: settings.diffWordWrap,
+    gitStatusAutoRefreshIntervalSeconds: settings.gitStatusAutoRefreshIntervalSeconds,
+    timestampFormat: settings.timestampFormat,
+  };
+}
+
 export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
-  const { settings, updateSettings } = useAppSettings();
+  const settings = useAppSettingsSelector(selectDiffPanelSettings);
+  const updateSettings = updateAppSettings;
   const diffRenderMode = settings.diffRenderMode;
   const [collapsedFileOverrides, setCollapsedFileOverrides] = useState<
     Readonly<Record<string, boolean>>
