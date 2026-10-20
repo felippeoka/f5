@@ -19,6 +19,7 @@ import {
   gitRefExists,
   gitShowFileAtRef,
   makeOrchestrationIntegrationHarness,
+  seedOrchestrationProjectAndThread,
   type OrchestrationIntegrationHarness,
 } from "./OrchestrationEngineHarness.integration.ts";
 import { checkpointRefForThreadTurn } from "../src/checkpointing/Utils.ts";
@@ -103,38 +104,7 @@ function withRealCodexHarness<A, E>(
   );
 }
 
-const seedProjectAndThread = (
-  harness: OrchestrationIntegrationHarness,
-  branch: string | null = null,
-) =>
-  Effect.gen(function* () {
-    const createdAt = nowIso();
-
-    yield* harness.engine.dispatch({
-      type: "project.create",
-      commandId: CommandId.makeUnsafe("cmd-project-create"),
-      projectId: PROJECT_ID,
-      title: "Integration Project",
-      workspaceRoot: harness.workspaceDir,
-      defaultModel: "gpt-5-codex",
-      createdAt,
-    });
-
-    yield* harness.engine.dispatch({
-      type: "thread.create",
-      commandId: CommandId.makeUnsafe("cmd-thread-create"),
-      threadId: THREAD_ID,
-      projectId: PROJECT_ID,
-      title: "Integration Thread",
-      model: "gpt-5-codex",
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-      runtimeMode: "approval-required",
-      branch,
-      // This fixture uses the project checkout, not a linked worktree.
-      worktreePath: null,
-      createdAt,
-    });
-  });
+const seedProjectAndThread = seedOrchestrationProjectAndThread;
 
 const startTurn = (input: {
   readonly harness: OrchestrationIntegrationHarness;

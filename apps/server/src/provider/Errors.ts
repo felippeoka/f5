@@ -70,7 +70,7 @@ export class ProviderAdapterRequestError extends Schema.TaggedErrorClass<Provide
      * Set only when the adapter knows the turn input never reached the model,
      * so durable delivery can reject it instead of marking it ambiguous.
      */
-    deliveryCertainty: Schema.optional(Schema.Literal("not_sent")),
+    deliveryCertainty: Schema.optional(Schema.Literals(["not_sent", "unknown"])),
     /** Whether a not-sent delivery may be retried automatically. */
     deliveryRetryable: Schema.optional(Schema.Boolean),
     cause: Schema.optional(Schema.Defect),

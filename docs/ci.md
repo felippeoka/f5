@@ -17,7 +17,7 @@ matrices finish every shard, and all jobs have timeouts.
 | browser             | Code changes            | Discovered browser tests in Chromium                                                                     | 15 min  |
 | desktop             | Code changes            | Sandboxed Electron smoke, profile lifecycle, marketing build                                             | 20 min  |
 | windows-build       | Code changes            | Strict Rust checks, workspace/Git/integration suites, desktop build and smoke, profiles                  | 30 min  |
-| windows-server-unit | Code changes            | Two Windows unit shards, two workers each                                                                | 20 min  |
+| windows-server-unit | Code changes            | Three Windows unit shards, two workers each                                                              | 20 min  |
 | macos-profiles      | Code changes            | Swift, strict universal helper, selected profile tests                                                   | 15 min  |
 | macos-suite         | Main, nightly, dispatch | Strict native checks, all workspace/server suites, desktop and profile smoke                             | 60 min  |
 | CI result           | Every run               | Aggregate verdict                                                                                        | 5 min   |
@@ -86,6 +86,38 @@ variables inherited from a running session from altering test fixtures. CI runs
 server smoke and integration suites as independent steps. A failing suite does not
 hide later suites; workspace Turbo execution also continues after failures.
 
+Local `test:full` and the server's multi-stage scripts use
+`scripts/run-test-stages.ts`: every stage runs, each exit code is summarized, and
+any failed stage makes the overall command fail. The runner has a deliberate
+first-stage failure regression check. The default workspace test command also uses
+Turbo `--continue=always`.
+
+Server Vitest configuration removes inherited `F5_PROFILE_`, `CLAUDE_CODE_`,
+`GIT_CONFIG_KEY_` and `GIT_CONFIG_VALUE_` variables, plus `CLAUDE_CONFIG_DIR`,
+`CODEX_HOME` and `GIT_CONFIG_COUNT`, before environment capture. Tests default to
+`GIT_CONFIG_COUNT=0`; fixtures can explicitly opt into configuration they exercise.
+Storage inspection now includes the bytes changed by persisting its own report
+before publishing the result. A hermetic logical-byte test covers Windows
+semantics without enabling suite-wide console output. Windows-hosted execution
+and three consecutive hosted green runs remain acceptance requirements.
+
+Local macOS verification on 2026-10-19 completed fifty consecutive iterations each
+for the live-write backup snapshot, checkout refresh failure, stopped-session
+projection timeout and all four hidden Bots redirect variants. The renderer
+cold-import checks (`ChatMarkdown`, `FileViewPanel` and `MessagesTimeline.markdown`)
+also passed fifty iterations with all eighteen assertions per iteration. Imports
+now happen during file setup, outside the first rendering assertion's deadline;
+no global retry or timeout increase was added. Git/workspace tests synchronize
+with explicit completion barriers, and Bots tests subscribe to startup recovery.
+A subsequent full run exposed `ENOTEMPTY` while removing a Git fixture whose
+service-scoped upstream refresh was still writing. Fixture finalization now awaits
+refreshes admitted for that checkout. The behind-count checkout case passed another
+50/50 iterations without retries on 2026-10-19.
+After syncing main on 2026-10-20, the OAuth callback-settings unit test also passed
+50/50 iterations. It stubs and asserts the port probe instead of probing fixed port
+3118; the separate real-socket ownership and callback-preflight tests remain enabled.
+These local results do not establish hosted Windows behavior.
+
 Workflow lint uses the pinned actionlint Docker image with shellcheck enabled.
 The image digest is maintained manually; Dependabot does not update it. The only
 suppression is `SC2016` in release workflows for intentional single-quoted Node
@@ -147,6 +179,8 @@ failing browser assertion, and native lock-file drift. Record cold/warm cache
 behavior and Linux/Windows job timings. The permanent full macOS gate remains
 limited to main, nightly and dispatch; an unverified gate is not ready to merge.
 
+Feature merges pause while a `ci-main-red` issue is open.
+
 After the workflow merges and main has three consecutive green push runs at distinct
 SHAs, activate the Main ruleset manually: require PRs with no approval count, require
 `CI result` from GitHub Actions with up-to-date disabled, block force pushes/deletion,
@@ -165,4 +199,11 @@ until explicitly approved; no blanket Vitest retries are configured.
 
 CI does not certify authenticated model turns, physical computer input, account
 permissions, or signed installed-upgrade behavior beyond protected release rehearsals.
-Performance collection remains the manual workflow in `docs/performance.md`.
+Performance collection includes the report-only nightly workflow and manual qualification described in `docs/performance.md`.
+
+Release preflight requires a successful latest main push run for the tagged SHA.
+Required job names and matrix variants come from `CI result` in the checked-out
+workflow, with platform-specific skips derived from the release profile. Missing,
+skipped or failed required jobs reject qualification; a failed latest attempt
+cannot borrow an older successful run. Nightly performance is separate from that
+release/merge gate.

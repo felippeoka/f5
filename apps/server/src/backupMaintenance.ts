@@ -80,13 +80,16 @@ export function runBackupMaintenance(
       child.kill("SIGKILL");
     };
     signal?.addEventListener("abort", abort, { once: true });
-    child.on("close", (code) => {
+    child.on("close", (code, exitSignal) => {
       signal?.removeEventListener("abort", abort);
       if (failure) return reject(failure);
       try {
         const response = JSON.parse(result) as { manifest?: BackupManifest; error?: string };
         if (code !== 0 || !response.manifest)
-          throw new Error(response.error ?? "Backup maintenance process failed.");
+          throw new Error(
+            response.error ??
+              `Backup maintenance process failed (exit ${code}, signal ${exitSignal ?? "none"}).`,
+          );
         resolve(response.manifest);
       } catch (error) {
         reject(error);

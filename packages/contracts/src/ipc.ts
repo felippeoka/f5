@@ -1,3 +1,4 @@
+import type { ReportClientDiagnosticsInput } from "./server";
 import type {
   WorktreesMoveThreadInput,
   WorktreesMoveThreadResult,
@@ -34,6 +35,8 @@ import type {
 import type {
   NativeOperationInput,
   NativeOperationResolutionInput,
+  NativeHistoryRecoveryInput,
+  NativeHistoryRecovery,
   NativeOperationInspectInput,
   NativeOperationRecord,
   NativeForkInput,
@@ -406,6 +409,7 @@ import type {
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetStartupSnapshotInput,
   OrchestrationGetStartupSnapshotResult,
+  OrchestrationGetLatestSequenceResult,
   OrchestrationGetThreadCommandExecutionInput,
   OrchestrationGetThreadCommandExecutionResult,
   OrchestrationGetThreadCommandExecutionsInput,
@@ -855,6 +859,7 @@ export interface NativeApi {
     ) => Promise<T | null>;
   };
   server: {
+    reportClientDiagnostics: (input: ReportClientDiagnosticsInput) => Promise<void>;
     getClaudeTranscriptRepair: (input: {
       threadId: ThreadId;
     }) => Promise<{ backupId?: string; canRepair: boolean } | null>;
@@ -1033,6 +1038,7 @@ export interface NativeApi {
   };
   /** Private provider form/URL answers; never go through orchestration commands. */
   nativeOperations?: {
+    historyRecovery?: (input: NativeHistoryRecoveryInput) => Promise<NativeHistoryRecovery | null>;
     resolve: (input: NativeOperationResolutionInput) => Promise<NativeOperationRecord>;
     fork: (input: NativeForkInput) => Promise<NativeOperationRecord>;
     execute: (input: NativeOperationInput) => Promise<NativeOperationRecord>;
@@ -1129,6 +1135,7 @@ export interface NativeApi {
     onAdvisoriesUpdated: (callback: (snapshot: PrHubAdvisoriesChanged) => void) => () => void;
   };
   orchestration: {
+    getLatestSequence: () => Promise<OrchestrationGetLatestSequenceResult>;
     getSnapshot: () => Promise<OrchestrationReadModel>;
     getStartupSnapshot: (
       input?: OrchestrationGetStartupSnapshotInput,

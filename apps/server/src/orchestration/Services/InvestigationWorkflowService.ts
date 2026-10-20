@@ -1,3 +1,4 @@
+import type { WorkerAdmissionError } from "@t3tools/shared/DrainableWorker";
 import type {
   InvestigationWorkflow,
   InvestigationWorkflowId,
@@ -10,7 +11,7 @@ import type { Effect, Scope } from "effect";
 
 export interface InvestigationWorkflowServiceShape {
   readonly start: Effect.Effect<void, never, Scope.Scope>;
-  readonly drain: Effect.Effect<void>;
+  readonly drain: Effect.Effect<void, WorkerAdmissionError>;
   readonly createWorkflow: (
     input: OrchestrationCreateInvestigationWorkflowInput,
   ) => Effect.Effect<InvestigationWorkflowId, Error>;

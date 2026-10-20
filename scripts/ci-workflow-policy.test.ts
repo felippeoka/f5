@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { inventories } from "./ci-test-summary.ts";
 
 interface Job {
   needs?: string[];
@@ -27,6 +28,15 @@ export function assertWorkflowPolicy(jobs: Record<string, Job>) {
 
 describe("CI workflow policy", () => {
   it("gates every job and bounds all jobs and matrices", () => assertWorkflowPolicy(workflow.jobs));
+  it("has a report inventory for every configured server unit shard", () => {
+    for (const job of ["server-unit", "windows-server-unit"]) {
+      const matrix = workflow.jobs[job]!.strategy!.matrix as { shard: number[] };
+      for (const shard of matrix.shard) {
+        const event = `server-unit-${shard}`;
+        expect(inventories[event]).toEqual([{ packageName: "suites", event }]);
+      }
+    }
+  });
   it("keeps the notifier outside concurrency groups that can cancel push runs", () => {
     expect(workflow.jobs["main-status"]!.concurrency).toBeUndefined();
   });

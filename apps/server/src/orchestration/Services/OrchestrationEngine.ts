@@ -18,13 +18,30 @@ import type {
 import { ServiceMap } from "effect";
 import type { Effect, Scope, Stream } from "effect";
 
-import type { OrchestrationDispatchError } from "../Errors.ts";
+import type { OrchestrationDispatchError, OrchestrationOverloadError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
 
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
+export type { ProviderControlOrigin as ControlOrigin } from "../../provider/controlTarget.ts";
+import type { ProviderControlOrigin as ControlOrigin } from "../../provider/controlTarget.ts";
+
 export interface OrchestrationEngineShape {
+  /** Releases a reserved control slot after its provider-side outcome is recorded. */
+  /** Claim immediately before processing; expired/unowned events must never run late. */
+  readonly claimControl?: (commandId: string) => Effect.Effect<boolean>;
+  readonly completeControl?: (commandId: string) => Effect.Effect<void>;
+  readonly controlOrigin?: (commandId: string) => ControlOrigin | undefined;
+  readonly isTurnStartSuperseded?: (event: OrchestrationEvent) => boolean;
+  /** Wait for controls already admitted for this thread before preparing a new send. */
+  readonly waitForControlProgress?: (
+    threadId: string,
+  ) => Effect.Effect<void, OrchestrationOverloadError>;
+
+  /** Process-local admission inventory; never includes command contents. */
+  readonly inspectQueue?: () => { entries: number; bytes: number; oldestAgeMs: number };
+
   /**
    * Read the current in-memory orchestration read model.
    *

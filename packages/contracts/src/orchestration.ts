@@ -56,6 +56,7 @@ import {
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
+  getLatestSequence: "orchestration.getLatestSequence",
   getStartupSnapshot: "orchestration.getStartupSnapshot",
   getThreadTailDetails: "orchestration.getThreadTailDetails",
   getRewindDrafts: "orchestration.getRewindDrafts",
@@ -1678,6 +1679,20 @@ const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Internal verified-history repair. Live deltas never reopen a completed message.
+const ThreadMessageAssistantReconcileCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.assistant.reconcile"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  turnId: TurnId,
+  expectedText: Schema.NullOr(Schema.String),
+  expectedReasoningText: Schema.String,
+  text: Schema.String,
+  reasoningText: Schema.String,
+  createdAt: IsoDateTime,
+});
+
 const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.message.assistant.complete"),
   commandId: CommandId,
@@ -1864,6 +1879,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadUsageRecordCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessageAssistantReconcileCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadTurnProcessingQuiesceCommand,
@@ -3240,7 +3256,14 @@ export const OrchestrationStartImplementationInput = Schema.Struct({
 export type OrchestrationStartImplementationInput =
   typeof OrchestrationStartImplementationInput.Type;
 
+export const OrchestrationGetLatestSequenceResult = Schema.Struct({
+  latestSequence: NonNegativeInt,
+  backendIncarnation: Schema.String,
+});
+export type OrchestrationGetLatestSequenceResult = typeof OrchestrationGetLatestSequenceResult.Type;
+
 export const OrchestrationRpcSchemas = {
+  getLatestSequence: { input: Schema.Struct({}), output: OrchestrationGetLatestSequenceResult },
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
     output: OrchestrationGetSnapshotResult,

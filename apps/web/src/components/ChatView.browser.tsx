@@ -1,3 +1,4 @@
+import { waitForTimelineLayout } from "../test/timeline";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resetProtocolStateForTests, setServerBootstrap } from "../protocolState";
 import { serverBootstrapFixture as baseServerBootstrapFixture } from "../test/serverBootstrap";
@@ -1914,21 +1915,9 @@ async function waitForTimelineRowVisible(rowSelector: string, message: string): 
  * height hold still.
  */
 async function waitForTimelineScrollToSettle(): Promise<void> {
-  const STABLE_FRAMES = 6;
-  let stableFrames = 0;
-  let previous = "";
-  const deadline = performance.now() + 4_000;
-  while (stableFrames < STABLE_FRAMES && performance.now() < deadline) {
-    await nextFrame();
-    const scrollContainer = document.querySelector<HTMLElement>(
-      '[data-slot="messages-scroll-container"]',
-    );
-    const current = scrollContainer
-      ? `${scrollContainer.scrollTop}:${scrollContainer.scrollHeight}`
-      : "";
-    stableFrames = current !== "" && current === previous ? stableFrames + 1 : 0;
-    previous = current;
-  }
+  await waitForTimelineLayout(() =>
+    document.querySelector<HTMLElement>('[data-slot="messages-scroll-container"]'),
+  );
 }
 
 async function scrollTimelineRowIntoView(rowSelector: string): Promise<void> {

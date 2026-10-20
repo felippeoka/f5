@@ -1,3 +1,4 @@
+import type { RetainedThreadDetails } from "../deciderReadModel.ts";
 /**
  * ProjectionSnapshotQuery - Read-model snapshot query service interface.
  *
@@ -18,6 +19,7 @@ import type {
   OrchestrationGetThreadDetailsInput,
   OrchestrationThreadDetails,
   OrchestrationReadModel,
+  ThreadId,
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
@@ -28,6 +30,11 @@ import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
  * ProjectionSnapshotQueryShape - Service API for read-model snapshots.
  */
 export interface ProjectionSnapshotQueryShape {
+  /** Internal decider fallback; uses the same retention limits as live state. */
+  readonly getRetainedThreadDetails?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<RetainedThreadDetails, ProjectionRepositoryError>;
+
   /**
    * Read the latest orchestration projection snapshot.
    *

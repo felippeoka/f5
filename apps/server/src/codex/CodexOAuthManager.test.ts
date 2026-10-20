@@ -10,6 +10,7 @@ import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectMcpConfigService } from "../mcp/ProjectMcpConfigService.ts";
+import * as ProviderAccountProbes from "../profiles/ProviderAccountService.ts";
 import type { ProviderServiceShape } from "../provider/Services/ProviderService.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import type { CodexControlClient } from "./CodexControlClient.ts";
@@ -263,6 +264,9 @@ describe("CodexOAuthManager", () => {
   });
 
   it("passes stored OAuth callback settings into the Codex OAuth control client", async () => {
+    // Settings forwarding must not depend on another local login's port.
+    // ProviderAccountService tests cover actual port ownership separately.
+    const probe = vi.spyOn(ProviderAccountProbes, "assertOAuthPortAvailable").mockResolvedValue();
     const client = new FakeOauthClient();
     let capturedInput: CodexOauthClientAccessInput | undefined;
 
@@ -300,6 +304,7 @@ describe("CodexOAuthManager", () => {
       );
 
       expect(pending.status).toBe("pending");
+      expect(probe).toHaveBeenCalledExactlyOnceWith(3118);
       expect(capturedInput?.mcpOAuthCallbackPort).toBe(3118);
       expect(capturedInput?.mcpOAuthCallbackUrl).toBe("https://callback.example.test/callback");
     });

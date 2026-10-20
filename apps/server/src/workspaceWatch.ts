@@ -29,6 +29,7 @@ export interface WorkspaceWatchNotification {
 export interface WorkspaceWatchRegistryOptions<S> {
   readonly notify: (subscriber: S, notification: WorkspaceWatchNotification) => void;
   readonly debounceMs?: number;
+  readonly maxDebounceMs?: number;
   readonly pollIntervalMs?: number;
   readonly maxPathsPerSubscriber?: number;
   /** Test seam; defaults to `fs.watch`. */
@@ -55,14 +56,17 @@ interface WatchEntry<S> {
   /** Deepest workspace root registered; the path must resolve inside it. */
   root: string;
   watcher: fs.FSWatcher | null;
-  pollTimer: ReturnType<typeof setInterval> | null;
-  /** Polling because watching failed, as opposed to waiting for the path to exist. */
+  polling: boolean;
+  /** Watching failed, as opposed to waiting for a path or reconciling directory names. */
   watchFailed: boolean;
   ready: Promise<void>;
   debounceTimer: ReturnType<typeof setTimeout> | null;
   signature: string | null;
   revision: number;
   checking: Promise<void> | null;
+  needsRearm: boolean;
+  dirty: boolean;
+  debounceStartedAt: number | null;
   disposed: boolean;
 }
 
@@ -127,12 +131,16 @@ export class WorkspaceWatchRegistry<S> {
   private readonly callsBySubscriber = new Map<S, { tail: Promise<void>; released: boolean }>();
   private flushScheduled = false;
   private readonly debounceMs: number;
+  private readonly maxDebounceMs: number;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollingActive = false;
   private readonly pollIntervalMs: number;
   private readonly maxPathsPerSubscriber: number;
   private readonly watch: NonNullable<WorkspaceWatchRegistryOptions<S>["watch"]>;
 
   constructor(private readonly options: WorkspaceWatchRegistryOptions<S>) {
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.maxDebounceMs = Math.max(this.debounceMs, options.maxDebounceMs ?? 500);
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.maxPathsPerSubscriber = options.maxPathsPerSubscriber ?? DEFAULT_MAX_PATHS_PER_SUBSCRIBER;
     this.watch = options.watch ?? ((target, listener) => fs.watch(target, listener));
@@ -328,13 +336,16 @@ export class WorkspaceWatchRegistry<S> {
       registrations: new Map(),
       root,
       watcher: null,
-      pollTimer: null,
+      polling: false,
       watchFailed: false,
       ready: Promise.resolve(),
       debounceTimer: null,
       signature: null,
       revision: 0,
       checking: null,
+      needsRearm: false,
+      dirty: false,
+      debounceStartedAt: null,
       disposed: false,
     };
     entry.ready = this.observe(entry).then((signature) => {
@@ -378,14 +389,45 @@ export class WorkspaceWatchRegistry<S> {
       entry.watchFailed = watchFailed;
       this.queueStatusChange(entry);
     }
-    if (entry.pollTimer) return;
-    entry.pollTimer = setInterval(() => this.scheduleCheck(entry, true), this.pollIntervalMs);
-    entry.pollTimer.unref?.();
+    entry.polling = true;
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => void this.poll(), this.pollIntervalMs);
+    this.pollTimer.unref?.();
+  }
+
+  private async poll(): Promise<void> {
+    if (this.pollingActive) return;
+    this.pollingActive = true;
+    try {
+      const entries = [...this.entries.values()].filter(
+        (entry) => entry.polling && !entry.disposed,
+      );
+      let next = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(4, entries.length) }, async () => {
+          for (;;) {
+            const entry = entries[next++];
+            if (!entry) return;
+            if (!entry.polling || entry.disposed) continue;
+            entry.needsRearm = true;
+            await this.check(entry);
+          }
+        }),
+      );
+    } finally {
+      this.pollingActive = false;
+    }
   }
 
   private stopPolling(entry: WatchEntry<S>): void {
-    if (entry.pollTimer) clearInterval(entry.pollTimer);
-    entry.pollTimer = null;
+    entry.polling = false;
+    if (
+      this.pollTimer &&
+      ![...this.entries.values()].some((candidate) => candidate.polling && !candidate.disposed)
+    ) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
     if (entry.watchFailed) {
       entry.watchFailed = false;
       this.queueStatusChange(entry);
@@ -394,39 +436,66 @@ export class WorkspaceWatchRegistry<S> {
 
   private scheduleCheck(entry: WatchEntry<S>, rearm: boolean): void {
     if (entry.disposed) return;
+    // A later change hint must not erase a preceding rename hint.
+    entry.needsRearm ||= rearm;
+    if (entry.checking) {
+      entry.dirty = true;
+      return;
+    }
+    const now = Date.now();
+    entry.debounceStartedAt ??= now;
     if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
+    const delay = Math.min(
+      this.debounceMs,
+      Math.max(0, this.maxDebounceMs - (now - entry.debounceStartedAt)),
+    );
     entry.debounceTimer = setTimeout(() => {
       entry.debounceTimer = null;
-      void this.check(entry, rearm);
-    }, this.debounceMs);
+      entry.debounceStartedAt = null;
+      void this.check(entry);
+    }, delay);
     entry.debounceTimer.unref?.();
   }
 
-  private async check(entry: WatchEntry<S>, rearm: boolean): Promise<void> {
-    // Serialize checks so revisions advance in observation order.
-    while (entry.checking) await entry.checking;
+  private async check(entry: WatchEntry<S>): Promise<void> {
+    if (entry.disposed) return;
+    if (entry.checking) {
+      entry.dirty = true;
+      return entry.checking;
+    }
     const run = (async () => {
-      const previous = entry.signature;
-      const next = await this.observe(entry);
-      if (entry.disposed) return;
-      entry.signature = next;
-      const inodeChanged = previous?.split(":")[0] !== next?.split(":")[0];
-      // A rename or atomic save replaces the inode the watcher was bound to.
-      if (rearm && (inodeChanged || next === null || !entry.watcher)) this.arm(entry);
-      else if (!entry.watcher && !entry.pollTimer) this.arm(entry);
-      if (previous === next) return;
-      entry.revision += 1;
-      this.queueChange(entry, {
-        kind: entry.kind,
-        change: next === null ? "deleted" : previous === null ? "created" : "changed",
-        revision: entry.revision,
-      });
+      {
+        entry.dirty = false;
+        const rearm = entry.needsRearm;
+        entry.needsRearm = false;
+        const previous = entry.signature;
+        const next = await this.observe(entry);
+        if (entry.disposed) return;
+        entry.signature = next;
+        const inodeChanged = previous?.split(":")[0] !== next?.split(":")[0];
+        if (rearm && (inodeChanged || next === null || !entry.watcher)) this.arm(entry);
+        else if (!entry.watcher && !entry.polling) this.arm(entry);
+        if (previous !== next) {
+          entry.revision++;
+          this.queueChange(entry, {
+            kind: entry.kind,
+            change: next === null ? "deleted" : previous === null ? "created" : "changed",
+            revision: entry.revision,
+          });
+        }
+      }
     })();
     entry.checking = run;
     try {
       await run;
     } finally {
-      if (entry.checking === run) entry.checking = null;
+      if (entry.checking === run) {
+        entry.checking = null;
+        // Yield the shared polling slot after one observation. More hints get
+        // one debounced rerun instead of extending this lease indefinitely.
+        if (!entry.disposed && (entry.dirty || entry.needsRearm))
+          this.scheduleCheck(entry, entry.needsRearm);
+      }
     }
   }
 
@@ -492,9 +561,10 @@ export class WorkspaceWatchRegistry<S> {
     entry.disposed = true;
     entry.watcher?.close();
     entry.watcher = null;
-    if (entry.pollTimer) clearInterval(entry.pollTimer);
-    entry.pollTimer = null;
+    this.stopPolling(entry);
     if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
     entry.debounceTimer = null;
+    entry.debounceStartedAt = null;
+    entry.dirty = entry.needsRearm = false;
   }
 }

@@ -188,6 +188,7 @@ function createNativeApiMock(options?: { serverConfig?: Partial<ServerConfig> })
   nativeApiRef.current = {
     server: {
       getConfig: vi.fn(async () => serverConfig),
+      reportClientDiagnostics: vi.fn(async () => undefined),
       updateSettings: vi.fn(async (patch) => {
         serverConfig = {
           ...serverConfig,

@@ -1,3 +1,5 @@
+import { preserveTimelineAnchorDuringHistoryLoad } from "./chat/timelineScrollAnchors";
+import { messageAttachmentSources } from "../lib/streamingTextRevision";
 import { WorkspaceTransitionBanner } from "./chat/WorkspaceTransitionBanner";
 import { flushSync } from "react-dom";
 import { WorktreeMissingBanner } from "./chat/WorktreeMissingBanner";
@@ -904,7 +906,7 @@ export default function ChatView({
     isAtEndRef.current = true;
     showScrollDebouncer.current?.cancel();
     setShowScrollToBottom(false);
-    list.scrollToEnd?.({ animated: true });
+    list.scrollToEnd?.({ animated: false });
   }, []);
   const [followNextTailNonce, setFollowNextTailNonce] = useState(0);
   // Only a send that starts a new turn follows the tail; steering, queueing
@@ -2261,12 +2263,12 @@ export default function ChatView({
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+  const imageSources = messageAttachmentSources(timelineMessages);
   useEffect(() => {
-    const imageSources = timelineMessages.flatMap((message) => message.attachments ?? []);
     setExpandedImage((existing) =>
       existing ? refreshExpandedImageActionSources(existing, imageSources) : existing,
     );
-  }, [timelineMessages]);
+  }, [imageSources]);
   // Reuses unchanged entries (and the array itself) across streaming deltas so
   // memoized timeline rows only re-render when their own entry changed.
   const timelineEntryCacheRef = useRef<TimelineEntryCache | null>(null);
@@ -2379,9 +2381,15 @@ export default function ChatView({
   const loadOlderTimelineHistory = useCallback(
     async (signal: AbortSignal) => {
       if (!activeThread) return;
-      await retryThreadHistoryBackfill(queryClient, activeThread.id, {
+      await preserveTimelineAnchorDuringHistoryLoad({
+        getList: () => legendListRef.current,
+        getRowIndex: (id) => timelineEntryRowIndexMapRef.current?.get(id),
         signal,
-        includeCommandExecutionHistory: settings.showAgentCommandTranscripts,
+        load: () =>
+          retryThreadHistoryBackfill(queryClient, activeThread.id, {
+            signal,
+            includeCommandExecutionHistory: settings.showAgentCommandTranscripts,
+          }),
       });
     },
     [activeThread, queryClient, settings.showAgentCommandTranscripts],

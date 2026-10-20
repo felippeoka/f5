@@ -1819,6 +1819,47 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.message.assistant.reconcile": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const existing = thread.messages.find((message) => message.id === command.messageId);
+      if (
+        thread.latestTurn?.turnId !== command.turnId ||
+        (existing?.text ?? null) !== command.expectedText ||
+        (existing?.reasoningText ?? "") !== command.expectedReasoningText ||
+        (existing && (existing.role !== "assistant" || existing.turnId !== command.turnId))
+      )
+        return [];
+      if (
+        existing &&
+        !existing.streaming &&
+        existing.text === command.text &&
+        (existing.reasoningText ?? "") === command.reasoningText
+      )
+        return [];
+      return [
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: command.messageId,
+            role: "assistant",
+            text: command.text,
+            ...(command.reasoningText ? { reasoningText: command.reasoningText } : {}),
+            turnId: command.turnId,
+            streaming: false,
+            createdAt: existing?.createdAt ?? command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
+    }
+
     case "thread.message.assistant.delta": {
       const targetThread = yield* requireThread({
         readModel,

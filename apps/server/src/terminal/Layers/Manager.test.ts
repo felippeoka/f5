@@ -8,7 +8,8 @@ import {
   type TerminalOpenInput,
   type TerminalRestartInput,
 } from "@t3tools/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as processTree from "@t3tools/shared/processTree";
 
 import {
   PtySpawnError,
@@ -31,6 +32,7 @@ class FakePtyProcess implements PtyProcess {
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: PtyExitEvent) => void>();
   killed = false;
+  exitOnKill = true;
 
   constructor(readonly pid: number) {}
 
@@ -45,6 +47,7 @@ class FakePtyProcess implements PtyProcess {
   kill(signal?: string): void {
     this.killed = true;
     this.killSignals.push(signal);
+    if (this.exitOnKill) this.emitExit({ exitCode: 0, signal: null });
   }
 
   onData(callback: (data: string) => void): () => void {
@@ -223,7 +226,16 @@ function makeServerConfig(logsDir: string): ServerConfigShape {
 describe("TerminalManager", () => {
   const tempDirs: string[] = [];
 
+  beforeEach(() => {
+    // Fake PTY PIDs must never reach the host's process-tree killer.
+    vi.spyOn(processTree, "killProcessTreeAsync").mockImplementation(async (child, options) => {
+      child.kill(options.signal ?? (options.graceful === false ? "SIGKILL" : "SIGTERM"));
+      return { terminated: true, usedFallback: false };
+    });
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const dir of tempDirs.splice(0, tempDirs.length)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -238,6 +250,7 @@ describe("TerminalManager", () => {
       processKillGraceMs?: number;
       maxRetainedInactiveSessions?: number;
       ptyAdapter?: FakePtyAdapter;
+      writeHistory?: (filePath: string, history: string) => Promise<void>;
     } = {},
   ) {
     const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-terminal-"));
@@ -246,6 +259,7 @@ describe("TerminalManager", () => {
     const manager = new TerminalManagerRuntime({
       logsDir,
       ptyAdapter,
+      ...(options.writeHistory ? { writeHistory: options.writeHistory } : {}),
       // Fake PTY PIDs must not query or match real processes on the test host.
       processTableReader: options.processTableReader ?? (async () => new Set()),
       historyLineLimit,
@@ -285,8 +299,8 @@ describe("TerminalManager", () => {
     const other = makeManager().manager;
     const otherSnapshot = await other.open(openInput());
     expect(otherSnapshot.epoch).not.toBe(first.epoch);
-    manager.dispose();
-    other.dispose();
+    await manager.dispose();
+    await other.dispose();
   });
 
   it("reclaims closed revision state and gives a reopened key a newer generation", async () => {
@@ -297,7 +311,7 @@ describe("TerminalManager", () => {
     const reopened = await manager.open(openInput());
     expect(reopened.epoch).toBe(first.epoch);
     expect(reopened.generation).toBeGreaterThan(first.generation);
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("spawns lazily and reuses running terminal per thread", async () => {
@@ -314,7 +328,7 @@ describe("TerminalManager", () => {
     expect(third.threadId).toBe("thread-1");
     expect(ptyAdapter.spawnInputs).toHaveLength(1);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it.each([undefined, "", "24bit"])(
@@ -325,7 +339,7 @@ describe("TerminalManager", () => {
         await manager.open({ ...openInput(), env: { COLORTERM: color ?? "" } });
         expect(ptyAdapter.spawnInputs[0]?.env.COLORTERM).toBe(color || "truecolor");
       } finally {
-        manager.dispose();
+        await manager.dispose();
       }
     },
   );
@@ -339,7 +353,7 @@ describe("TerminalManager", () => {
     expect(ptyAdapter.spawnInputs).toHaveLength(1);
     expect(ptyAdapter.processes).toHaveLength(1);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("records observability metrics for open and restart", async () => {
@@ -400,7 +414,7 @@ describe("TerminalManager", () => {
     expect(process.writes).toEqual(["ls\n"]);
     expect(process.resizeCalls).toEqual([{ cols: 120, rows: 30 }]);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("resizes running terminal on open when a different size is requested", async () => {
@@ -414,7 +428,7 @@ describe("TerminalManager", () => {
 
     expect(process.resizeCalls).toEqual([{ cols: 140, rows: 40 }]);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("preserves existing terminal size on open when size is omitted", async () => {
@@ -443,7 +457,7 @@ describe("TerminalManager", () => {
     expect(resumedSpawn.cols).toBe(100);
     expect(resumedSpawn.rows).toBe(24);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("uses default dimensions when opening a new terminal without size hints", async () => {
@@ -459,7 +473,7 @@ describe("TerminalManager", () => {
     expect(spawned.cols).toBe(120);
     expect(spawned.rows).toBe(30);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("supports multiple terminals per thread with isolated sessions", async () => {
@@ -480,7 +494,7 @@ describe("TerminalManager", () => {
     expect(second.writes).toEqual(["ls\n"]);
     expect(ptyAdapter.spawnInputs).toHaveLength(2);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("clears transcript and emits cleared event", async () => {
@@ -509,8 +523,42 @@ describe("TerminalManager", () => {
       ),
     ).toBe(true);
 
-    manager.dispose();
+    await manager.dispose();
   });
+
+  it.each(["restart", "cwd", "shutdown"] as const)(
+    "drains an intentional %s without emitting a tab-closing exit",
+    async (operation) => {
+      const { manager, ptyAdapter, logsDir } = makeManager();
+      const events: TerminalEvent[] = [];
+      manager.on("event", (event) => events.push(event));
+      await manager.open(openInput());
+      const source = ptyAdapter.processes[0]!;
+      source.exitOnKill = false;
+      const stopping =
+        operation === "restart"
+          ? manager.restart(restartInput())
+          : operation === "cwd"
+            ? manager.open(openInput({ cwd: logsDir }))
+            : manager.dispose();
+      await waitFor(() => source.killSignals.length > 0);
+      source.emitData("last graceful output\n");
+      source.emitExit({ exitCode: 0, signal: 15 });
+      await stopping;
+      expect(events.map((event) => event.type)).toEqual(
+        operation === "shutdown"
+          ? ["started", "output"]
+          : ["started", "output", "cleared", operation === "restart" ? "restarted" : "started"],
+      );
+      if (operation === "shutdown")
+        expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toContain("last graceful output");
+      else {
+        ptyAdapter.processes[1]!.emitExit({ exitCode: 1, signal: null });
+        expect(events.at(-1)?.type).toBe("exited");
+      }
+      await manager.dispose();
+    },
+  );
 
   it("restarts terminal with empty transcript and respawns pty", async () => {
     const { manager, ptyAdapter, logsDir } = makeManager();
@@ -527,7 +575,7 @@ describe("TerminalManager", () => {
     expect(ptyAdapter.spawnInputs).toHaveLength(2);
     await waitFor(() => fs.readFileSync(historyLogPath(logsDir), "utf8") === "");
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("emits exited event and reopens with clean transcript after exit", async () => {
@@ -551,7 +599,7 @@ describe("TerminalManager", () => {
     expect(ptyAdapter.spawnInputs).toHaveLength(2);
     expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe("");
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("ignores trailing writes after terminal exit", async () => {
@@ -566,7 +614,7 @@ describe("TerminalManager", () => {
     await expect(manager.write({ threadId: "thread-1", data: "\r" })).resolves.toBeUndefined();
     expect(process.writes).toEqual([]);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("emits subprocess activity events when child-process state changes", async () => {
@@ -598,7 +646,7 @@ describe("TerminalManager", () => {
       1_200,
     );
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("shares one process table per poll and preserves activity after failed reads", async () => {
@@ -637,7 +685,7 @@ describe("TerminalManager", () => {
       warning.mockRestore();
       info.mockRestore();
     } finally {
-      manager.dispose();
+      await manager.dispose();
       vi.useRealTimers();
     }
   });
@@ -667,46 +715,172 @@ describe("TerminalManager", () => {
       await manager.close({ threadId: "thread-1" });
       expect((await manager.open(openInput())).history).toBe("🙂\r\n");
     } finally {
-      manager.dispose();
+      await manager.dispose();
     }
   });
 
   it("coalesces output while a persistence write is blocked", async () => {
-    const { manager, ptyAdapter, logsDir } = makeManager(5000, {
-      processTableReader: async () => new Set(),
-    });
     const release = Promise.withResolvers<void>();
-    const write = fs.promises.writeFile.bind(fs.promises);
-    let blocked = false;
-    const spy = vi.spyOn(fs.promises, "writeFile").mockImplementation(async (...args) => {
-      if (!blocked && args[0] === historyLogPath(logsDir)) {
-        blocked = true;
-        await release.promise;
-      }
-      return write(...args);
+    const write = vi.fn(async (filePath: string, history: string) => {
+      if (write.mock.calls.length === 1) await release.promise;
+      await fs.promises.writeFile(filePath, history, "utf8");
     });
+    const { manager, ptyAdapter, logsDir } = makeManager(5000, { writeHistory: write });
     try {
       await manager.open(openInput());
       ptyAdapter.processes[0]!.emitData("first\n");
-      await waitFor(() => blocked);
+      await waitFor(() => write.mock.calls.length === 1);
       for (let i = 0; i < 50; i++) ptyAdapter.processes[0]!.emitData(`${i}\n`);
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(spy.mock.calls.filter(([target]) => target === historyLogPath(logsDir))).toHaveLength(
-        1,
-      );
+      expect(write).toHaveBeenCalledTimes(1);
       release.resolve();
       await manager.close({ threadId: "thread-1" });
-      expect(spy.mock.calls.filter(([target]) => target === historyLogPath(logsDir))).toHaveLength(
-        2,
-      );
+      expect(write).toHaveBeenCalledTimes(2);
       expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe(
         "first\n" + Array.from({ length: 50 }, (_, i) => `${i}\n`).join(""),
       );
     } finally {
       release.resolve();
-      spy.mockRestore();
-      manager.dispose();
+      await manager.dispose();
     }
+  });
+
+  it("persists output emitted during TERM and makes disposal idempotent", async () => {
+    const { manager, ptyAdapter, logsDir } = makeManager();
+    await manager.open(openInput());
+    const source = ptyAdapter.processes[0]!;
+    source.emitData("before\n");
+    vi.spyOn(source, "kill").mockImplementation(() => {
+      source.emitData("final🙂");
+      source.emitExit({ exitCode: 0, signal: null });
+    });
+    const first = manager.dispose();
+    expect(manager.dispose()).toBe(first);
+    await first;
+    expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe("before\nfinal🙂");
+    await expect(manager.open(openInput())).rejects.toThrow("shutting down");
+    expect(manager.listenerCount("event")).toBe(0);
+  });
+
+  it("flushes the final source bytes before closing and reopening a terminal", async () => {
+    const { manager, ptyAdapter, logsDir } = makeManager();
+    try {
+      await manager.open(openInput());
+      const source = ptyAdapter.processes[0]!;
+      source.emitData("before\n");
+      vi.spyOn(source, "kill").mockImplementation(() => {
+        source.emitData("final🙂");
+        source.emitExit({ exitCode: 0, signal: null });
+      });
+      await manager.close({ threadId: "thread-1" });
+      expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe("before\nfinal🙂");
+      const reopened = await manager.open(openInput());
+      expect(reopened.history).toBe("before\nfinal🙂");
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("waits for the old terminal source before changing directories and fences late old output", async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "f5-terminal-directory-"));
+    tempDirs.push(logsDir);
+    const adapter = new FakePtyAdapter();
+    const manager = new TerminalManagerRuntime({
+      logsDir,
+      ptyAdapter: adapter,
+      shellResolver: () => process.execPath,
+    });
+    const input = openInput();
+    await manager.open(input);
+    const old = adapter.processes[0]!;
+    old.exitOnKill = false;
+    const next = manager.open({ ...input, cwd: logsDir });
+    await vi.waitFor(() =>
+      expect(old.killSignals).toContain(process.platform === "win32" ? "SIGKILL" : "SIGTERM"),
+    );
+    expect(adapter.processes).toHaveLength(1);
+    old.emitData("last old output");
+    old.emitExit({ exitCode: 0, signal: null });
+    const opened = await next;
+    expect(adapter.processes).toHaveLength(2);
+    expect(opened.status).toBe("running");
+    old.emitData("late old output");
+    old.emitExit({ exitCode: 0, signal: null });
+    adapter.processes[1]!.emitData("current output");
+    const current = await manager.open({ ...input, cwd: logsDir });
+    expect(current.status).toBe("running");
+    expect(current.history).toBe("current output");
+    await manager.dispose();
+  });
+
+  it("shares one source stop when close and shutdown overlap", async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "f5-terminal-shared-stop-"));
+    tempDirs.push(logsDir);
+    const adapter = new FakePtyAdapter();
+    const manager = new TerminalManagerRuntime({
+      logsDir,
+      ptyAdapter: adapter,
+      shellResolver: () => process.execPath,
+    });
+    const input = openInput();
+    await manager.open(input);
+    const source = adapter.processes[0]!;
+    source.exitOnKill = false;
+    const close = manager.close({ threadId: input.threadId, terminalId: input.terminalId });
+    await vi.waitFor(() =>
+      expect(source.killSignals).toContain(process.platform === "win32" ? "SIGKILL" : "SIGTERM"),
+    );
+    const signalsBeforeDisposal = [...source.killSignals];
+    const disposal = manager.dispose();
+    source.emitData("last output");
+    source.emitExit({ exitCode: 0, signal: null });
+    await Promise.all([close, disposal]);
+    expect(source.killSignals).toEqual(signalsBeforeDisposal);
+  });
+
+  it("does not rewrite unchanged histories on repeated close, reopen and shutdown", async () => {
+    const write = vi.fn(async (filePath: string, history: string) => {
+      await fs.promises.writeFile(filePath, history, "utf8");
+    });
+    const { manager, ptyAdapter } = makeManager(5000, { writeHistory: write });
+    try {
+      await manager.open(openInput());
+      ptyAdapter.processes[0]!.emitData("persist once\n");
+      await manager.close({ threadId: "thread-1" });
+      expect(write).toHaveBeenCalledTimes(1);
+      await manager.open(openInput());
+      await manager.close({ threadId: "thread-1" });
+      expect(write).toHaveBeenCalledTimes(1);
+      await manager.open(openInput());
+      await manager.dispose();
+      expect(write).toHaveBeenCalledTimes(1);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("retains a dirty snapshot after a failed write and repairs it during final flush", async () => {
+    const write = vi.fn(async (filePath: string, history: string) => {
+      if (write.mock.calls.length === 1) throw new Error("disk temporarily unavailable");
+      await fs.promises.writeFile(filePath, history, "utf8");
+    });
+    const { manager, ptyAdapter, logsDir } = makeManager(5000, { writeHistory: write });
+    await manager.open(openInput());
+    ptyAdapter.processes[0]!.emitData("must survive");
+    await manager.dispose();
+    expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe("must survive");
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds shutdown when a PTY never closes and still flushes history", async () => {
+    const { manager, ptyAdapter, logsDir } = makeManager(5, { processKillGraceMs: 1 });
+    await manager.open(openInput());
+    const source = ptyAdapter.processes[0]!;
+    source.exitOnKill = false;
+    source.emitData("last bytes");
+    await manager.dispose(Date.now() + 100);
+    expect(source.killSignals).toContain("SIGKILL");
+    expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe("last bytes");
   });
 
   it.each(["restart", "replace with reused PID"] as const)(
@@ -733,7 +907,7 @@ describe("TerminalManager", () => {
         expect(events.filter((event) => event.type === "activity")).toHaveLength(0);
       } finally {
         pending.resolve(new Set());
-        manager.dispose();
+        await manager.dispose();
       }
     },
   );
@@ -752,7 +926,7 @@ describe("TerminalManager", () => {
     const nonEmptyLines = reopened.history.split("\n").filter((line) => line.length > 0);
     expect(nonEmptyLines).toEqual(["line2", "line3", "line4"]);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("deletes history file when close(deleteHistory=true)", async () => {
@@ -767,7 +941,7 @@ describe("TerminalManager", () => {
     await manager.close({ threadId: "thread-1", deleteHistory: true });
     expect(fs.existsSync(historyLogPath(logsDir))).toBe(false);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("closes all terminals for a thread when close omits terminalId", async () => {
@@ -792,7 +966,7 @@ describe("TerminalManager", () => {
     expect(fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "default"))).toBe(false);
     expect(fs.existsSync(multiTerminalHistoryLogPath(logsDir, "thread-1", "sidecar"))).toBe(false);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("escalates terminal shutdown to SIGKILL when process does not exit in time", async () => {
@@ -801,6 +975,7 @@ describe("TerminalManager", () => {
     const process = ptyAdapter.processes[0];
     expect(process).toBeDefined();
     if (!process) return;
+    process.exitOnKill = false;
 
     await manager.close({ threadId: "thread-1" });
     await waitFor(() => process.killSignals.includes("SIGKILL"));
@@ -810,7 +985,7 @@ describe("TerminalManager", () => {
     );
     expect(process.killSignals).toContain("SIGKILL");
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("evicts oldest inactive terminal sessions when retention limit is exceeded", async () => {
@@ -838,7 +1013,7 @@ describe("TerminalManager", () => {
     const keys = [...sessions.keys()];
     expect(keys).toEqual(["thread:thread-2\u0000default"]);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("migrates legacy transcript filenames to terminal-scoped history path on open", async () => {
@@ -854,7 +1029,7 @@ describe("TerminalManager", () => {
     expect(fs.readFileSync(nextPath, "utf8")).toBe("legacy-line\n");
     expect(fs.existsSync(legacyPath)).toBe(false);
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("retries with fallback shells when preferred shell spawn fails", async () => {
@@ -888,7 +1063,7 @@ describe("TerminalManager", () => {
       ).toBe(true);
     }
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("filters app runtime env variables from terminal sessions", async () => {
@@ -930,7 +1105,7 @@ describe("TerminalManager", () => {
       expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
       expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe("keep-me");
 
-      manager.dispose();
+      await manager.dispose();
     } finally {
       restoreEnv();
     }
@@ -955,7 +1130,7 @@ describe("TerminalManager", () => {
     expect(spawnInput.env.T3CODE_WORKTREE_PATH).toBe("/repo/worktree-a");
     expect(spawnInput.env.CUSTOM_FLAG).toBe("1");
 
-    manager.dispose();
+    await manager.dispose();
   });
 
   it.skipIf(process.platform === "win32")(
@@ -972,7 +1147,7 @@ describe("TerminalManager", () => {
       expect(spawnInput.shell).toBe("/bin/zsh");
       expect(spawnInput.args).toEqual(["-o", "nopromptsp"]);
 
-      manager.dispose();
+      await manager.dispose();
     },
   );
 });

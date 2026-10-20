@@ -11,11 +11,13 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   EventId,
   type ProviderEvent,
+  type ProviderSession,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
 
 import {
+  type CodexAppServerStartSessionInput,
   buildCodexInitializeParams,
   buildCodexThreadOpenRequestParams,
   buildCodexTurnStartParams,
@@ -3094,8 +3096,8 @@ describe("respondToRequest", () => {
 });
 
 describe("Codex server requests", () => {
-  function requestContext() {
-    return {
+  function requestContext(manager: CodexAppServerManager) {
+    const context = {
       session: {
         provider: "codex",
         status: "ready",
@@ -3109,11 +3111,16 @@ describe("Codex server requests", () => {
       elicitations: new ElicitationRegistry(),
       nativeRequestCorrelations: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
+    return context;
   }
 
   it("routes legacy callId fields to provider items", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     (
       manager as unknown as {
         handleServerRequest: (context: unknown, request: Record<string, unknown>) => void;
@@ -3142,7 +3149,7 @@ describe("Codex server requests", () => {
 
   it("bounds native request correlations while retaining the newest prompts", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const handleServerRequest = (
       manager as unknown as {
         handleServerRequest: (context: unknown, request: Record<string, unknown>) => void;
@@ -3192,7 +3199,7 @@ describe("Codex server requests", () => {
 
   it("answers currentTime/read without creating a prompt", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3222,7 +3229,7 @@ describe("Codex server requests", () => {
 
   it("keeps MCP app approval pending until the user chooses an advertised response", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3268,7 +3275,7 @@ describe("Codex server requests", () => {
 
   it("sends an execpolicy amendment only when the command approval offered it", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3338,7 +3345,7 @@ describe("Codex server requests", () => {
 
   it("cancels MCP forms with unsupported constraints visibly, without publishing a request", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3375,7 +3382,7 @@ describe("Codex server requests", () => {
   it("answers supported MCP forms privately and settles them on native completion", async () => {
     const SENTINEL = "sentinel-value-4be1";
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3451,7 +3458,7 @@ describe("Codex server requests", () => {
 
   it("settles a cancelled MCP form as cancelled, not as a provided answer", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     vi.spyOn(
       manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
       "writeMessage",
@@ -3496,7 +3503,7 @@ describe("Codex server requests", () => {
     ["attestation/generate", "attestation"],
   ] as const)("rejects unexpected %s requests deterministically", async (method, messagePart) => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const events: Array<{ method: string; message?: string }> = [];
     manager.on("event", (event) =>
       events.push({
@@ -3536,7 +3543,7 @@ describe("Codex server requests", () => {
 
   it("clears externally resolved prompts while preserving request type", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const requestId = ApprovalRequestId.makeUnsafe("req-external");
     context.pendingApprovals.set(requestId, {});
     context.nativeRequestCorrelations.set("85", {
@@ -3577,7 +3584,7 @@ describe("Codex server requests", () => {
 
   it("suppresses the server acknowledgement after a local resolution", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const requestId = ApprovalRequestId.makeUnsafe("req-local");
     context.nativeRequestCorrelations.set("86", {
       nativeRequestId: "86",
@@ -3605,7 +3612,7 @@ describe("Codex server requests", () => {
 
   it("suppresses uncorrelated late server acknowledgements", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const events: unknown[] = [];
     manager.on("event", (event) => events.push(event));
 
@@ -3729,6 +3736,10 @@ describe("respondToUserInput", () => {
       pendingApprovals: new Map(),
       pendingUserInputs: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
     type ApprovalRequestContext = {
       session: typeof context.session;
       pendingApprovals: typeof context.pendingApprovals;
@@ -3770,6 +3781,10 @@ describe("respondToUserInput", () => {
       pendingApprovals: new Map(),
       pendingUserInputs: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
     type ApprovalRequestContext = {
       session: typeof context.session;
       pendingApprovals: typeof context.pendingApprovals;
@@ -3816,6 +3831,10 @@ describe("respondToUserInput", () => {
       pendingApprovals: new Map(),
       pendingUserInputs: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
     type ApprovalRequestContext = {
       session: typeof context.session;
       pendingApprovals: typeof context.pendingApprovals;
@@ -3938,9 +3957,9 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
   }, 180_000);
 });
 
-it("ignores process callbacks from a replaced provider session", () => {
+it("drains replaced provider sources without closing their replacement", () => {
   const manager = new CodexAppServerManager();
-  const output = new EventEmitter();
+  const output = Object.assign(new EventEmitter(), { close: vi.fn(), finish: vi.fn() });
   const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter() });
   const context = {
     session: { threadId: "replaced" },
@@ -3948,6 +3967,10 @@ it("ignores process callbacks from a replaced provider session", () => {
     output,
     child,
     writer: { close: vi.fn() },
+    pending: new Map(),
+    pendingApprovals: new Map(),
+    pendingUserInputs: new Map(),
+    nativeRequestCorrelations: new Map(),
   };
   const internal = manager as unknown as {
     sessions: Map<string, unknown>;
@@ -3956,7 +3979,7 @@ it("ignores process callbacks from a replaced provider session", () => {
     emitErrorEvent: (...args: unknown[]) => void;
     emitLifecycleEvent: (...args: unknown[]) => void;
   };
-  const stdout = vi.spyOn(internal, "handleStdoutLine");
+  const stdout = vi.spyOn(internal, "handleStdoutLine").mockImplementation(() => {});
   const errors = vi.spyOn(internal, "emitErrorEvent");
   const lifecycle = vi.spyOn(internal, "emitLifecycleEvent");
   internal.sessions.set("replaced", context);
@@ -3967,9 +3990,10 @@ it("ignores process callbacks from a replaced provider session", () => {
   child.stderr.emit("data", Buffer.from("ERROR old process"));
   child.emit("error", new Error("old process"));
   child.emit("exit", 1, null);
-  expect(stdout).not.toHaveBeenCalled();
-  expect(errors).not.toHaveBeenCalled();
-  expect(lifecycle).not.toHaveBeenCalled();
+  child.emit("close", 1, null);
+  expect(stdout).toHaveBeenCalledTimes(1);
+  expect(errors.mock.calls.every((call) => call[1] === "process/stderr")).toBe(true);
+  expect(lifecycle).toHaveBeenCalledTimes(1);
   expect(internal.sessions.get("replaced")).toBe(replacement);
 });
 describe("Release 4 native operations", () => {
@@ -4387,3 +4411,186 @@ it("stamps MCP startup notifications from their emitting Codex context", () => {
     sessionGeneration: 1,
   });
 });
+
+describe("Codex process settlement and source draining", () => {
+  function fixture() {
+    const manager = new CodexAppServerManager();
+    const output = Object.assign(new EventEmitter(), { close: vi.fn(), finish: vi.fn() });
+    const child = Object.assign(new EventEmitter(), {
+      stdout: { destroy: vi.fn() },
+      stdin: { destroy: vi.fn() },
+      stderr: Object.assign(new EventEmitter(), { destroy: vi.fn() }),
+    });
+    const reject = vi.fn();
+    const timeout = setTimeout(() => reject(new Error("late timeout")), 60_000);
+    const context = {
+      session: {
+        threadId: "draining",
+        status: "running",
+        activeTurnId: TurnId.makeUnsafe("draining-turn"),
+      },
+      stopping: false,
+      output,
+      child,
+      writer: { close: vi.fn() },
+      pending: new Map([[1, { timeout, reject }]]),
+      pendingApprovals: new Map(),
+      pendingUserInputs: new Map(),
+      nativeRequestCorrelations: new Map(),
+    };
+    const internal = manager as unknown as {
+      sessions: Map<string, unknown>;
+      attachProcessListeners: (context: unknown) => void;
+      handleStdoutLine: (...args: unknown[]) => void;
+      emitLifecycleEvent: (...args: unknown[]) => void;
+      emitErrorEvent: (...args: unknown[]) => void;
+    };
+    internal.sessions.set("draining", context);
+    const lines = vi.spyOn(internal, "handleStdoutLine").mockImplementation(() => {});
+    const lifecycle = vi.spyOn(internal, "emitLifecycleEvent").mockImplementation(() => {});
+    const errors = vi.spyOn(internal, "emitErrorEvent").mockImplementation(() => {});
+    internal.attachProcessListeners(context);
+    return { context, output, child, reject, internal, lines, lifecycle, errors };
+  }
+  it.each(["exit", "error"])(
+    "settles written requests on %s before pipes close, including replaced contexts",
+    (kind) => {
+      const f = fixture();
+      const replacement = { session: { threadId: "draining" } };
+      f.internal.sessions.set("draining", replacement);
+      if (kind === "exit") f.child.emit("exit", 1, null);
+      else f.child.emit("error", new Error("dead"));
+      expect(f.reject).toHaveBeenCalledTimes(1);
+      expect(f.context.pending.size).toBe(0);
+      f.child.emit("close");
+      expect(f.internal.sessions.get("draining")).toBe(replacement);
+      expect(f.lifecycle).toHaveBeenCalledTimes(1);
+      expect(f.child.eventNames()).toEqual([]);
+    },
+  );
+  it("publishes final output and split stderr after exit before one terminal event", () => {
+    const f = fixture();
+    f.child.stderr.emit("data", Buffer.from("ERROR final "));
+    f.child.emit("exit", 0, null);
+    expect(f.reject).toHaveBeenCalledTimes(1);
+    expect(f.lifecycle).not.toHaveBeenCalled();
+    f.output.emit("line", '{"method":"turn/completed"}');
+    f.child.stderr.emit("data", Buffer.from("diagnostic\n"));
+    expect(f.lines).toHaveBeenCalledTimes(1);
+    expect(f.errors).toHaveBeenCalledWith(
+      f.context,
+      "process/stderr",
+      expect.stringContaining("final diagnostic"),
+    );
+    f.child.emit("exit", 0, null);
+    f.child.emit("error", new Error("duplicate"));
+    f.output.emit("close");
+    f.child.stderr.emit("end");
+    expect(f.lifecycle).toHaveBeenCalledTimes(1);
+    expect(f.lifecycle).toHaveBeenCalledWith(
+      f.context,
+      "session/exited",
+      expect.any(String),
+      TurnId.makeUnsafe("draining-turn"),
+    );
+    expect(f.context.session.activeTurnId).toBeUndefined();
+    expect(f.internal.sessions.size).toBe(0);
+    expect(f.context.pending.size).toBe(0);
+    expect(f.child.eventNames()).toEqual([]);
+    expect(f.output.listenerCount("line")).toBe(0);
+    expect(f.child.stderr.listenerCount("data")).toBe(0);
+  });
+  it("closes hanging pipes at the drain deadline without leaking listeners", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      f.output.finish.mockImplementation(() => {
+        f.output.emit("line", '{"method":"final"}');
+        f.output.emit("close");
+      });
+      f.child.emit("error", new Error("failed without exit"));
+      expect(f.context.pending.size).toBe(0);
+      await vi.advanceTimersByTimeAsync(1_800);
+      expect(f.lifecycle).toHaveBeenCalledTimes(1);
+      expect(f.lines).toHaveBeenCalledWith(f.context, '{"method":"final"}');
+      expect(f.lines.mock.invocationCallOrder[0]).toBeLessThan(
+        f.lifecycle.mock.invocationCallOrder[0]!,
+      );
+      expect(f.child.eventNames()).toEqual([]);
+      expect(f.child.stderr.eventNames()).toEqual([]);
+      expect(f.output.eventNames()).toEqual([]);
+      expect(f.child.stdout.destroy).toHaveBeenCalledTimes(1);
+      expect(f.child.stderr.destroy).toHaveBeenCalledTimes(1);
+      expect(f.child.stdin.destroy).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it("cancels a queued session start without releasing the preceding start's exclusion", async () => {
+  const manager = new CodexAppServerManager();
+  let release!: (session: ProviderSession) => void;
+  const firstResult = new Promise<ProviderSession>((resolve) => {
+    release = resolve;
+  });
+  const session = {
+    threadId: asThreadId("cancel-start"),
+    provider: "codex",
+    status: "ready",
+    runtimeMode: "full-access",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } as const;
+  const internal = manager as unknown as {
+    startSessionUnlocked: (input: CodexAppServerStartSessionInput) => Promise<ProviderSession>;
+  };
+  const start = vi
+    .spyOn(internal, "startSessionUnlocked")
+    .mockImplementationOnce(() => firstResult)
+    .mockResolvedValue(session);
+  const input = { threadId: session.threadId, runtimeMode: "full-access" } as const;
+  const first = manager.startSession(input);
+  await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+  const controller = new AbortController();
+  const cancelled = manager.startSession(input, controller.signal);
+  const rejection = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+  controller.abort();
+  await rejection;
+  const third = manager.startSession(input);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(start).toHaveBeenCalledTimes(1);
+  release(session);
+  await Promise.all([first, third]);
+  expect(start).toHaveBeenCalledTimes(2);
+});
+
+it.each([false, true])(
+  "retired goal pause cannot stop a replacement (request already started: %s)",
+  async (started) => {
+    const { manager, context, sendRequest } = createThreadControlHarness();
+    const internal = manager as unknown as {
+      sessions: Map<string, unknown>;
+      handleServerNotification: (context: unknown, notification: unknown) => void;
+    };
+    internal.sessions.set(context.session.threadId, context);
+    const stop = vi.spyOn(manager, "stopSession").mockImplementation(() => {});
+    const request = Promise.withResolvers<never>();
+    sendRequest.mockReturnValue(request.promise);
+    const frame = {
+      method: "thread/goal/updated",
+      params: { threadId: "thread_1", goal: { status: "active" } },
+    };
+    if (started) internal.handleServerNotification(context, frame);
+    const replacement = { session: { ...context.session } };
+    internal.sessions.set(context.session.threadId, replacement);
+    if (started) request.reject(new Error("retired writer closed"));
+    else internal.handleServerNotification(context, frame);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stop).not.toHaveBeenCalled();
+    expect(sendRequest).toHaveBeenCalledTimes(started ? 1 : 0);
+    expect(internal.sessions.get(context.session.threadId)).toBe(replacement);
+  },
+);

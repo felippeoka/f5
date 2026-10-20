@@ -1,3 +1,4 @@
+import type { ProviderAdapterSessionStartInput } from "../Services/ProviderAdapter.ts";
 import { AGENT_AUTOMATION_SUPPORT } from "@t3tools/shared/agentAutomationSupport";
 /**
  * MuseAdapter — F5 provider adapter for Muse Code over the Muse Session
@@ -103,7 +104,7 @@ import {
 } from "../msp/MuseEventMapping.ts";
 import { memoryNativeCommandIdStore, type NativeCommandIdStore } from "../msp/nativeCommandIds.ts";
 import { type MuseAdapterShape } from "../Services/MuseAdapter.ts";
-import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { writeProviderEventLog, type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "muse" as const;
 const MUSE_RESUME_VERSION = 1 as const;
@@ -177,6 +178,7 @@ interface PendingMuseApproval {
 }
 
 interface MuseSessionContext {
+  readonly eventIdentity: ProviderAdapterSessionStartInput["mcpEventIdentity"];
   readonly threadId: ThreadId;
   readonly scope: Scope.Closeable;
   readonly handle: MuseHostHandle;
@@ -206,7 +208,10 @@ interface MuseSessionContext {
 }
 
 /** Adapter-internal entries on the notification queue, processed in order with host frames. */
-type AdapterSignal = { readonly method: "$gapError" } | { readonly method: "$gapFilled" };
+type AdapterSignal =
+  | { readonly method: "$gapError" }
+  | { readonly method: "$gapFilled" }
+  | { readonly method: "$closed" };
 
 /** Records an id, dropping the oldest once the set is full. */
 function remember<A>(set: Set<A>, value: A): void {
@@ -229,6 +234,7 @@ function selectionValue(
 
 export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapterOptions) {
   return Effect.gen(function* () {
+    const adapterScope = yield* Effect.scope;
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const fileSystem = yield* FileSystem.FileSystem;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -243,14 +249,18 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
     const offer = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-    const stamp = (threadId: ThreadId, turnId?: string) =>
+    const stamp = (
+      origin: Pick<MuseSessionContext, "threadId" | "eventIdentity">,
+      turnId?: string,
+    ) =>
       Effect.gen(function* () {
         return {
           eventId: EventId.make(yield* Random.nextUUIDv4),
           createdAt: yield* nowIso,
           provider: PROVIDER,
           providerInstanceId: boundInstanceId,
-          threadId,
+          ...origin.eventIdentity,
+          threadId: origin.threadId,
           ...(turnId ? { turnId: TurnId.make(turnId) } : {}),
         };
       });
@@ -269,7 +279,8 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
       nativeEventLogger
         ? Effect.suspend(() => {
             const observedAt = new Date().toISOString();
-            return nativeEventLogger.write(
+            return writeProviderEventLog(
+              nativeEventLogger,
               {
                 observedAt,
                 event: {
@@ -393,6 +404,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
     const stopSessionInternal = (
       ctx: MuseSessionContext,
       exit: { readonly exitKind: "graceful" | "error"; readonly reason?: string },
+      waitForClose = false,
     ) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
@@ -401,7 +413,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         for (const pending of ctx.approvals.values()) {
           yield* offer({
             type: "request.resolved",
-            ...(yield* stamp(ctx.threadId, pending.params.turnId)),
+            ...(yield* stamp(ctx, pending.params.turnId)),
             requestId: RuntimeRequestId.make(pending.requestId),
             payload: { requestType: museRequestType(pending.params), decision: "cancel" },
           });
@@ -410,7 +422,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         for (const requestId of ctx.userInputs.keys()) {
           yield* offer({
             type: "user-input.resolved",
-            ...(yield* stamp(ctx.threadId, ctx.activeTurnId)),
+            ...(yield* stamp(ctx, ctx.activeTurnId)),
             requestId: RuntimeRequestId.make(requestId),
             payload: { answers: {}, receipt: "cancelled" },
           });
@@ -422,7 +434,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           settleTurnWaiters(ctx, turnId);
           yield* offer({
             type: "turn.completed",
-            ...(yield* stamp(ctx.threadId, turnId)),
+            ...(yield* stamp(ctx, turnId)),
             payload: {
               state: exit.exitKind === "error" ? "failed" : "cancelled",
               stopReason: exit.exitKind === "error" ? "error" : "cancelled",
@@ -432,7 +444,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         }
         yield* offer({
           type: "session.exited",
-          ...(yield* stamp(ctx.threadId)),
+          ...(yield* stamp(ctx)),
           resumeCursor: resumeCursorOf(ctx),
           payload: {
             exitKind: exit.exitKind,
@@ -441,7 +453,9 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           },
         });
         yield* Queue.shutdown(ctx.notifications);
-        yield* Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore, Effect.forkDetach);
+        const close = Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore);
+        if (waitForClose) yield* close;
+        else yield* close.pipe(Effect.forkIn(adapterScope));
       });
 
     /**
@@ -456,7 +470,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         ctx.diverged = true;
         yield* offer({
           type: "runtime.error",
-          ...(yield* stamp(ctx.threadId, ctx.activeTurnId)),
+          ...(yield* stamp(ctx, ctx.activeTurnId)),
           payload: { message, class: "permission_error" },
         });
         const turnId = ctx.activeTurnId;
@@ -468,7 +482,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             yield* awaitTurnSettled(ctx, turnId, CANCEL_SETTLE_TIMEOUT_MS);
           }
           yield* stopSessionInternal(ctx, { exitKind: "error", reason: message });
-        }).pipe(Effect.forkDetach);
+        }).pipe(Effect.forkIn(adapterScope));
       });
 
     const emitItem = (ctx: MuseSessionContext, item: Item, force = false) =>
@@ -494,7 +508,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             if (streamed && item.text.startsWith(streamed) && item.text.length > streamed.length) {
               yield* offer({
                 type: "content.delta",
-                ...(yield* stamp(ctx.threadId, turnId ?? undefined)),
+                ...(yield* stamp(ctx, turnId ?? undefined)),
                 itemId: RuntimeItemId.make(item.itemId),
                 payload: { streamKind: "assistant_text", delta: item.text.slice(streamed.length) },
               });
@@ -509,7 +523,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             : "item.updated";
         yield* offer({
           type,
-          ...(yield* stamp(ctx.threadId, turnId ?? undefined)),
+          ...(yield* stamp(ctx, turnId ?? undefined)),
           itemId: RuntimeItemId.make(item.itemId),
           ...(completed ? cursorField(ctx, false) : {}),
           payload: {
@@ -549,7 +563,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         ctx.approvalRequestByApprovalId.set(params.approvalId, requestId);
         yield* offer({
           type: "request.opened",
-          ...(yield* stamp(ctx.threadId, params.turnId)),
+          ...(yield* stamp(ctx, params.turnId)),
           requestId: RuntimeRequestId.make(requestId),
           payload: {
             requestType: museRequestType(params),
@@ -577,7 +591,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         }
         yield* offer({
           type: "request.resolved",
-          ...(yield* stamp(ctx.threadId, pending.params.turnId)),
+          ...(yield* stamp(ctx, pending.params.turnId)),
           requestId: RuntimeRequestId.make(requestId),
           payload: {
             requestType: museRequestType(pending.params),
@@ -603,7 +617,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           ).pipe(Effect.ignore);
           yield* offer({
             type: "runtime.warning",
-            ...(yield* stamp(ctx.threadId, ctx.activeTurnId)),
+            ...(yield* stamp(ctx, ctx.activeTurnId)),
             payload: {
               message: "Muse Code sent an approval F5 could not read; F5 denied it.",
               category: "protocol",
@@ -673,7 +687,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         ctx.userInputs.set(requestId, params);
         yield* offer({
           type: "user-input.requested",
-          ...(yield* stamp(ctx.threadId, params.turnId)),
+          ...(yield* stamp(ctx, params.turnId)),
           requestId: RuntimeRequestId.make(requestId),
           payload: { questions: museQuestions(params.questions) },
           raw: { source: "msp.jsonrpc", method: "userInput/requested", payload: params },
@@ -695,7 +709,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         );
         yield* offer({
           type: "user-input.resolved",
-          ...(yield* stamp(ctx.threadId, pending.turnId)),
+          ...(yield* stamp(ctx, pending.turnId)),
           requestId: RuntimeRequestId.make(requestId),
           payload: {
             answers,
@@ -722,7 +736,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         endTurn(ctx, turnId);
         yield* offer({
           type: "turn.completed",
-          ...(yield* stamp(ctx.threadId, turnId)),
+          ...(yield* stamp(ctx, turnId)),
           ...cursorField(ctx, true),
           payload: {
             state: museTurnState(outcome.terminal),
@@ -739,7 +753,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         endTurn(ctx, turnId);
         yield* offer({
           type: "turn.aborted",
-          ...(yield* stamp(ctx.threadId, turnId)),
+          ...(yield* stamp(ctx, turnId)),
           ...cursorField(ctx, true),
           payload: { reason },
         });
@@ -822,7 +836,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         }
       }).pipe(
         Effect.catch((cause) =>
-          stamp(ctx.threadId, ctx.activeTurnId).pipe(
+          stamp(ctx, ctx.activeTurnId).pipe(
             Effect.flatMap((stamped) =>
               offer({
                 type: "runtime.warning",
@@ -854,7 +868,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             };
             yield* offer({
               type: "turn.started",
-              ...(yield* stamp(ctx.threadId, turnId)),
+              ...(yield* stamp(ctx, turnId)),
               payload: {
                 ...(ctx.currentModelId ? { model: ctx.currentModelId } : {}),
                 ...(ctx.currentEffort ? { effort: ctx.currentEffort } : {}),
@@ -904,7 +918,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             ctx.streamedText.set(itemId, (ctx.streamedText.get(itemId) ?? "") + delta);
             yield* offer({
               type: "content.delta",
-              ...(yield* stamp(ctx.threadId, (folded?.turnId ?? ctx.activeTurnId) || undefined)),
+              ...(yield* stamp(ctx, (folded?.turnId ?? ctx.activeTurnId) || undefined)),
               itemId: RuntimeItemId.make(itemId),
               ...cursorField(ctx, false),
               payload: { streamKind: museDeltaStreamKind(folded, field), delta },
@@ -933,7 +947,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             const items = Array.isArray(params.items) ? params.items : [];
             yield* offer({
               type: "turn.plan.updated",
-              ...(yield* stamp(ctx.threadId, ctx.activeTurnId)),
+              ...(yield* stamp(ctx, ctx.activeTurnId)),
               payload: { plan: museTodoPlan(items) },
             });
             return;
@@ -942,7 +956,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             const cumulative = params.cumulative as Record<string, unknown> | undefined;
             yield* offer({
               type: "thread.token-usage.updated",
-              ...(yield* stamp(ctx.threadId, turnId)),
+              ...(yield* stamp(ctx, turnId)),
               payload: {
                 usage: {
                   prompt_tokens: params.promptTokens,
@@ -959,7 +973,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
               typeof params.windowTokens === "number" ? params.windowTokens : undefined;
             yield* offer({
               type: "thread.token-usage.updated",
-              ...(yield* stamp(ctx.threadId, ctx.activeTurnId)),
+              ...(yield* stamp(ctx, ctx.activeTurnId)),
               payload: {
                 usage: { total_tokens: used, pressure: params.pressure },
                 ...(used !== undefined ? { contextTokens: Math.max(0, Math.floor(used)) } : {}),
@@ -973,7 +987,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           case "usage/changed":
             yield* offer({
               type: "account.rate-limits.updated",
-              ...(yield* stamp(ctx.threadId)),
+              ...(yield* stamp(ctx)),
               payload: { rateLimits: params },
             });
             return;
@@ -981,7 +995,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           case "turn/modelRetryScheduled":
             yield* offer({
               type: "runtime.warning",
-              ...(yield* stamp(ctx.threadId, turnId)),
+              ...(yield* stamp(ctx, turnId)),
               payload: {
                 message: `Muse Code is retrying (attempt ${String(params.nextAttempt ?? "?")} of ${String(params.maxAttempts ?? "?")}).`,
                 category: "provider",
@@ -992,7 +1006,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           case "session/modelRouteUnserved":
             yield* offer({
               type: "runtime.warning",
-              ...(yield* stamp(ctx.threadId, ctx.activeTurnId)),
+              ...(yield* stamp(ctx, ctx.activeTurnId)),
               payload: {
                 message: `Muse Code cannot route model '${String(params.modelId)}' through its installed provider.`,
                 category: "provider",
@@ -1037,7 +1051,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           error instanceof MuseGapFillError ? ` between ${error.after} and ${error.next}` : "";
         yield* offer({
           type: "runtime.warning",
-          ...(yield* stamp(ctx.threadId, ctx.activeTurnId)),
+          ...(yield* stamp(ctx, ctx.activeTurnId)),
           payload: {
             message: `Muse Code history${bounds} could not be recovered; F5 reloaded the session's current state.`,
             category: "protocol",
@@ -1239,14 +1253,14 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           const cwd = nodePath.resolve(input.cwd);
           const existing = sessions.get(input.threadId);
           if (existing && !existing.stopped) {
-            yield* stopSessionInternal(existing, { exitKind: "graceful" });
+            yield* stopSessionInternal(existing, { exitKind: "graceful" }, true);
           }
           const selection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const requestedEffort =
             selectionValue(selection?.options, "reasoningEffort") ?? DEFAULT_REASONING_EFFORT;
 
-          const sessionScope = yield* Scope.make("sequential");
+          const sessionScope = yield* Scope.fork(adapterScope, "sequential");
           return yield* Effect.gen(function* () {
             const handle = yield* (options?.openHost ?? defaultOpenHost)({ cwd }).pipe(
               Effect.provideService(Scope.Scope, sessionScope),
@@ -1275,7 +1289,10 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             });
             const permissions = yield* enforcePermissions(handle.host, opened.session, runtimeMode);
             if (!permissions.ok) {
-              const stamped = yield* stamp(input.threadId);
+              const stamped = yield* stamp({
+                threadId: input.threadId,
+                eventIdentity: input.mcpEventIdentity,
+              });
               yield* offer({
                 type: "runtime.error",
                 ...stamped,
@@ -1310,6 +1327,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             const now = yield* nowIso;
             const viewCursor = opening?.result.viewCursor ?? null;
             const ctx: MuseSessionContext = {
+              eventIdentity: input.mcpEventIdentity,
               threadId: input.threadId,
               scope: sessionScope,
               handle,
@@ -1357,22 +1375,21 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                   ? recoverFromGap(ctx, undefined)
                   : entry.method === "$gapFilled"
                     ? reconcileFold(ctx)
-                    : handleNotification(ctx, entry as Notification),
+                    : entry.method === "$closed"
+                      ? stopSessionInternal(ctx, {
+                          exitKind: "error",
+                          reason: `Muse Code host exited unexpectedly.${handle.stderrTail().trim() ? ` ${handle.stderrTail().trim().slice(-500)}` : ""}`,
+                        })
+                      : handleNotification(ctx, entry as Notification),
               ),
               Effect.forkIn(sessionScope),
             );
+            // The SDK closes only after delivering its final notifications. Put
+            // source closure behind them so asynchronous logging/preparation
+            // cannot be overtaken by the terminal lifecycle event.
             yield* Effect.promise(() => handle.host.connection.closed).pipe(
               Effect.flatMap(() =>
-                ctx.stopped
-                  ? Effect.void
-                  : stopSessionInternal(ctx, {
-                      exitKind: "error",
-                      reason: `Muse Code host exited unexpectedly.${
-                        handle.stderrTail().trim()
-                          ? ` ${handle.stderrTail().trim().slice(-500)}`
-                          : ""
-                      }`,
-                    }),
+                ctx.stopped ? Effect.void : Queue.offer(notifications, { method: "$closed" }),
               ),
               Effect.forkIn(sessionScope),
             );
@@ -1380,7 +1397,10 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             if (handle.host.fingerprintWarning) {
               yield* offer({
                 type: "runtime.warning",
-                ...(yield* stamp(input.threadId)),
+                ...(yield* stamp({
+                  threadId: input.threadId,
+                  eventIdentity: input.mcpEventIdentity,
+                })),
                 payload: {
                   message:
                     "Untested Muse Code protocol: this CLI's schema differs from the one F5 was built against.",
@@ -1392,7 +1412,10 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             if (opened.freshReason) {
               yield* offer({
                 type: "runtime.warning",
-                ...(yield* stamp(input.threadId)),
+                ...(yield* stamp({
+                  threadId: input.threadId,
+                  eventIdentity: input.mcpEventIdentity,
+                })),
                 payload: {
                   message: `${opened.freshReason} F5 started a new Muse Code session.`,
                   category: "provider",
@@ -1402,7 +1425,10 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             if (opened.hydrate) {
               yield* offer({
                 type: "runtime.warning",
-                ...(yield* stamp(input.threadId)),
+                ...(yield* stamp({
+                  threadId: input.threadId,
+                  eventIdentity: input.mcpEventIdentity,
+                })),
                 payload: {
                   message:
                     "Muse Code pruned history after F5's last checkpoint; F5 reloaded the session's current state.",
@@ -1416,12 +1442,18 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
 
             yield* offer({
               type: "session.started",
-              ...(yield* stamp(input.threadId)),
+              ...(yield* stamp({
+                threadId: input.threadId,
+                eventIdentity: input.mcpEventIdentity,
+              })),
               payload: { resume: { mspSessionId: ctx.mspSessionId } },
             });
             yield* offer({
               type: "session.configured",
-              ...(yield* stamp(input.threadId)),
+              ...(yield* stamp({
+                threadId: input.threadId,
+                eventIdentity: input.mcpEventIdentity,
+              })),
               payload: {
                 config: {
                   agentBrowser: {
@@ -1435,12 +1467,18 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             });
             yield* offer({
               type: "session.state.changed",
-              ...(yield* stamp(input.threadId)),
+              ...(yield* stamp({
+                threadId: input.threadId,
+                eventIdentity: input.mcpEventIdentity,
+              })),
               payload: { state: "ready", reason: "Muse Code session ready" },
             });
             yield* offer({
               type: "thread.started",
-              ...(yield* stamp(input.threadId)),
+              ...(yield* stamp({
+                threadId: input.threadId,
+                eventIdentity: input.mcpEventIdentity,
+              })),
               resumeCursor: resumeCursorOf(ctx),
               payload: { providerThreadId: ctx.mspSessionId },
             });
@@ -1783,7 +1821,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             // A cancel ack only means the request was admitted.
             yield* awaitTurnSettled(ctx, turnId, CANCEL_SETTLE_TIMEOUT_MS);
           }
-          yield* stopSessionInternal(ctx, { exitKind: "graceful" });
+          yield* stopSessionInternal(ctx, { exitKind: "graceful" }, true);
         }),
       );
 
@@ -1799,8 +1837,8 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
     const stopAll: MuseAdapterShape["stopAll"] = () =>
       Effect.forEach(
         Array.from(sessions.values()),
-        (ctx) => stopSessionInternal(ctx, { exitKind: "graceful" }),
-        { discard: true },
+        (ctx) => stopSessionInternal(ctx, { exitKind: "graceful" }, true),
+        { discard: true, concurrency: "unbounded" },
       );
 
     yield* Effect.addFinalizer(() =>

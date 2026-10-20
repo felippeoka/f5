@@ -57,10 +57,31 @@ export interface ProviderSubmissionHandle {
 }
 
 export interface ProviderServiceShape {
+  /** Preserve a send fence when ingestion cannot retain an admitted event. */
+  readonly requireHistoryReconciliation?: (
+    event: ProviderRuntimeEvent,
+  ) => Effect.Effect<void, ProviderServiceError>;
+  /** Published before adapter startup, until its durable binding has been written. */
+  readonly getStartingSessionIdentity?: (
+    threadId: ThreadId,
+  ) => { readonly instanceId: ProviderInstanceId; readonly generation: number } | undefined;
+  readonly acknowledgeHistoryReconciliation?: (input: {
+    readonly threadId: ThreadId;
+    readonly markerId: string;
+    readonly historyIdentity: string;
+    readonly instanceId: import("@t3tools/contracts").ProviderInstanceId;
+    readonly generation: number;
+  }) => Effect.Effect<boolean, ProviderServiceError>;
   /** Registers a service-owned operation; caller cancellation cannot abandon transport. */
   readonly submitTurn?: (input: ProviderSendTurnInput) => Effect.Effect<ProviderSubmissionHandle>;
 
   readonly nativeOperations?: {
+    readonly historyRecovery?: (
+      input: import("@t3tools/contracts").NativeHistoryRecoveryInput,
+    ) => Effect.Effect<
+      import("@t3tools/contracts").NativeHistoryRecovery | null,
+      ProviderServiceError
+    >;
     readonly resolve?: (
       input: import("@t3tools/contracts").NativeOperationResolutionInput,
     ) => Effect.Effect<import("@t3tools/contracts").NativeOperationRecord, ProviderServiceError>;

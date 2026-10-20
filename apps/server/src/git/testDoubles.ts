@@ -85,7 +85,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
       "cloneRepository",
       "listLocalBranchNames",
     ].map((method) => [method, []]),
-  ) as unknown as { [K in keyof GitCoreShape]: Array<ReadonlyArray<unknown>> };
+  ) as unknown as { [K in keyof GitCoreShape]-?: Array<ReadonlyArray<unknown>> };
 
   const implementations: GitCoreShape = {
     readMoveSnapshot: () =>

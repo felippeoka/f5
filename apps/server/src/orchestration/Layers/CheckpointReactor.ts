@@ -1,3 +1,4 @@
+import { AcceptedShutdownWork, registerShutdown } from "../../shutdown.ts";
 import { pruneCheckpointRefs } from "../../checkpointing/pruneCheckpointRefs.ts";
 import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -17,7 +18,7 @@ import {
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import { Cause, Effect, Layer, Option, Stream } from "effect";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import {
@@ -944,7 +945,12 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  const worker = yield* makeBackgroundWorker(
+    (input: Parameters<typeof processInputSafely>[0]) =>
+      processInputSafely(input).pipe(Effect.provideService(AcceptedShutdownWork, true)),
+    { name: "CheckpointReactor" },
+  );
+  yield* registerShutdown("checkpoints", "drain", () => worker.drain, ["provider-ingestion"]);
 
   const reconcileStartupQuiescence = Effect.gen(function* () {
     const unquiesced = yield* turns.listTerminalUnquiesced.pipe(
@@ -990,6 +996,7 @@ const make = Effect.gen(function* () {
         }
         return worker.enqueue({ source: "domain", event });
       }),
+      { startImmediately: true },
     );
 
     yield* Effect.forkScoped(
@@ -1003,6 +1010,7 @@ const make = Effect.gen(function* () {
         }
         return worker.enqueue({ source: "runtime", event });
       }),
+      { startImmediately: true },
     );
 
     // Historical recovery can involve filesystem and Git work for many turns.

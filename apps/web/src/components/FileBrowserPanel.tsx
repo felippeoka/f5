@@ -192,7 +192,7 @@ function combineDirectoryQueries(queries: ReadonlyArray<UseQueryResult<ProjectLi
   return {
     queries,
     data: {
-      entries: queries.flatMap((query) => (query.isError ? [] : (query.data?.entries ?? []))),
+      entries: queries.flatMap((query) => query.data?.entries ?? []),
       totalEntries: queries.reduce((sum, query) => sum + (query.data?.totalEntries ?? 0), 0),
       truncated: queries.some((query) => query.data?.truncated),
     },
@@ -547,21 +547,28 @@ export default function FileBrowserPanel({
     ],
   );
   const directoryErrors = directoryQueries.flatMap((query, index) =>
-    index > 0 && query.isError
+    query.isError
       ? [
           <div
             key={directoryPaths[index]}
             role="alert"
             className="px-3 py-2 text-xs text-destructive"
           >
-            Could not read {directoryPaths[index]}. Other folders remain available.
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => toggleDirectory(directoryPaths[index]!)}
-            >
-              Collapse folder
-            </Button>
+            {query.error instanceof Error && /permission|EACCES|EPERM/i.test(query.error.message)
+              ? "Permission denied reading "
+              : "Could not read "}
+            {directoryPaths[index] || "workspace root"}.{" "}
+            {query.data ? "Showing the last successful listing. " : ""}Other folders remain
+            available.
+            {index > 0 ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => toggleDirectory(directoryPaths[index]!)}
+              >
+                Collapse folder
+              </Button>
+            ) : null}
             <Button size="xs" variant="ghost" onClick={() => void query.refetch()}>
               Retry folder
             </Button>
@@ -584,7 +591,9 @@ export default function FileBrowserPanel({
             {entriesQuery.data && entriesQuery.data.totalEntries > entries.length
               ? ` · showing ${entries.length.toLocaleString()} of ${entriesQuery.data.totalEntries.toLocaleString()}`
               : ""}
-            {entriesQuery.data?.truncated ? " · partial" : ""}
+            {entriesQuery.data?.truncated ? " · truncated" : ""}
+            {entriesQuery.isFetching && entries.length > 0 ? " · updating" : ""}
+            {directoryQueries.some((query) => query.isError && query.data) ? " · stale" : ""}
           </p>
         </div>
         <label className="flex items-center gap-1 text-2xs text-muted-foreground">
@@ -627,11 +636,14 @@ export default function FileBrowserPanel({
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground">
           Workspace files are unavailable for this thread.
         </div>
-      ) : !searchMode && entriesQuery.isError ? (
+      ) : !searchMode && entriesQuery.isError && entries.length === 0 ? (
         <div className="p-3 text-xs leading-relaxed text-destructive">
           {entriesQuery.error instanceof Error
             ? entriesQuery.error.message
             : "Failed to load workspace files."}
+          <Button size="xs" variant="ghost" onClick={() => void directoryQueries[0]?.refetch()}>
+            Retry workspace
+          </Button>
         </div>
       ) : searchMode ? (
         <ScrollArea className="min-h-0 flex-1" scrollFade>

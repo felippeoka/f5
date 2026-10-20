@@ -5,6 +5,7 @@ export type WsConnectionPhase = "connecting" | "connected" | "reconnecting" | "d
 export interface WsConnectionState {
   readonly phase: WsConnectionPhase;
   readonly synchronized: boolean;
+  readonly synchronizationError: string | null;
   readonly attemptCount: number;
   readonly connectedAt: string | null;
   readonly disconnectedAt: string | null;
@@ -17,6 +18,7 @@ type WsReconnectHandler = () => Promise<void> | void;
 const INITIAL_WS_CONNECTION_STATE: WsConnectionState = Object.freeze({
   phase: "connecting" as const,
   synchronized: false,
+  synchronizationError: null,
   attemptCount: 0,
   connectedAt: null,
   disconnectedAt: null,
@@ -48,6 +50,7 @@ export function subscribeWsConnectionState(listener: () => void): () => void {
 function hasStateChanged(nextState: WsConnectionState): boolean {
   return (
     nextState.synchronized !== currentState.synchronized ||
+    nextState.synchronizationError !== currentState.synchronizationError ||
     nextState.phase !== currentState.phase ||
     nextState.attemptCount !== currentState.attemptCount ||
     nextState.connectedAt !== currentState.connectedAt ||
@@ -154,7 +157,9 @@ export function isWsInteractionBlocked(phase: WsConnectionPhase): boolean {
 
 export function noteWsSynchronized(): void {
   setWsConnectionState((state) =>
-    state.phase === "connected" ? { ...state, synchronized: true } : state,
+    state.phase === "connected"
+      ? { ...state, synchronized: true, synchronizationError: null }
+      : state,
   );
 }
 export function noteWsResynchronizing(): void {
@@ -163,4 +168,12 @@ export function noteWsResynchronizing(): void {
 export function useServerMutationsAvailable(): boolean {
   const state = useWsConnectionState();
   return state.phase === "connected" && state.synchronized;
+}
+
+export function noteWsSynchronizationError(message: string): void {
+  setWsConnectionState((state) => ({
+    ...state,
+    synchronized: false,
+    synchronizationError: message,
+  }));
 }

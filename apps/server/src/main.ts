@@ -1,3 +1,4 @@
+import { ServerShutdown, ServerShutdownLive } from "./shutdown.ts";
 import { ProfileGithubAccount } from "./git/ProfileGithubAccount";
 import { makeServerSecretStore } from "./auth/Layers/ServerSecretStore";
 import * as ProfileFS from "node:fs/promises";
@@ -477,7 +478,10 @@ const makeCliRuntimeLayer = (): typeof CliRuntimeLayerLive =>
   isTestRuntime() ? CliRuntimeLayerTest : CliRuntimeLayerLive;
 
 const LayerLive = (input: CliInput) =>
-  makeCliRuntimeLayer().pipe(Layer.provideMerge(ServerConfigLive(input)));
+  makeCliRuntimeLayer().pipe(
+    Layer.provideMerge(ServerConfigLive(input)),
+    Layer.provideMerge(ServerShutdownLive),
+  );
 
 const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";
@@ -563,6 +567,9 @@ const makeServerProgram = (input: CliInput) =>
     }
 
     yield* withStartupPhaseTiming("server.start", start);
+    const shutdown = yield* ServerShutdown;
+    // This finalizer runs before the runtime layers release their resources.
+    yield* Effect.addFinalizer(() => Effect.promise(() => shutdown.run()));
     if (!isTestRuntime()) {
       yield* withStartupPhaseTiming(
         "telemetry.heartbeat.fork",

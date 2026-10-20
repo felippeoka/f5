@@ -7,8 +7,8 @@ import { useEffect } from "react";
 
 import { readNativeApi } from "../nativeApi";
 import { getWsConnectionState, subscribeWsConnectionState } from "../wsConnectionState";
-import { projectQueryKeys } from "./projectReactQuery";
-import { providerQueryKeys } from "./providerReactQuery";
+import { projectQueryKeys } from "./projectQueryKeys";
+import { providerQueryKeys } from "./providerQueryKeys";
 
 /**
  * Keeps the server watching the workspace files that are open and the
