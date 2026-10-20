@@ -7275,6 +7275,58 @@ describe("ProviderRuntimeIngestion", () => {
     expect(checkpoint?.checkpointRef).toBe("provider-diff:evt-turn-diff-updated");
   });
 
+  it("skips a tool update only when it matches the last update for that item", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const update = (eventId: string, detail: string, itemId = "item-repeat-tool") =>
+      harness.emit({
+        type: "item.updated",
+        eventId: asEventId(eventId),
+        provider: "opencode",
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-repeat"),
+        itemId: asItemId(itemId),
+        payload: { itemType: "command_execution", status: "in_progress", title: "Run", detail },
+      });
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("repeat-start"),
+      provider: "opencode",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-repeat"),
+      createdAt: now,
+      payload: {},
+    });
+    update("repeat-1", "bun test");
+    update("repeat-2", "bun test");
+    update("repeat-3", "bun test --watch");
+    update("repeat-4", "bun test");
+    update("repeat-other", "bun test", "item-other-tool");
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("repeat-done"),
+      provider: "opencode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-repeat"),
+      itemId: asItemId("item-repeat-tool"),
+      payload: { itemType: "command_execution", status: "completed", title: "Run" },
+    });
+    update("repeat-5", "bun test");
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some((activity: ProviderRuntimeTestActivity) => activity.id === "repeat-5"),
+    );
+    expect(
+      thread.activities
+        .filter((activity: ProviderRuntimeTestActivity) => activity.kind === "tool.updated")
+        .map((activity: ProviderRuntimeTestActivity) => activity.id)
+        .toSorted(),
+    ).toEqual(["repeat-1", "repeat-3", "repeat-4", "repeat-5", "repeat-other"]);
+  });
+
   it("reuses the same checkpoint turn count for repeated turn.diff.updated events in one turn", async () => {
     const harness = await createHarness();
     const turnId = asTurnId("turn-diff-repeat");

@@ -228,6 +228,8 @@ const REASONING_HEADING_REGEX = /^\s*\*\*([^*\n]{1,200}?)\*\*/;
 // block within the same turn).
 const THINKING_TOKENS_DISPATCH_THRESHOLD = 500;
 const PROFILED_WORKFLOW_TURN_TIMEOUT_MS = 30 * 60 * 1_000;
+// Tool items that never complete are evicted oldest first past this many.
+const MAX_TRACKED_TOOL_UPDATES = 512;
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
 const MAX_BUFFERED_REASONING_CHARS = 200_000;
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 100;
@@ -2367,6 +2369,9 @@ const make = Effect.gen(function* () {
     string,
     Set<import("@t3tools/contracts").ProviderInstanceId | null>
   >();
+  // Last tool.updated activity appended per open tool item. Providers such as OpenCode resend
+  // the whole tool state on every part update, so a repeat that matches it is not stored again.
+  const lastToolUpdates = new Map<string, string>();
   // Runtime error and terminal reports share one refresh, without blocking the serial worker.
   const refreshedUsageFailures = new Map<ThreadId, string>();
   let enqueueResolvedUsageLimit: (input: RuntimeIngestionInput) => Effect.Effect<void> = () =>
@@ -5551,13 +5556,28 @@ const make = Effect.gen(function* () {
         lifecycle.images,
         isPreparedComputerEvent(event),
       );
+      const toolUpdateKey = event.itemId ? `${thread.id}\u0000${event.itemId}` : undefined;
+      if (toolUpdateKey && event.type === "item.completed") lastToolUpdates.delete(toolUpdateKey);
       yield* Effect.forEach(activities, (activity) =>
-        orchestrationEngine.dispatch({
-          type: "thread.activity.append",
-          commandId: providerCommandId(event, `thread-activity-append:${activity.id}`),
-          threadId: thread.id,
-          activity,
-          createdAt: activity.createdAt,
+        Effect.gen(function* () {
+          const signature =
+            toolUpdateKey && activity.kind === "tool.updated"
+              ? JSON.stringify([activity.tone, activity.summary, activity.turnId, activity.payload])
+              : undefined;
+          if (signature && lastToolUpdates.get(toolUpdateKey!) === signature) return;
+          yield* orchestrationEngine.dispatch({
+            type: "thread.activity.append",
+            commandId: providerCommandId(event, `thread-activity-append:${activity.id}`),
+            threadId: thread.id,
+            activity,
+            createdAt: activity.createdAt,
+          });
+          // Recorded only after the append succeeds, so a retried event is not skipped.
+          if (!signature) return;
+          lastToolUpdates.delete(toolUpdateKey!);
+          lastToolUpdates.set(toolUpdateKey!, signature);
+          if (lastToolUpdates.size > MAX_TRACKED_TOOL_UPDATES)
+            lastToolUpdates.delete(lastToolUpdates.keys().next().value!);
         }),
       ).pipe(Effect.asVoid);
 
