@@ -52,7 +52,9 @@ import {
 } from "../Services/Manager";
 
 const DEFAULT_HISTORY_LINE_LIMIT = 5_000;
-const DEFAULT_PERSIST_DEBOUNCE_MS = 40;
+// Busy terminals write their whole retained history each flush; batching keeps
+// that bounded while close and restart still flush the latest output.
+const DEFAULT_PERSIST_DEBOUNCE_MS = 250;
 const DEFAULT_SUBPROCESS_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;

@@ -773,6 +773,35 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("batches live history writes every 250 ms and flushes the latest output on close", async () => {
+    const { manager, ptyAdapter, logsDir } = makeManager(5000);
+    const write = fs.promises.writeFile.bind(fs.promises);
+    const writes: string[] = [];
+    const spy = vi.spyOn(fs.promises, "writeFile").mockImplementation(async (...args) => {
+      if (args[0] === historyLogPath(logsDir)) writes.push(String(args[1]));
+      return write(...args);
+    });
+    try {
+      await manager.open(openInput());
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      ptyAdapter.processes[0]!.emitData("first");
+      await vi.advanceTimersByTimeAsync(200);
+      expect(writes).toEqual([]);
+      ptyAdapter.processes[0]!.emitData(" second");
+      await vi.advanceTimersByTimeAsync(50);
+      vi.useRealTimers();
+      await waitFor(() => writes.length === 1);
+      expect(writes).toEqual(["first second"]);
+      ptyAdapter.processes[0]!.emitData(" third");
+      await manager.close({ threadId: "thread-1" });
+      expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe("first second third");
+    } finally {
+      vi.useRealTimers();
+      spy.mockRestore();
+      manager.dispose();
+    }
+  });
+
   it.each(["restart", "replace with reused PID"] as const)(
     "ignores a process-table result after %s",
     async (operation) => {
