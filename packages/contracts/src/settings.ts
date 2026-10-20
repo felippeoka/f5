@@ -12,6 +12,7 @@ import {
 import { ModelSelection, ProjectSkillScope, RuntimeMode } from "./orchestration";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance";
 import { ThreadEnvMode, type ThreadEnvMode as ThreadEnvModeType } from "./threadEnvMode";
+import { ComputerPasswordMasking } from "./computerAutomation";
 export { ThreadEnvMode };
 
 // ── Client Settings (local-only) ───────────────────────────────
@@ -434,6 +435,10 @@ export const ServerSettings = Schema.Struct({
   computerUseExecutionMode: ComputerUseExecutionMode.pipe(
     Schema.withDecodingDefault(() => "foreground" as const),
   ),
+  /** Global within this profile. Fast masking can miss fields omitted by accessibility. */
+  computerUsePasswordMasking: ComputerPasswordMasking.pipe(
+    Schema.withDecodingDefault(() => "fast" as const),
+  ),
   /** Allow agents to control approved apps. Off by default. */
   enableAgentComputerUse: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   autoPullDefaultBranch: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
@@ -586,6 +591,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   computerUseBackend: Schema.optionalKey(Schema.Literals(["auto", "f5"])),
   computerUseExecutionMode: Schema.optionalKey(ComputerUseExecutionMode),
+  computerUsePasswordMasking: Schema.optionalKey(ComputerPasswordMasking),
   autoPullDefaultBranch: Schema.optionalKey(Schema.Boolean),
   observability: Schema.optionalKey(
     Schema.Struct({

@@ -32,24 +32,26 @@ final class SecureAuditTests: XCTestCase {
     ]
   }
 
-  func testUnverifiedSearchIsOffAndCannotHideAMissedPassword() {
-    XCTAssertFalse(computerWebAreaSearchEnabled([:]))
-    for value in ["", "true", "0"] {
-      XCTAssertFalse(
-        computerWebAreaSearchEnabled(["F5_COMPUTER_EXPERIMENTAL_WEB_AREA_SEARCH": value]))
-    }
-    XCTAssertTrue(computerWebAreaSearchEnabled(["F5_COMPUTER_EXPERIMENTAL_WEB_AREA_SEARCH": "1"]))
+  func testMissingAndConservativeModeWalkButFastAcceptsOmittedFields() {
+    XCTAssertEqual(ComputerPasswordMasking.requested(nil), .conservative)
+    XCTAssertEqual(ComputerPasswordMasking.requested("unknown"), .conservative)
     let tree = escapingTree()
     var searchCalls = 0
     let omittedPassword: (Int) -> [Int]? = { _ in
       searchCalls += 1
       return []
     }
-    let result = computerSecureAudit(
-      root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 20000,
-      expired: { false }, search: computerWebAreaSearchEnabled([:]) ? omittedPassword : nil)
-    XCTAssertEqual(searchCalls, 0)
-    XCTAssertEqual(result, ComputerSecureAudit(rects: [tree[3]!.frame!], complete: true))
+    for value in [nil, "conservative", "fast"] {
+      let mode = ComputerPasswordMasking.requested(value)
+      let result = computerSecureAudit(
+        root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 20000,
+        expired: { false }, search: mode.usesWebAreaSearch ? omittedPassword : nil)
+      XCTAssertEqual(
+        result,
+        ComputerSecureAudit(rects: mode == .fast ? [] : [tree[3]!.frame!], complete: true))
+    }
+    // Successful search may miss a real field. This explicitly records fast mode's limitation.
+    XCTAssertEqual(searchCalls, 1)
   }
   func testNativeChromeDrainsBeforeHugeWebSubtree() {
     var tree = escapingTree()

@@ -599,6 +599,7 @@ export class ComputerAutomationBrokerRuntime {
     binding.appliedPolicy ??= JSON.stringify({
       computerEnabled: ctx.policy.computerUse,
       mode: ctx.policy.computerUseExecutionMode ?? "foreground",
+      passwordMasking: ctx.policy.computerUsePasswordMasking ?? "fast",
     });
     return ctx;
   }
@@ -819,8 +820,15 @@ export class ComputerAutomationBrokerRuntime {
       // Revision checkpoint immediately before dispatch.
       this.assertRevision(binding, revision, turnRevision);
       this.pushGrants(threadId, generation, live.turnId, executionGeneration);
+      const { passwordMasking: _callerMasking, ...payloadInput } = input;
+      const currentStatus = this.host.status();
       const envelope = {
-        ...input,
+        ...payloadInput,
+        // Only resolved user policy can select masking. Legacy peers strip unknown envelope
+        // fields before checking hashes, so send it only to a helper that advertises support.
+        ...(currentStatus.available && currentStatus.passwordMaskingSupported
+          ? { passwordMasking: live.policy.computerUsePasswordMasking ?? "fast" }
+          : {}),
         requestId,
         authorization: this.authorization(live, executionGeneration),
         deadlineAtMs: Date.now() + Math.min(60_000, Math.max(1, Math.floor(timeoutMs))),
@@ -850,6 +858,25 @@ export class ComputerAutomationBrokerRuntime {
         result = await pending;
       } finally {
         options?.signal?.removeEventListener("abort", onAbort);
+      }
+      // A late observation from before a settings/session change must not restore old pixels.
+      // Confirmed actions retain their result even when their optional capture was cancelled.
+      if (!mutation) {
+        if (this.bindings.get(threadId) !== binding)
+          throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
+        this.assertRevision(binding, revision, turnRevision);
+      } else if (
+        (this.bindings.get(threadId) !== binding ||
+          binding.policyRevision !== revision ||
+          binding.turnRevision !== turnRevision) &&
+        result &&
+        typeof result === "object" &&
+        "screenshot" in result
+      ) {
+        // A result can beat the desktop's cancellation receipt. Keep the successful action,
+        // but never deliver its old-policy image after the user changed masking.
+        const { screenshot: _oldCapture, ...action } = result;
+        result = { ...action, screenshotError: "Interrupted" };
       }
       if ((input.op === "listApps" || input.op === "resolveApps") && Array.isArray(result))
         for (const app of result as ReadonlyArray<{ appId?: unknown; name?: unknown }>)
@@ -1286,11 +1313,13 @@ export class ComputerAutomationBrokerRuntime {
       let computerEnabled = false;
       let chromeEnabled = false;
       let mode = "foreground";
+      let passwordMasking = "fast";
       try {
         const context = await this.options.resolve(threadId, binding.generation, binding.provider);
         computerEnabled = context.policy.computerUse;
         chromeEnabled = binding.provider === "claude" && context.policy.claudeInChrome;
         mode = context.policy.computerUseExecutionMode ?? "foreground";
+        passwordMasking = context.policy.computerUsePasswordMasking ?? "fast";
       } catch {
         /* An unreadable policy removes execution permission. */
       }
@@ -1299,7 +1328,7 @@ export class ComputerAutomationBrokerRuntime {
         for (const pending of this.setupConsents.values())
           if (pending.threadId === threadId && pending.generation === binding.generation)
             pending.settle(false);
-      const applied = JSON.stringify({ computerEnabled, mode });
+      const applied = JSON.stringify({ computerEnabled, mode, passwordMasking });
       const changed = binding.appliedPolicy !== undefined && binding.appliedPolicy !== applied;
       binding.appliedPolicy = applied;
       if (changed) await this.revokeBinding(threadId, binding);

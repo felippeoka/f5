@@ -3,6 +3,7 @@ import type { ServerSettings } from "@t3tools/contracts";
 const GLOBAL_KEYS = [
   "enableAgentComputerUse",
   "computerUseExecutionMode",
+  "computerUsePasswordMasking",
   "computerUseBackend",
   "enableAgentBrowserAccess",
 ] as const;
@@ -12,6 +13,7 @@ const PROJECT_KEYS = ["enableAgentComputerUse", "enableAgentBrowserAccess"] as c
 export interface ComputerSettingsPatch {
   readonly enableAgentComputerUse?: unknown;
   readonly computerUseExecutionMode?: unknown;
+  readonly computerUsePasswordMasking?: unknown;
   readonly computerUseBackend?: unknown;
   readonly enableAgentBrowserAccess?: unknown;
   readonly projectSettingsOverrides?: Readonly<Record<string, unknown>> | undefined;

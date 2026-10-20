@@ -2,11 +2,50 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   ComputerAutomationError,
+  ComputerAutomationRequest,
+  ComputerAutomationBackendStatus,
   ComputerInspectResult,
   ComputerScreenshot,
 } from "./computerAutomation";
 
 describe("computer observation and error metadata", () => {
+  it("accepts optional request policy and supported-helper status without changing legacy data", () => {
+    const request = {
+      op: "screenshot",
+      requestId: "r",
+      payloadHash: "0".repeat(64),
+      authorization: {
+        profileId: "p",
+        threadId: "t",
+        sessionGeneration: "s",
+        turnId: "turn",
+        executionGeneration: 1,
+        grantVersion: 0,
+        grants: [],
+      },
+      deadlineAtMs: 1,
+      agent: { provider: "claude", threadTitle: "Thread" },
+      displayId: "d",
+    };
+    expect(Schema.decodeUnknownSync(ComputerAutomationRequest)(request)).toEqual(request);
+    for (const passwordMasking of ["fast", "conservative"]) {
+      expect(
+        Schema.decodeUnknownSync(ComputerAutomationRequest)({ ...request, passwordMasking }),
+      ).toEqual({ ...request, passwordMasking });
+    }
+    expect(() =>
+      Schema.decodeUnknownSync(ComputerAutomationRequest)({
+        ...request,
+        passwordMasking: "off",
+      }),
+    ).toThrow();
+    for (const status of [
+      { available: true },
+      { available: true, passwordMaskingSupported: true },
+    ]) {
+      expect(Schema.decodeUnknownSync(ComputerAutomationBackendStatus)(status)).toEqual(status);
+    }
+  });
   it("decodes partial inspect snapshots", () => {
     const value = { snapshotId: "s", appId: "a", accessible: true, truncated: true, nodes: [] };
     expect(Schema.decodeUnknownSync(ComputerInspectResult)(value)).toEqual(value);
@@ -19,6 +58,7 @@ describe("computer observation and error metadata", () => {
       mimeType: "image/jpeg",
       data: "",
       hiddenContent: true,
+      passwordMasking: "fast",
       masked: "web-area",
       maskReasons: ["partial-audit", "window-match", "audit-incomplete", "windows-changed"],
       secureAudit: {
@@ -45,8 +85,20 @@ describe("computer observation and error metadata", () => {
       },
     };
     expect(Schema.decodeUnknownSync(ComputerScreenshot)(value)).toEqual(value);
-    const { secureAudit: _, ...legacy } = value;
+    const { secureAudit: _, passwordMasking: _mode, ...legacy } = value;
     expect(Schema.decodeUnknownSync(ComputerScreenshot)(legacy)).toEqual(legacy);
+    expect(
+      Schema.decodeUnknownSync(ComputerScreenshot)({
+        ...value,
+        passwordMasking: "conservative",
+      }).passwordMasking,
+    ).toBe("conservative");
+    expect(() =>
+      Schema.decodeUnknownSync(ComputerScreenshot)({
+        ...value,
+        passwordMasking: "off",
+      }),
+    ).toThrow();
     expect(() =>
       Schema.decodeUnknownSync(ComputerScreenshot)({
         ...value,

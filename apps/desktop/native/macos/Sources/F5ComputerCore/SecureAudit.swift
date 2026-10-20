@@ -22,7 +22,8 @@ public struct ComputerSecureAuditNode<Handle> {
 }
 
 /// Rects to mask in one window: secure fields plus any region the audit could not establish
-/// as safe. `complete` is false when any such region was masked.
+/// as safe. `complete` is false when any such region was masked. A completed search
+/// cannot establish that the app exposed every visually present field to accessibility.
 public struct ComputerSecureAudit: Equatable {
   public var rects: [CGRect]
   public var complete: Bool

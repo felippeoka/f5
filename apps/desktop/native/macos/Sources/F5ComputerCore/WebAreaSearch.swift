@@ -1,7 +1,14 @@
-/// Experimental search remains off until real browser password fixtures establish coverage.
-/// The helper must be explicitly launched with this environment switch for on-device testing.
-public func computerWebAreaSearchEnabled(_ environment: [String: String]) -> Bool {
-  environment["F5_COMPUTER_EXPERIMENTAL_WEB_AREA_SEARCH"] == "1"
+/// Fast masking accepts that accessibility search can omit visible password fields.
+/// Missing/unknown request values retain the conservative walk used by legacy servers.
+public enum ComputerPasswordMasking: String {
+  case fast
+  case conservative
+
+  public static func requested(_ value: String?) -> Self {
+    Self(rawValue: value ?? "") ?? .conservative
+  }
+
+  public var usesWebAreaSearch: Bool { self == .fast }
 }
 
 /// Searches text fields in a web area and every nested frame without walking DOM children.

@@ -1,7 +1,12 @@
 import legacySettings from "./fixtures/server-settings-290d261c9.json";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { DEFAULT_SERVER_SETTINGS, ProjectId, ServerSettings } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ProjectId,
+  ProjectSettingsOverrides,
+  ServerSettings,
+} from "@t3tools/contracts";
 import { parseCheckedInProjectFile } from "./checkedInProjectFile";
 import { agentBrowserPolicyFromSettings, resolveProjectSettings } from "./projectSettings";
 import { applyServerSettingsPatch } from "./serverSettings";
@@ -21,6 +26,27 @@ describe("agent browser policy", () => {
 });
 
 describe("project settings", () => {
+  it("persists global password masking without allowing project or checked-in overrides", () => {
+    const global = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      computerUsePasswordMasking: "conservative",
+    });
+    expect(global.computerUsePasswordMasking).toBe("conservative");
+    expect(agentBrowserPolicyFromSettings(global, id).computerUsePasswordMasking).toBe(
+      "conservative",
+    );
+    expect(
+      agentBrowserPolicyFromSettings(DEFAULT_SERVER_SETTINGS, id).computerUsePasswordMasking,
+    ).toBe("fast");
+    expect(
+      resolveProjectSettings({
+        projectId: id,
+        global,
+        checkedIn: Schema.decodeUnknownSync(ProjectSettingsOverrides)({
+          computerUsePasswordMasking: "fast",
+        }),
+      }).settings.computerUsePasswordMasking,
+    ).toBe("conservative");
+  });
   it("ignores checked-in values for storage automation keys", () => {
     const result = resolveProjectSettings({
       projectId: id,

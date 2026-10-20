@@ -61,11 +61,15 @@ export const ComputerBackgroundStatus = Schema.Struct({
   reason: Schema.optional(ComputerBackgroundUnavailableReason),
 });
 export type ComputerBackgroundStatus = typeof ComputerBackgroundStatus.Type;
+export const ComputerPasswordMasking = Schema.Literals(["fast", "conservative"]);
+export type ComputerPasswordMasking = typeof ComputerPasswordMasking.Type;
 export const ComputerAutomationBackendStatus = Schema.Union([
   Schema.Struct({
     available: Schema.Literal(true),
     displays: Schema.optional(Schema.Array(ComputerDisplay)),
     background: Schema.optional(ComputerBackgroundStatus),
+    /** Absent on legacy helpers and platforms without selectable password masking. */
+    passwordMaskingSupported: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     available: Schema.Literal(false),
@@ -141,6 +145,8 @@ const Envelope = {
   screenshot: Schema.optional(Schema.Boolean),
   /** Missing means foreground, the only delivery legacy peers understand. */
   delivery: Schema.optional(ComputerDelivery),
+  /** User policy injected by the broker; absent requests retain the legacy child walk. */
+  passwordMasking: Schema.optional(ComputerPasswordMasking),
 };
 const Coordinates = { displayId: Id, geometryGeneration: Id, x: NonNegative, y: NonNegative };
 export const ComputerAutomationRequest = Schema.Union([
@@ -229,6 +235,7 @@ const ComputerSecureAuditDiagnostics = Schema.Struct({
   windows: Schema.Array(
     Schema.Struct({
       windowIndex: NonNegative,
+      /** The audit finished; accessibility may still omit visually present fields. */
       complete: Schema.Boolean,
       elapsedMs: NonNegative,
       visitedNodes: NonNegative,
@@ -277,6 +284,7 @@ export const ComputerScreenshot = Schema.Struct({
   mimeType: Schema.Literals(["image/png", "image/jpeg"]),
   data: Schema.String.check(Schema.isMaxLength(8 * 1024 * 1024)),
   hiddenContent: Schema.Boolean,
+  passwordMasking: Schema.optional(ComputerPasswordMasking),
   masked: Schema.optional(Schema.Literals(["none", "fields", "web-area", "window"])),
   maskReasons: Schema.optional(
     Schema.Array(

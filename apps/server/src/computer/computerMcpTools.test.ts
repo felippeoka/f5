@@ -665,28 +665,39 @@ describe("compact computer observations", () => {
     await pending;
     expect(() => h.context.geometry.display(undefined, [])).toThrow("Specify displayId");
   });
-  it("preserves masking metadata when extracting an inline screenshot", async () => {
-    const h = setup();
-    const secureAudit = { searchEnabled: false, elapsedMs: 3, windows: [] };
-    h.invoke.mockResolvedValue({
-      displayId: "d",
-      geometryGeneration: "g",
-      data: "aGVsbG8=",
-      mimeType: "image/jpeg",
-      masked: "web-area",
-      maskReasons: ["partial-audit"],
-      hiddenContent: true,
-      secureAudit,
-    });
-    const response = await callComputerTool(h.context, "computer_screenshot", {});
-    expect(response.structuredContent).toMatchObject({
-      masked: "web-area",
-      maskReasons: ["partial-audit"],
-      hiddenContent: true,
-      secureAudit,
-    });
-    expect(response.structuredContent).not.toHaveProperty("data");
-  });
+  it.each(["fast", "conservative", undefined])(
+    "preserves actual masking mode and labels missing metadata (%s)",
+    async (passwordMasking) => {
+      const h = setup();
+      const secureAudit = { searchEnabled: false, elapsedMs: 3, windows: [] };
+      h.invoke.mockResolvedValue({
+        displayId: "d",
+        geometryGeneration: "g",
+        data: "aGVsbG8=",
+        mimeType: "image/jpeg",
+        masked: "web-area",
+        maskReasons: ["partial-audit"],
+        hiddenContent: true,
+        secureAudit,
+        ...(passwordMasking ? { passwordMasking } : {}),
+      });
+      const response = await callComputerTool(h.context, "computer_screenshot", {});
+      expect(response.structuredContent).toMatchObject({
+        masked: "web-area",
+        maskReasons: ["partial-audit"],
+        hiddenContent: true,
+        secureAudit,
+        ...(passwordMasking ? { passwordMasking } : { passwordMaskingNote: "Legacy / unknown" }),
+      });
+      expect(response.structuredContent).not.toHaveProperty("data");
+      expect(response.content[0]).toEqual({
+        type: "text",
+        text: JSON.stringify(response.structuredContent),
+      });
+      expect(COMPUTER_GUIDANCE).toContain("best-effort detection");
+      expect(COMPUTER_GUIDANCE).toContain("complete audit does not guarantee");
+    },
+  );
   it("explains why an element reference is stale", async () => {
     const h = setup();
     h.invoke.mockRejectedValue(

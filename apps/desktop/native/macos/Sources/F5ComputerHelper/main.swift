@@ -454,7 +454,10 @@ func permissions() -> [String: Any] {
     return ["available": false, "reason": "missing-permissions", "missing": missing]
   }
   if !monitorHealthy { return ["available": false, "reason": "monitor-unhealthy"] }
-  return ["available": true, "displays": displays().map(\.json)]
+  return [
+    "available": true, "displays": displays().map(\.json),
+    "passwordMaskingSupported": true,
+  ]
 }
 func installMonitor() {
   guard AXIsProcessTrusted() else {
@@ -1472,7 +1475,8 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
   }
   let maskStarted = ProcessInfo.processInfo.systemUptime
   let maskDeadline = maskStarted + 2
-  let searchEnabled = computerWebAreaSearchEnabled(ProcessInfo.processInfo.environment)
+  let passwordMasking = ComputerPasswordMasking.requested(request["passwordMasking"] as? String)
+  let searchEnabled = passwordMasking.usesWebAreaSearch
   var auditDiagnostics: [[String: Any]] = []
   var appWindows: [pid_t: [AXUIElement]] = [:]
   var maskOutcomes: [ComputerCaptureMaskOutcome] = []
@@ -1648,6 +1652,7 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     "mimeType": zoom ? "image/png" : "image/jpeg", "data": data, "hiddenContent": hidden,
   ]
   let maskSummary = computerCaptureMaskSummary(maskOutcomes)
+  result["passwordMasking"] = passwordMasking.rawValue
   result["masked"] = maskSummary.masked
   result["maskReasons"] = maskSummary.maskReasons
   result["secureAudit"] = [
