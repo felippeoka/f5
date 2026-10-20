@@ -1349,6 +1349,77 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("ProviderServiceLive shutdown leaves settled stopped sessions untouched", () =>
+  Effect.gen(function* () {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-service-settled-"));
+    const persistenceLayer = makeSqlitePersistenceLive(path.join(tempDir, "orchestration.sqlite"));
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(persistenceLayer),
+    );
+    const settledThreadId = asThreadId("thread-settled");
+    const settledRow = {
+      threadId: settledThreadId,
+      projectId: null,
+      providerName: "codex",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      adapterKey: "codex",
+      runtimeMode: "full-access",
+      status: "stopped",
+      lastSeenAt: "2026-01-01T00:00:00.000Z",
+      mcpEffectiveConfigVersion: null,
+      launchFingerprint: null,
+      resumeCursor: { threadId: "provider-thread-settled" },
+      runtimePayload: {
+        lastRuntimeEvent: "provider.stopSession",
+        lastRuntimeEventAt: "2026-01-01T00:00:00.000Z",
+      },
+    } as const;
+    yield* Effect.gen(function* () {
+      const repository = yield* ProviderSessionRuntimeRepository;
+      yield* repository.upsert(settledRow);
+    }).pipe(Effect.provide(runtimeRepositoryLayer));
+
+    const codex = makeFakeCodexAdapter();
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(providerServiceConfigLayer),
+      Layer.provide(
+        Layer.succeed(ProviderAdapterRegistry, makeAdapterRegistryMock({ codex: codex.adapter })),
+      ),
+      Layer.provide(ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))),
+      Layer.provide(makeProjectMcpConfigServiceTestLayer()),
+      Layer.provide(AnalyticsService.layerTest),
+    );
+    const liveThreadId = asThreadId("thread-live");
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      yield* provider.startSession(liveThreadId, {
+        provider: "codex",
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        threadId: liveThreadId,
+      });
+    }).pipe(Effect.provide(providerLayer));
+
+    const [settled, live] = yield* Effect.gen(function* () {
+      const repository = yield* ProviderSessionRuntimeRepository;
+      return [
+        yield* repository.getByThreadId({ threadId: settledThreadId }),
+        yield* repository.getByThreadId({ threadId: liveThreadId }),
+      ] as const;
+    }).pipe(Effect.provide(runtimeRepositoryLayer));
+    assert.equal(Option.getOrUndefined(settled)?.lastSeenAt, settledRow.lastSeenAt);
+    assert.deepEqual(Option.getOrUndefined(settled)?.runtimePayload, settledRow.runtimePayload);
+    assert.equal(Option.getOrUndefined(live)?.status, "stopped");
+    assert.equal(
+      (Option.getOrUndefined(live)?.runtimePayload as Record<string, unknown> | undefined)
+        ?.lastRuntimeEvent,
+      "provider.stopAll",
+    );
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 routing.layer("ProviderServiceLive routing", (it) => {
   it.effect("does not recover an idle or stopped binding just to interrupt", () =>
     Effect.gen(function* () {

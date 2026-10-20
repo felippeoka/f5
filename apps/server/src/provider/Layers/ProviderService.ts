@@ -230,6 +230,16 @@ const decodeInputOrValidationError = <S extends Schema.Top>(input: {
     ),
   );
 
+/** Stopped rows with no active turn are settled; shutdown leaves them untouched. */
+function isSettledBinding(binding: {
+  readonly status?: string | undefined;
+  readonly runtimePayload?: unknown;
+}): boolean {
+  return (
+    binding.status === "stopped" && readPersistedActiveTurnId(binding.runtimePayload) === undefined
+  );
+}
+
 function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "stopped" | "error" {
   switch (session.status) {
     case "connecting":
@@ -3420,7 +3430,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const runStopAll = () =>
       Effect.gen(function* () {
-        const threadIds = yield* directory.listThreadIds();
+        const bindings = yield* directory.listBindings();
         const currentAdapters = yield* getAdapterEntries;
         yield* markRestartTurns.pipe(
           Effect.catchCause((cause) =>
@@ -3432,23 +3442,21 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         yield* Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll()).pipe(
           Effect.asVoid,
         );
-        yield* Effect.forEach(threadIds, (threadId) =>
-          directory.getBinding(threadId).pipe(
-            Effect.flatMap((bindingOption) => {
-              const binding = Option.getOrUndefined(bindingOption);
-              if (!binding) return Effect.void;
-              return directory.upsert({
-                threadId,
-                provider: binding.provider,
-                providerInstanceId: resolveBindingInstanceId(binding),
-                status: "stopped",
-                runtimePayload: {
-                  lastRuntimeEvent: "provider.stopAll",
-                  lastRuntimeEventAt: new Date().toISOString(),
-                },
-              });
+        // Stopped rows stay for their resume cursors, so long-lived installs hold
+        // thousands. Only rewrite the ones this shutdown actually stops.
+        yield* Effect.forEach(
+          bindings.filter((binding) => !isSettledBinding(binding)),
+          (binding) =>
+            directory.upsert({
+              threadId: binding.threadId,
+              provider: binding.provider,
+              providerInstanceId: resolveBindingInstanceId(binding),
+              status: "stopped",
+              runtimePayload: {
+                lastRuntimeEvent: "provider.stopAll",
+                lastRuntimeEventAt: new Date().toISOString(),
+              },
             }),
-          ),
         ).pipe(Effect.asVoid);
         submissionTokens.clear();
         sessionEventIdentities.clear();
@@ -3456,7 +3464,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           yield* Deferred.succeed(completion.done, undefined);
         submissionCompletions.clear();
         yield* analytics.record("provider.sessions.stopped_all", {
-          sessionCount: threadIds.length,
+          sessionCount: bindings.length,
         });
         yield* analytics.flush;
       });
