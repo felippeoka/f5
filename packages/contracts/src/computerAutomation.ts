@@ -222,6 +222,54 @@ export const ComputerAutomationRequest = Schema.Union([
 ]);
 export type ComputerAutomationRequest = typeof ComputerAutomationRequest.Type;
 export type ComputerAutomationOperation = ComputerAutomationRequest["op"];
+/** Content-free diagnostics from the macOS password audit; absent on older helpers. */
+const ComputerSecureAuditDiagnostics = Schema.Struct({
+  searchEnabled: Schema.Boolean,
+  elapsedMs: NonNegative,
+  windows: Schema.Array(
+    Schema.Struct({
+      windowIndex: NonNegative,
+      complete: Schema.Boolean,
+      elapsedMs: NonNegative,
+      visitedNodes: NonNegative,
+      nodeReadElapsedMs: NonNegative,
+      maxChildren: NonNegative,
+      textFieldQueries: NonNegative,
+      frameQueries: NonNegative,
+      searchResults: NonNegative,
+      searchElapsedMs: NonNegative,
+      searchFallbacks: NonNegative,
+      invalidSearchResults: NonNegative,
+      stopReasons: Schema.Array(
+        Schema.Literals([
+          "deadline",
+          "node-budget",
+          "depth-limit",
+          "unreadable-node",
+          "unreadable-children",
+          "secure-field-without-frame",
+          "search-limit",
+          "search-incomplete",
+          "window-match",
+        ]),
+      ),
+      axFailures: Schema.Array(
+        Schema.Struct({
+          operation: Schema.Literals([
+            "node-read",
+            "role",
+            "subrole",
+            "children",
+            "text-fields",
+            "frames",
+          ]),
+          error: Schema.Int,
+          count: Positive,
+        }),
+      ).check(Schema.isMaxLength(32)),
+    }),
+  ),
+});
 export const ComputerScreenshot = Schema.Struct({
   displayId: Id,
   geometryGeneration: Id,
@@ -235,6 +283,7 @@ export const ComputerScreenshot = Schema.Struct({
       Schema.Literals(["window-match", "audit-incomplete", "partial-audit", "windows-changed"]),
     ),
   ),
+  secureAudit: Schema.optional(ComputerSecureAuditDiagnostics),
 });
 export type ComputerScreenshot = typeof ComputerScreenshot.Type;
 export const ComputerAutomationScreenshot = ComputerScreenshot;

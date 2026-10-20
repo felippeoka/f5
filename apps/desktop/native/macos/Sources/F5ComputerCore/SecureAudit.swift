@@ -115,7 +115,8 @@ public func computerSecureAuditDeadline(
 public func computerSecureAudit<Handle>(
   root: Handle, read: (Handle) -> ComputerSecureAuditNode<Handle>?, maxDepth: Int,
   maxNodes: Int, expired: () -> Bool, search: ((Handle) -> [Handle]?)? = nil,
-  children: ((Handle) -> [Handle]?)? = nil
+  children: ((Handle) -> [Handle]?)? = nil,
+  diagnostics: ComputerSecureAuditDiagnostics? = nil
 ) -> ComputerSecureAudit? {
   typealias Entry = SecureAuditEntry<Handle>
   var rects: [CGRect] = []
@@ -137,6 +138,7 @@ public func computerSecureAudit<Handle>(
   var visited = 0
   while openHead < open.count || clippedHead < clipped.count {
     if visited >= maxNodes || expired() {
+      diagnostics?.stop(visited >= maxNodes ? .nodeBudget : .deadline)
       if openHead < open.count { return nil }
       for entry in clipped[clippedHead...] {
         guard unaudited(entry) else { return nil }
@@ -152,13 +154,20 @@ public func computerSecureAudit<Handle>(
       clippedHead += 1
     }
     visited += 1
+    diagnostics?.visitNode()
     guard let node = read(entry.handle), let role = node.role else {
+      diagnostics?.stop(.unreadableNode)
       guard unaudited(entry) else { return nil }
       continue
     }
     let own = node.frame.flatMap { computerSecureAuditRectIsValid($0) ? $0 : nil }
     if role == "AXSecureTextField" || node.subrole == "AXSecureTextField" {
-      if let own { append(own) } else if !unaudited(entry) { return nil }
+      if let own {
+        append(own)
+      } else {
+        diagnostics?.stop(.secureFieldWithoutFrame)
+        if !unaudited(entry) { return nil }
+      }
       continue
     }
     if computerSecureAuditLeafRoles.contains(role) { continue }
@@ -171,19 +180,31 @@ public func computerSecureAudit<Handle>(
     if role == "AXWebArea", let results = search?(entry.handle) {
       // A limit-sized search cannot establish that there are no further fields.
       var safe = results.count < 5000 && !expired()
+      if !safe {
+        // The search may use a limit-sized sentinel for its own precise failure.
+        if expired() {
+          diagnostics?.stop(.deadline)
+        } else if diagnostics?.lastSearchFailure == nil {
+          diagnostics?.stop(.searchLimit)
+        }
+      }
       if safe {
         for handle in results {
           if visited >= maxNodes || expired() {
+            diagnostics?.stop(visited >= maxNodes ? .nodeBudget : .deadline)
             safe = false
             break
           }
           visited += 1
+          diagnostics?.visitNode()
           guard let field = read(handle), let fieldRole = field.role else {
+            diagnostics?.stop(.unreadableNode)
             safe = false
             break
           }
           if fieldRole == "AXSecureTextField" || field.subrole == "AXSecureTextField" {
             guard let frame = field.frame, computerSecureAuditRectIsValid(frame) else {
+              diagnostics?.stop(.secureFieldWithoutFrame)
               safe = false
               break
             }
@@ -197,10 +218,12 @@ public func computerSecureAudit<Handle>(
     let descendants: [Handle]?
     if let children { descendants = children(entry.handle) } else { descendants = node.children }
     guard let descendants else {
+      diagnostics?.stop(.unreadableChildren)
       guard unaudited(entry, region: clip) else { return nil }
       continue
     }
     if !node.childrenReadable || (entry.depth >= maxDepth && !descendants.isEmpty) {
+      diagnostics?.stop(!node.childrenReadable ? .unreadableChildren : .depthLimit)
       guard unaudited(entry, region: clip) else { return nil }
       continue
     }

@@ -667,6 +667,7 @@ describe("compact computer observations", () => {
   });
   it("preserves masking metadata when extracting an inline screenshot", async () => {
     const h = setup();
+    const secureAudit = { searchEnabled: false, elapsedMs: 3, windows: [] };
     h.invoke.mockResolvedValue({
       displayId: "d",
       geometryGeneration: "g",
@@ -675,12 +676,14 @@ describe("compact computer observations", () => {
       masked: "web-area",
       maskReasons: ["partial-audit"],
       hiddenContent: true,
+      secureAudit,
     });
     const response = await callComputerTool(h.context, "computer_screenshot", {});
     expect(response.structuredContent).toMatchObject({
       masked: "web-area",
       maskReasons: ["partial-audit"],
       hiddenContent: true,
+      secureAudit,
     });
     expect(response.structuredContent).not.toHaveProperty("data");
   });

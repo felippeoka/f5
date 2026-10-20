@@ -21,8 +21,38 @@ describe("computer observation and error metadata", () => {
       hiddenContent: true,
       masked: "web-area",
       maskReasons: ["partial-audit", "window-match", "audit-incomplete", "windows-changed"],
+      secureAudit: {
+        searchEnabled: true,
+        elapsedMs: 1000,
+        windows: [
+          {
+            windowIndex: 0,
+            complete: false,
+            elapsedMs: 1000,
+            visitedNodes: 98,
+            nodeReadElapsedMs: 990,
+            maxChildren: 50050,
+            textFieldQueries: 1,
+            frameQueries: 0,
+            searchResults: 0,
+            searchElapsedMs: 5,
+            searchFallbacks: 1,
+            invalidSearchResults: 0,
+            stopReasons: ["deadline"],
+            axFailures: [{ operation: "text-fields", error: -25205, count: 1 }],
+          },
+        ],
+      },
     };
     expect(Schema.decodeUnknownSync(ComputerScreenshot)(value)).toEqual(value);
+    const { secureAudit: _, ...legacy } = value;
+    expect(Schema.decodeUnknownSync(ComputerScreenshot)(legacy)).toEqual(legacy);
+    expect(() =>
+      Schema.decodeUnknownSync(ComputerScreenshot)({
+        ...value,
+        secureAudit: { ...value.secureAudit, elapsedMs: -1 },
+      }),
+    ).toThrow();
   });
   it("accepts stale refs from legacy helpers and detailed macOS reasons", () => {
     for (const reason of [

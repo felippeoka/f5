@@ -89,29 +89,63 @@ func axRect(_ element: AXUIElement) -> CGRect? {
   return CGRect(origin: point, size: dimensions)
 }
 /// Reads one element for the secure-field audit in a single AX round trip.
-func secureAuditNode(_ element: AXUIElement) -> ComputerSecureAuditNode<AXUIElement>? {
+func secureAuditNode(
+  _ element: AXUIElement, diagnostics: ComputerSecureAuditDiagnostics? = nil
+) -> ComputerSecureAuditNode<AXUIElement>? {
+  let started = ProcessInfo.processInfo.systemUptime
+  defer {
+    diagnostics?.nodeReadDuration(seconds: ProcessInfo.processInfo.systemUptime - started)
+  }
   var values: CFArray?
-  guard
-    AXUIElementCopyMultipleAttributeValues(
-      element, computerSecureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
-      == .success,
+  let status = AXUIElementCopyMultipleAttributeValues(
+    element, computerSecureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
+  guard status == .success,
     let list = values as [AnyObject]?
-  else { return nil }
+  else {
+    if status != .success { diagnostics?.axFailure(.nodeRead, error: Int(status.rawValue)) }
+    return nil
+  }
+  if list.count == 5 {
+    if CFGetTypeID(list[4]) == CFArrayGetTypeID() {
+      diagnostics?.observedChildren(CFArrayGetCount(unsafeBitCast(list[4], to: CFArray.self)))
+    }
+    for (index, operation) in [
+      (0, ComputerSecureAuditDiagnostics.Operation.role), (1, .subrole), (4, .children),
+    ] {
+      if let error = computerAXBatchError(list[index]),
+        error != .attributeUnsupported && error != .noValue
+      {
+        diagnostics?.axFailure(operation, error: Int(error.rawValue))
+      }
+    }
+  }
   return computerSecureAuditNode(list)
 }
-func secureAuditSearch(_ root: AXUIElement, expired: () -> Bool) -> [AXUIElement]? {
-  computerSearchWebArea(root: root, expired: expired) { element, key in
+func secureAuditSearch(
+  _ root: AXUIElement, expired: () -> Bool, diagnostics: ComputerSecureAuditDiagnostics
+) -> [AXUIElement]? {
+  computerSearchWebArea(root: root, expired: expired, diagnostics: diagnostics) { element, key in
+    let started = ProcessInfo.processInfo.systemUptime
+    defer {
+      diagnostics.searchDuration(seconds: ProcessInfo.processInfo.systemUptime - started)
+    }
     var value: CFTypeRef?
     let predicate: [String: Any] = [
       "AXSearchKey": key, "AXResultsLimit": 5000, "AXDirection": "AXDirectionNext",
       "AXImmediateDescendantsOnly": false, "AXVisibleOnly": false,
     ]
-    guard
-      AXUIElementCopyParameterizedAttributeValue(
-        element, "AXUIElementsForSearchPredicate" as CFString, predicate as CFDictionary, &value
-      ) == .success
-    else { return nil }
-    return value as? [AXUIElement]
+    let status = AXUIElementCopyParameterizedAttributeValue(
+      element, "AXUIElementsForSearchPredicate" as CFString, predicate as CFDictionary, &value)
+    guard status == .success else {
+      diagnostics.axFailure(
+        key == "AXTextFieldSearchKey" ? .textFields : .frames, error: Int(status.rawValue))
+      return nil
+    }
+    guard let results = value as? [AXUIElement] else {
+      diagnostics.invalidSearchResult()
+      return nil
+    }
+    return results
   }
 }
 private typealias AXWindowIDFunction =
@@ -1119,7 +1153,9 @@ func backgroundPreflight(_ request: [String: Any], app: NSRunningApplication) th
   }
   if IsSecureEventInputEnabled() {
     // Hold, never type into or beside a secure field. Return before the host's own deadline.
-    emit(["type": "executionState", "executionGeneration": generation, "state": "waiting-secure-input"])
+    emit([
+      "type": "executionState", "executionGeneration": generation, "state": "waiting-secure-input",
+    ])
     let deadline = min(
       number(request, "deadlineAtMs") / 1000 - 1, Date().timeIntervalSince1970 + 25)
     while IsSecureEventInputEnabled() {
@@ -1434,14 +1470,38 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     captureApps.contains { $0.processID == window.owningApplication?.processID }
       && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
   }
-  let maskDeadline = ProcessInfo.processInfo.systemUptime + 2
+  let maskStarted = ProcessInfo.processInfo.systemUptime
+  let maskDeadline = maskStarted + 2
+  let searchEnabled = computerWebAreaSearchEnabled(ProcessInfo.processInfo.environment)
+  var auditDiagnostics: [[String: Any]] = []
   var appWindows: [pid_t: [AXUIElement]] = [:]
   var maskOutcomes: [ComputerCaptureMaskOutcome] = []
   let masks = computerSecureCaptureMasks(windows: capturedWindows.map(\.frame)) { index in
     let captured = capturedWindows[index]
+    let diagnostics = ComputerSecureAuditDiagnostics()
+    let started = ProcessInfo.processInfo.systemUptime
+    var complete = false
+    defer {
+      auditDiagnostics.append([
+        "windowIndex": index, "complete": complete,
+        "elapsedMs": max(0, Int((ProcessInfo.processInfo.systemUptime - started) * 1000)),
+        "visitedNodes": diagnostics.visitedNodes,
+        "nodeReadElapsedMs": diagnostics.nodeReadElapsedMs, "maxChildren": diagnostics.maxChildren,
+        "textFieldQueries": diagnostics.textFieldQueries, "frameQueries": diagnostics.frameQueries,
+        "searchResults": diagnostics.searchResults, "searchFallbacks": diagnostics.searchFallbacks,
+        "searchElapsedMs": diagnostics.searchElapsedMs,
+        "invalidSearchResults": diagnostics.invalidSearchResults,
+        "stopReasons": diagnostics.stopReasons.map(\.rawValue).sorted(),
+        "axFailures": diagnostics.axFailures.map {
+          ["operation": $0.operation.rawValue, "error": $0.error, "count": $0.count]
+            as [String: Any]
+        },
+      ])
+    }
     guard ProcessInfo.processInfo.systemUptime < maskDeadline,
       let pid = captured.owningApplication?.processID
     else {
+      diagnostics.stop(.deadline)
       maskOutcomes.append(ComputerCaptureMaskOutcome(.window, reasons: [.auditIncomplete]))
       return nil
     }
@@ -1456,6 +1516,7 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
         id: windowIdentifier, rect: axRect,
         minimized: { attribute($0, kAXMinimizedAttribute) as? Bool ?? false })
     else {
+      diagnostics.stop(.windowMatch)
       maskOutcomes.append(ComputerCaptureMaskOutcome(.window, reasons: [.windowMatch]))
       return nil
     }
@@ -1466,10 +1527,13 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
       windowsLeft: capturedWindows.count - index)
     let expired = { ProcessInfo.processInfo.systemUptime >= windowDeadline }
     let audit = computerSecureAudit(
-      root: matched, read: secureAuditNode, maxDepth: 256, maxNodes: 20000,
+      root: matched, read: { secureAuditNode($0, diagnostics: diagnostics) }, maxDepth: 256,
+      maxNodes: 20000,
       expired: expired,
-      search: computerWebAreaSearchEnabled(ProcessInfo.processInfo.environment)
-        ? { secureAuditSearch($0, expired: expired) } : nil)
+      search: searchEnabled
+        ? { secureAuditSearch($0, expired: expired, diagnostics: diagnostics) } : nil,
+      diagnostics: diagnostics)
+    complete = audit?.complete ?? false
     if let audit {
       maskOutcomes.append(
         ComputerCaptureMaskOutcome(
@@ -1480,6 +1544,7 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     }
     return audit
   }
+  let auditElapsedMs = max(0, Int((ProcessInfo.processInfo.systemUptime - maskStarted) * 1000))
   maskIncomplete = masks.incomplete
   for rect in masks.rects { fillMask(rect) }
   // Capture and AX traversal are separate OS calls. If a granted window moved,
@@ -1585,6 +1650,11 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
   let maskSummary = computerCaptureMaskSummary(maskOutcomes)
   result["masked"] = maskSummary.masked
   result["maskReasons"] = maskSummary.maskReasons
+  result["secureAudit"] = [
+    "searchEnabled": searchEnabled,
+    "elapsedMs": auditElapsedMs,
+    "windows": auditDiagnostics,
+  ]
   if scopedAppId != nil {
     // App-scoped evidence: the captured display, and no cursor (the user's pointer is theirs).
     if zoom { result["rect"] = request["rect"] }
