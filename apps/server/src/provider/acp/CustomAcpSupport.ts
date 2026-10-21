@@ -6,6 +6,7 @@ import {
   makeCopilotAcpRouting,
 } from "./CopilotAcpRouting.ts";
 import { type AcpSettings, type ServerProviderModel } from "@t3tools/contracts";
+import { customModelSlug } from "@t3tools/shared/customModels";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { Effect, Layer } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -30,6 +31,7 @@ export function makeCustomAcpRuntime(config: AcpSettings, input: GrokAcpRuntimeI
       AcpSessionRuntime.layer({
         ...input,
         spawn: customAcpSpawn(config, input.cwd, input.environment ?? {}),
+        customModels: config.customModels.map(customModelSlug),
         ...(routing
           ? {
               clientCapabilities: { _meta: copilotAcpCapabilities },

@@ -123,6 +123,12 @@ export interface AcpSessionRuntimeOptions {
     readonly retryDelayMs?: number;
     readonly eventBarrierTimeoutMs?: number;
   };
+  /**
+   * Model ids the user configured for this instance. The model config option
+   * accepts them even when the agent does not advertise them, and the agent
+   * validates them instead.
+   */
+  readonly customModels?: ReadonlyArray<string>;
 }
 
 export interface AcpSessionRequestLogEvent {
@@ -523,6 +529,9 @@ const makeAcpSessionRuntime = (
         }
         const allowedValues = collectSessionConfigOptionValues(configOption);
         if (allowedValues.includes(value)) {
+          return;
+        }
+        if (configOption.category === "model" && options.customModels?.includes(value)) {
           return;
         }
         return yield* new EffectAcpErrors.AcpRequestError({
