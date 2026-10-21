@@ -61,6 +61,29 @@ describe("checkGrokProviderStatus", () => {
       }
     },
   );
+  it.skipIf(process.platform === "win32")("marks Grok CLIs older than 1.0.13 broken", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "f5-grok-old-"));
+    const binaryPath = join(dir, "grok");
+    writeFileSync(binaryPath, `#!/bin/sh\n[ "$1" = "--version" ] && echo "grok 1.0.12"\nexit 0\n`);
+    chmodSync(binaryPath, 0o755);
+    try {
+      const settings = Schema.decodeSync(GrokSettings)({
+        enabled: true,
+        binaryPath,
+        customModels: [],
+      });
+      const provider = await Effect.runPromise(
+        checkGrokProviderStatus(settings, { PATH: process.env.PATH }).pipe(
+          Effect.provide(NodeServices.layer),
+        ),
+      );
+      expect(provider.status).toBe("error");
+      expect(provider.version).toBe("1.0.12");
+      expect(provider.message).toBe("Grok CLI v1.0.12 is too old. Upgrade to v1.0.13 or newer.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("reports a missing binary as unavailable", async () => {
     const settings = Schema.decodeSync(GrokSettings)({
       enabled: true,

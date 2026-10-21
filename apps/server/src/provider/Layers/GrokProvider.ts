@@ -6,6 +6,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { resolveInvocationEffect } from "../../spawn/resolveCommand.ts";
 
 import { resolveGrokAcpBaseModelId } from "../acp/GrokAcpSupport.ts";
+import { compareCliVersions } from "../cliVersion.ts";
 import {
   buildServerProvider,
   detailFromResult,
@@ -17,6 +18,8 @@ import {
 } from "../providerSnapshot.ts";
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
+// Older Grok CLIs do not work with F5's ACP integration.
+const MINIMUM_GROK_VERSION = "1.0.13";
 const GROK_MODELS_TIMEOUT_MS = 8_000;
 
 const GROK_PRESENTATION = {
@@ -208,6 +211,21 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
         message: detail
           ? `Grok CLI is installed but failed to run. ${detail}`
           : "Grok CLI is installed but failed to run.",
+      },
+    });
+  }
+  if (version && compareCliVersions(version, MINIMUM_GROK_VERSION) < 0) {
+    return buildServerProvider({
+      presentation: GROK_PRESENTATION,
+      enabled: grokSettings.enabled,
+      checkedAt,
+      models: fallbackModels,
+      probe: {
+        installed: true,
+        version,
+        status: "error",
+        auth: { status: "unknown" },
+        message: `Grok CLI v${version} is too old. Upgrade to v${MINIMUM_GROK_VERSION} or newer.`,
       },
     });
   }
