@@ -46,6 +46,7 @@ case 'prompt':{
  }
  if(mode==='crash'){process.exit(23);break;}
  if(mode==='reject'){emit({type:'response',id:record.id,command:'prompt',success:false,error:'PRIVATE_FAILURE'});break;}
+ if(mode==='streaming'&&record.streamingBehavior!=='steer'){emit({type:'agent_start'});emit({type:'response',id:record.id,command:'prompt',success:false,error:"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."});break;}
  if(record.message.startsWith('/reload')){reply(record,{});break;}
  const userId='u'+entries.length, assistantId='a'+entries.length;
  entries.push({id:userId,parentId:leafId,type:'message',message:{role:'user',content:record.message}});

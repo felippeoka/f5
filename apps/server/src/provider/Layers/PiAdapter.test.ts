@@ -8,7 +8,8 @@ import { fixture, threadId } from "../pi/PiAdapter.testkit.ts";
 import { PiRpcError } from "../pi/PiRpc.ts";
 import { makePiAdapter, parsePiResumeCursor } from "./PiAdapter.ts";
 
-it.each(["normal", "abort", "reject", "crash", "slash", "final-only", "tool"])(
+// "streaming": native work started before its wake reached F5, so Pi must queue the prompt.
+it.each(["normal", "abort", "reject", "crash", "slash", "final-only", "tool", "streaming"])(
   "owns a Pi child, correlates completion and closes the session: %s",
   async (mode) =>
     fixture(async ({ settings, options, trace }) => {
@@ -49,7 +50,12 @@ it.each(["normal", "abort", "reject", "crash", "slash", "final-only", "tool"])(
                   : "completed",
             );
             expect(JSON.stringify(observed)).not.toContain("PRIVATE_FAILURE");
-            if (mode === "normal" || mode === "final-only" || mode === "tool") {
+            if (
+              mode === "normal" ||
+              mode === "final-only" ||
+              mode === "tool" ||
+              mode === "streaming"
+            ) {
               expect(
                 observed.filter(
                   (event) =>

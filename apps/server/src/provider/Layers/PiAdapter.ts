@@ -1146,11 +1146,19 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                     updatedAt: new Date().toISOString(),
                   };
                   deliveryStarted = true;
+                  // Native work can start before its wake reaches F5. Steering lets Pi
+                  // queue the prompt into that run, or start an idle run as usual.
                   yield* ctx.rpc
                     .send(
                       compact
                         ? { type: "compact", id, ...compact }
-                        : { type: "prompt", id, message, ...(images.length ? { images } : {}) },
+                        : {
+                            type: "prompt",
+                            id,
+                            message,
+                            streamingBehavior: "steer",
+                            ...(images.length ? { images } : {}),
+                          },
                     )
                     .pipe(
                       Effect.tapError(() =>
