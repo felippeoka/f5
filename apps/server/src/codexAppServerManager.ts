@@ -633,6 +633,15 @@ export function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
   }
 }
 
+/**
+ * Config overrides sent with every thread start, resume and fork, layered above
+ * the user's and project's `config.toml`. Codex waits this long for MCP servers
+ * before the first model request and leaves out any server still starting
+ * (default 1 s, too short for cold `npx`/`uvx` servers). A hung server delays
+ * only the first turn of a session, not its 30 s startup timeout.
+ */
+export const CODEX_THREAD_CONFIG = { mcp_optional_startup_grace_ms: 10_000 } as const;
+
 export function buildCodexThreadOpenRequestParams(input: {
   readonly cwd?: string;
   readonly model?: string;
@@ -646,6 +655,7 @@ export function buildCodexThreadOpenRequestParams(input: {
     model: input.model ?? null,
     ...(input.serviceTier !== undefined ? { serviceTier: input.serviceTier } : {}),
     cwd: input.cwd ?? null,
+    config: CODEX_THREAD_CONFIG,
     ...(input.workflowExecutionProfile
       ? {
           approvalPolicy: "never" as const,

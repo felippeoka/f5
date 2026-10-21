@@ -17,6 +17,7 @@ import {
 
 import {
   buildCodexInitializeParams,
+  buildCodexThreadForkParams,
   buildCodexThreadOpenRequestParams,
   buildCodexTurnStartParams,
   CODEX_ELICITATION_OPENED_METHOD,
@@ -569,6 +570,15 @@ describe("Codex runtime-mode thread configuration", () => {
       expect(params.resume).toMatchObject({ excludeTurns: true });
     },
   );
+
+  it("gives slow MCP servers a startup grace on start, resume and fork", () => {
+    const input = { runtimeMode: "full-access", resumeThreadId: "provider-thread-1" } as const;
+    const params = buildCodexThreadOpenRequestParams(input);
+    const config = { mcp_optional_startup_grace_ms: 10_000 };
+    expect(params.start.config).toEqual(config);
+    expect(params.resume?.config).toEqual(config);
+    expect(buildCodexThreadForkParams(input, "provider-thread-1").config).toEqual(config);
+  });
 
   it.each(["unattended-readonly", "attended-readonly"] as const)(
     "forces read-only, never-approve configuration for %s",
