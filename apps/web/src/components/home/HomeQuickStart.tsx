@@ -1,5 +1,5 @@
 import type { ProjectId } from "@t3tools/contracts";
-import { ArrowUpIcon, FolderPlusIcon, WorkflowIcon } from "lucide-react";
+import { ArrowUpIcon, ChevronsUpDownIcon, FolderPlusIcon, WorkflowIcon } from "lucide-react";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { useCommandPaletteStore } from "../../commandPaletteStore";
@@ -11,7 +11,15 @@ import type { Project } from "../../types";
 import { useWorkflowCreateDialogStore } from "../../workflowCreateDialogStore";
 import { ProjectIcon } from "../ProjectIcon";
 import { Button } from "../ui/button";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxTrigger,
+} from "../ui/combobox";
 import { toastManager } from "../ui/toast";
 
 export const QUICK_START_PLACEHOLDER = "What should we work on?";
@@ -42,10 +50,11 @@ export function HomeQuickStart(props: {
       ? selectedProjectId
       : (props.defaultProjectId ?? props.projects[0]?.id ?? null);
   const selectedProject = props.projects.find((project) => project.id === projectId);
-  const projectItems = props.projects.map((project) => ({
-    value: project.id,
-    label: project.name,
-  }));
+  const [projectSearch, setProjectSearch] = useState("");
+  const normalizedSearch = projectSearch.trim().toLowerCase();
+  const filteredProjects = props.projects.filter((project) =>
+    project.name.toLowerCase().includes(normalizedSearch),
+  );
 
   const start = async () => {
     if (!projectId || starting) return;
@@ -127,15 +136,21 @@ export function HomeQuickStart(props: {
           className="block min-h-24 w-full resize-none bg-transparent px-4 pt-4 pb-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
         <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
-          <Select
+          <Combobox
+            items={props.projects.map((project) => project.id)}
+            filteredItems={filteredProjects.map((project) => project.id)}
             value={projectId}
-            onValueChange={(value) => setSelectedProjectId(value as ProjectId)}
-            items={projectItems}
+            autoHighlight
+            onOpenChange={(open) => {
+              if (!open) setProjectSearch("");
+            }}
+            onValueChange={(value) => {
+              if (value) setSelectedProjectId(value as ProjectId);
+            }}
           >
-            <SelectTrigger
+            <ComboboxTrigger
+              render={<Button type="button" variant="ghost" size="sm" />}
               aria-label="Project"
-              variant="ghost"
-              size="sm"
               className="h-7 max-w-56 gap-1.5 text-ui text-muted-foreground hover:text-foreground"
             >
               {selectedProject ? (
@@ -146,24 +161,37 @@ export function HomeQuickStart(props: {
                   className="size-3.5"
                 />
               ) : null}
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              {props.projects.map((project) => (
-                <SelectItem key={project.id} value={project.id}>
-                  <span className="inline-flex min-w-0 items-center gap-2">
-                    <ProjectIcon
-                      projectId={project.id}
-                      name={project.name}
-                      icon={project.icon}
-                      className="size-3.5"
-                    />
-                    <span className="truncate">{project.name}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+              <span className="truncate">{selectedProject?.name}</span>
+              <ChevronsUpDownIcon aria-hidden="true" className="size-3.5 shrink-0 opacity-60" />
+            </ComboboxTrigger>
+            <ComboboxPopup className="w-72">
+              <div className="border-b p-2">
+                <ComboboxInput
+                  aria-label="Search projects"
+                  placeholder="Search projects…"
+                  showTrigger={false}
+                  value={projectSearch}
+                  onChange={(event) => setProjectSearch(event.target.value)}
+                />
+              </div>
+              <ComboboxEmpty>No matching projects.</ComboboxEmpty>
+              <ComboboxList className="max-h-64">
+                {filteredProjects.map((project, index) => (
+                  <ComboboxItem key={project.id} index={index} value={project.id}>
+                    <span className="inline-flex min-w-0 items-center gap-2">
+                      <ProjectIcon
+                        projectId={project.id}
+                        name={project.name}
+                        icon={project.icon}
+                        className="size-3.5"
+                      />
+                      <span className="truncate">{project.name}</span>
+                    </span>
+                  </ComboboxItem>
+                ))}
+              </ComboboxList>
+            </ComboboxPopup>
+          </Combobox>
           <Button
             type="button"
             variant="ghost"
