@@ -1124,11 +1124,20 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         // The SDK has no response deadline of its own; a host that stops
         // answering must not hold the thread lock forever.
         const openTimeoutMs = options?.sessionOpenTimeoutMs ?? MSP_REQUEST_TIMEOUT_MS;
+        // Without a profile Muse applies its own default, which can be
+        // `:auto-review`, where an AI reviewer answers approvals instead of the
+        // user. Resume selects it too, since the mode may have changed. An
+        // ephemeral host refuses any profile id.
+        const permissionProfile =
+          host.durability.kind === "durable"
+            ? { permissionProfile: expectedPermissionProfile(input.runtimeMode) }
+            : {};
         const startFresh = call("session/start", () =>
           host.gate.run("session/start", openTimeoutMs, () =>
             host.client.startSession({
               workspaceRoot: input.cwd,
               approvalMode: verifyExpectedMode(input.runtimeMode),
+              ...permissionProfile,
               ...(input.modelId ? { modelId: input.modelId } : {}),
             }),
           ),
@@ -1151,6 +1160,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                 host.client.resumeSession({
                   sessionId: input.resume!.mspSessionId,
                   ...(cursor ? { cursor } : { excludeItems: true }),
+                  ...permissionProfile,
                 }),
               ),
             catch: (cause) => new MuseCallFailure({ cause }),
@@ -1186,6 +1196,8 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
 
     const verifyExpectedMode = (runtimeMode: MuseRuntimeMode) =>
       runtimeMode === "full-access" ? ("allowAll" as const) : ("promptUnmatched" as const);
+    const expectedPermissionProfile = (runtimeMode: MuseRuntimeMode) =>
+      runtimeMode === "full-access" ? ":unrestricted" : ":ask-me";
 
     /** Apply the approval mode and require the read-back to match. */
     const enforcePermissions = (host: MspHost, session: MspSession, runtimeMode: MuseRuntimeMode) =>

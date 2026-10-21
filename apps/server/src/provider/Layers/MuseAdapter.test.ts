@@ -515,6 +515,51 @@ it.layer(HarnessLayer)("MuseAdapter", (it) => {
     }),
   );
 
+  it.effect("selects the runtime mode's permission profile on start and resume", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      harness.configure = () => undefined;
+      const supervised = ThreadId.make("thread-profile-start");
+      yield* start(harness, supervised);
+      assert.equal(
+        harness.hosts.at(-1)!.requestsFor("session/start")[0]?.params.permissionProfile,
+        ":ask-me",
+      );
+      yield* harness.adapter.stopSession(supervised);
+
+      const resumed = ThreadId.make("thread-profile-resume");
+      yield* harness.adapter.startSession({
+        threadId: resumed,
+        provider: "muse",
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        resumeCursor: {
+          schemaVersion: 1,
+          mspSessionId: "msp-session-1",
+          viewCursor: "c1",
+          durability: "durable",
+        },
+      });
+      assert.equal(
+        harness.hosts.at(-1)!.requestsFor("session/resume")[0]?.params.permissionProfile,
+        ":unrestricted",
+      );
+      yield* harness.adapter.stopSession(resumed);
+
+      // An ephemeral host refuses any profile id, so none is sent.
+      harness.configure = (host) => {
+        Object.assign(host.options, { sessionDurability: "ephemeral" });
+      };
+      const ephemeral = ThreadId.make("thread-profile-ephemeral");
+      yield* start(harness, ephemeral);
+      harness.configure = () => undefined;
+      const params = harness.hosts.at(-1)!.requestsFor("session/start")[0]?.params;
+      assert.equal(params?.approvalMode, "promptUnmatched");
+      assert.equal(params?.permissionProfile, undefined);
+      yield* harness.adapter.stopSession(ephemeral);
+    }),
+  );
+
   it.effect("hydrates from session/read when the resume anchor was pruned", () =>
     Effect.gen(function* () {
       const harness = yield* MuseHarness;
