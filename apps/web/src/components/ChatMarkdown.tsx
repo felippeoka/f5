@@ -42,6 +42,7 @@ import { useFileNavigation } from "../fileNavigationContext";
 import { useTheme } from "../hooks/useTheme";
 import {
   collectMarkdownLinkHrefs,
+  isMarkdownFileLinkLabel,
   resolveMarkdownFileLinkMeta,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
@@ -582,7 +583,7 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
           }
         };
 
-        return (
+        const chip = (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
@@ -619,6 +620,14 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
               <TooltipPopup>{tooltipText}</TooltipPopup>
             </Tooltip>
           </TooltipProvider>
+        );
+        // `[validates the input](src/a.ts:12)` keeps its prose next to the chip.
+        return isMarkdownFileLinkLabel(nodeToPlainText(children), meta) ? (
+          chip
+        ) : (
+          <span>
+            {children} {chip}
+          </span>
         );
       },
       pre({ node, children, ...props }) {

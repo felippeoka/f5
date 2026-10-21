@@ -161,3 +161,17 @@ describe("ChatMarkdown external-bot policy", () => {
     expect(html).not.toContain("pr-link-preview");
   });
 });
+
+it("keeps a descriptive file-link label beside the chip and drops a filename label", async () => {
+  const { default: ChatMarkdown } = await import("./ChatMarkdown");
+  const html = renderToStaticMarkup(
+    <ChatMarkdown
+      text="It [validates the input](/tmp/project/src/example.ts:12) in [example.ts:12](/tmp/project/src/example.ts:12)."
+      cwd="/tmp/project"
+    />,
+  );
+  expect(html.match(/chat-markdown-file-link"/g)).toHaveLength(2);
+  expect(html).toContain("validates the input");
+  expect(html.match(/chat-markdown-file-link-label">example\.ts</g)).toHaveLength(2);
+  expect(html).not.toMatch(/in <span>example\.ts:12/);
+});

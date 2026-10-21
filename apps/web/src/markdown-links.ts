@@ -153,6 +153,30 @@ export function resolveMarkdownFileLinkMeta(
 }
 
 /**
+ * Whether a file link's text only names its destination (`example.ts`, `src/example.ts:12`),
+ * so the chip can replace it. Any other text is prose the reader still needs.
+ */
+export function isMarkdownFileLinkLabel(label: string, meta: MarkdownFileLinkMeta): boolean {
+  const normalize = (path: string) =>
+    path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  const labelPosition = splitPathAndPosition(label.trim());
+  if (
+    (labelPosition.line !== undefined && labelPosition.line !== meta.line) ||
+    (labelPosition.column !== undefined && labelPosition.column !== meta.column)
+  ) {
+    return false;
+  }
+  let labelPath = normalize(labelPosition.path);
+  let destinationPath = normalize(meta.filePath);
+  if (labelPath.length === 0) return true;
+  if (isWindowsAbsolutePath(meta.filePath)) {
+    labelPath = labelPath.toLowerCase();
+    destinationPath = destinationPath.toLowerCase();
+  }
+  return destinationPath === labelPath || destinationPath.endsWith(`/${labelPath}`);
+}
+
+/**
  * Normalize a `file://` URI to a plain filesystem path. Non-file hrefs are
  * returned unchanged. Useful for the chip's `href` attribute so hover / copy
  * reveals a path the user recognizes instead of the raw URI.
