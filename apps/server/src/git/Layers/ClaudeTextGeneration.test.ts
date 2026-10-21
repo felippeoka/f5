@@ -10,7 +10,7 @@ import { expect } from "vitest";
 import { ServerConfig } from "../../config.ts";
 import { type TextGenerationShape } from "../Services/TextGeneration.ts";
 import { sanitizeThreadTitle } from "../Utils.ts";
-import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
+import { claudeErrorResult, makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
 
 const ClaudeTextGenerationTestLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-claude-text-generation-test-",
@@ -519,4 +519,17 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
         }),
     ),
   );
+});
+
+it("reports the CLI's own error result instead of wrapper output", () => {
+  expect(
+    claudeErrorResult(
+      JSON.stringify([
+        { type: "system", subtype: "init" },
+        { type: "result", is_error: true, result: "API Error: 529 Overloaded" },
+      ]),
+    ),
+  ).toBe("API Error: 529 Overloaded");
+  expect(claudeErrorResult(JSON.stringify({ is_error: true, result: "  " }))).toBeUndefined();
+  expect(claudeErrorResult("mise WARN not trusted")).toBeUndefined();
 });
