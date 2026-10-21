@@ -74,17 +74,16 @@ import {
   isClaudeTranscriptUnderMaintenance,
   findClaudeTranscript,
   readClaudeTranscript,
+  readClaudeTranscriptLines,
   readClaudeTranscriptPage,
   selectClaudeResumePoint,
   isClaudeMissingResumeMessageError,
 } from "../claudeTranscript.ts";
 
-import * as NodeFsSync from "node:fs";
 import * as NodeFs from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as EffectNodePath from "@effect/platform-node/NodePath";
-import * as NodeReadline from "node:readline";
 
 import {
   type CanUseTool,
@@ -648,21 +647,10 @@ export interface ClaudeSessionStoreFs {
   readonly readLines: (path: string, signal: AbortSignal) => AsyncIterable<string>;
 }
 
-async function* readFileLines(path: string, signal: AbortSignal): AsyncGenerator<string> {
-  const stream = NodeFsSync.createReadStream(path, { encoding: "utf8", signal });
-  const lines = NodeReadline.createInterface({ input: stream, crlfDelay: Infinity });
-  try {
-    yield* lines;
-  } finally {
-    lines.close();
-    stream.destroy();
-  }
-}
-
 const nodeClaudeSessionStoreFs: ClaudeSessionStoreFs = {
   readdir: (path) => NodeFs.readdir(path),
   stat: (path) => NodeFs.stat(path),
-  readLines: readFileLines,
+  readLines: readClaudeTranscriptLines,
 };
 
 function isMissingPathError(cause: unknown): boolean {

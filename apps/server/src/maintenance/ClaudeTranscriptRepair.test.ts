@@ -14,6 +14,7 @@ import {
 import {
   hasClaudeParentChain,
   readClaudeTranscript,
+  readClaudeTranscriptLines,
   selectClaudeResumePoint,
   isClaudeMissingResumeMessageError,
 } from "../provider/claudeTranscript.ts";
@@ -226,6 +227,68 @@ describe("Claude transcript recovery", () => {
     expect(await readFile(path.join(input.providerLogsDir, result.backupId), "utf8")).toBe(
       original,
     );
+    expect(
+      JSON.parse(
+        await readFile(path.join(input.providerLogsDir, `${result.backupId}.receipt`), "utf8"),
+      ).quarantinedLines,
+    ).toEqual([2]);
+  });
+  it("numbers transcript lines exactly like split on newline", async () => {
+    const input = await fixture();
+    const text = [
+      `{"a":"${String.fromCharCode(0x2028)}${String.fromCharCode(0x2029)}"}`,
+      "",
+      "lone\rcarriage-return",
+      "{truncated",
+      '{"b":1}',
+    ].join("\n");
+    await writeFile(input.file, text);
+    const lines: string[] = [];
+    for await (const line of readClaudeTranscriptLines(input.file)) lines.push(line);
+    expect(lines).toEqual(text.split("\n"));
+  });
+  it("reads records containing U+2028/U+2029 as valid and keeps them eligible", async () => {
+    const input = await fixture([
+      {
+        ...envelope,
+        uuid: "target",
+        parentUuid: null,
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: `a${String.fromCharCode(0x2028)}b${String.fromCharCode(0x2029)}c`,
+            },
+          ],
+        },
+      },
+      { uuid: "next", parentUuid: "target", type: "user" },
+    ]);
+    const entries = await readClaudeTranscript(input.file);
+    expect([...entries.keys()]).toEqual(["target", "next"]);
+    expect(await inspectClaudeResumePoint(input.file, "target")).toEqual({ reason: "eligible" });
+  });
+  it("quarantines only the truncated line next to a U+2028 record and keeps that record byte-exact", async () => {
+    const separated = JSON.stringify({
+      ...envelope,
+      uuid: "root",
+      parentUuid: null,
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: `a${String.fromCharCode(0x2028)}b` }],
+      },
+    });
+    const target = JSON.stringify({ uuid: "target", parentUuid: "root", type: "user" });
+    const trailing = JSON.stringify({ uuid: "after", parentUuid: "target", type: "system" });
+    const input = await fixture();
+    await writeFile(input.file, `${separated}\n{truncated\n${target}\n${trailing}\n`);
+    const result = await repairClaudeResumePoint(input);
+    if (result.status !== "repaired") throw new Error("Expected repair");
+    expect(await readFile(input.file, "utf8")).toBe(`${separated}\n${target}\n${trailing}\n`);
+    expect(hasClaudeParentChain(await readClaudeTranscript(input.file), "target")).toBe(true);
     expect(
       JSON.parse(
         await readFile(path.join(input.providerLogsDir, `${result.backupId}.receipt`), "utf8"),
