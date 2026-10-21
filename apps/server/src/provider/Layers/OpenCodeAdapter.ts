@@ -1305,8 +1305,9 @@ export function makeOpenCodeAdapter(
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               });
               const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
+                // No title: OpenCode only generates one from the first prompt
+                // when session.create leaves it unset.
                 client.session.create({
-                  title: `T3 Code ${input.threadId}`,
                   permission: input.workflowExecutionProfile
                     ? buildOpenCodeWorkflowPermissionRules(input.workflowExecutionProfile)
                     : buildOpenCodePermissionRules(input.runtimeMode),
