@@ -22,6 +22,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
@@ -65,6 +66,7 @@ const listeners = vi.hoisted(() => ({
 vi.mock("../../nativeApi", () => ({
   ensureNativeApi: () => ({
     usage: api,
+    server: { getConfig: async () => ({ keybindings: DEFAULT_RESOLVED_KEYBINDINGS }) },
     orchestration: {
       onDomainEvent: (listener: (event: { type: string; payload?: unknown }) => void) => {
         listeners.domain.add(listener);
@@ -1143,6 +1145,43 @@ describe("query-connected usage dashboard", () => {
       await screen.rerender(view("limits", []));
       await expect.element(accountCard()).toBeVisible();
     } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("switches views with page keys, leaves typing alone and goes back on Escape", async () => {
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue(accounts());
+    const onSearchChange = vi.fn();
+    const onBack = vi.fn();
+    const queryClient = client();
+    const screen = await renderDashboard(
+      queryClient,
+      <UsageDashboard search={{}} onSearchChange={onSearchChange} onBack={onBack} />,
+    );
+    const field = document.createElement("input");
+    document.body.append(field);
+    try {
+      await expect.element(page.getByRole("tab", { name: "Activity" })).toBeVisible();
+      await vi.waitFor(async () => {
+        await userEvent.keyboard("c");
+        expect(onSearchChange).toHaveBeenLastCalledWith({ tab: "activity", metric: "cost" });
+      });
+      await userEvent.keyboard("l");
+      expect(onSearchChange).toHaveBeenLastCalledWith({ tab: "limits" });
+      await userEvent.keyboard("3");
+      expect(onSearchChange).toHaveBeenLastCalledWith({ range: "30d" });
+      await userEvent.keyboard("{Escape}");
+      expect(onBack).toHaveBeenCalledTimes(1);
+
+      onSearchChange.mockClear();
+      field.focus();
+      await userEvent.keyboard("ct4{Escape}");
+      expect(onSearchChange).not.toHaveBeenCalled();
+      expect(onBack).toHaveBeenCalledTimes(1);
+    } finally {
+      field.remove();
       await screen.unmount();
       queryClient.clear();
     }

@@ -279,6 +279,22 @@ export function formatKeybindingCommandLabel(
       return "Paste as text without folding";
     case "usage.open":
       return "Open Usage";
+    case "usage.tokens":
+      return "Usage: show tokens";
+    case "usage.cost":
+      return "Usage: show cost";
+    case "usage.turns":
+      return "Usage: show recorded turns";
+    case "usage.limits":
+      return "Usage: show limits";
+    case "usage.period.day":
+      return "Usage: past 24 hours";
+    case "usage.period.week":
+      return "Usage: past 7 days";
+    case "usage.period.month":
+      return "Usage: past 30 days";
+    case "usage.period.quarter":
+      return "Usage: past 90 days";
     case "commandPalette.toggle":
       return "Toggle command palette";
     case "help.shortcuts":

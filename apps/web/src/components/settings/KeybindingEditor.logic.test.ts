@@ -13,6 +13,7 @@ describe("groupKeybindingRows", () => {
       "Composer",
       "Terminal",
       "Diff",
+      "Usage",
       "Other",
     ]);
     expect(groups.find((group) => group.id === "composer")?.rows.map((row) => row.command)).toEqual(

@@ -122,6 +122,15 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+/", command: "help.shortcuts", when: "!terminalFocus" },
   { key: "mod+u", command: "usage.open", when: "!terminalFocus" },
+  // Usage page keys; the page ignores them while typing or in a popup.
+  { key: "t", command: "usage.tokens", when: "usagePageOpen" },
+  { key: "c", command: "usage.cost", when: "usagePageOpen" },
+  { key: "r", command: "usage.turns", when: "usagePageOpen" },
+  { key: "l", command: "usage.limits", when: "usagePageOpen" },
+  { key: "1", command: "usage.period.day", when: "usagePageOpen" },
+  { key: "2", command: "usage.period.week", when: "usagePageOpen" },
+  { key: "3", command: "usage.period.month", when: "usagePageOpen" },
+  { key: "4", command: "usage.period.quarter", when: "usagePageOpen" },
   { key: "mod+enter", command: "chat.newBackground", when: "newThreadComposer && !dialogFocus" },
 ];
 

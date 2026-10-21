@@ -15,6 +15,11 @@ The Usage page shows two things. **Activity** covers the tokens, cost and turns 
    next to the tabs limits both tabs to the providers you check, and F5 remembers that choice.
 4. Switch the chart between tokens, cost and turns.
 
+On Usage, when you are not typing in a field, press `T`, `C` or `R` for tokens, cost or recorded
+turns, `L` for Limits, and `1` to `4` for 24 hours, 7, 30 or 90 days. `Escape` returns to the
+previous page. Rebind them under **Usage** in **Settings → Keybindings**; they use the
+`usagePageOpen` context.
+
 The URL keeps the tab, range and filters, so you can bookmark a view or share it.
 
 > [!NOTE]

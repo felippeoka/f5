@@ -20,13 +20,13 @@ const KEYBINDING_GROUPS = [
       "projectContentSearch",
       "editor",
       "help",
-      "usage",
     ],
   },
   { id: "threads", title: "Threads", prefixes: ["thread", "chat", "prHub", "workflow"] },
   { id: "composer", title: "Composer", prefixes: ["composer", "modelPicker", "model"] },
   { id: "terminal", title: "Terminal", prefixes: ["terminal"] },
   { id: "diff", title: "Diff", prefixes: ["diff"] },
+  { id: "usage", title: "Usage", prefixes: ["usage"] },
   { id: "scripts", title: "Project scripts", prefixes: ["script"] },
 ] as const;
 const OTHER_KEYBINDING_GROUP = { id: "other", title: "Other" } as const;

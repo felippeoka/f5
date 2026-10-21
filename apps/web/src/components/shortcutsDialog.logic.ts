@@ -30,6 +30,7 @@ const WHEN_CONTEXT_LABELS: Readonly<Record<string, string>> = {
   dialogFocus: "In dialogs",
   composerFocus: "In composer",
   modelPickerOpen: "In model picker",
+  usagePageOpen: "On Usage",
 };
 
 /** Context keys the clause requires to be true (ignores negated and `or` branches). */
@@ -147,6 +148,20 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
       "rightPanel.closeTab",
       "rightPanel.tabMenu",
       "rightPanel.reopenClosed",
+    ],
+  },
+  {
+    id: "usage",
+    title: "Usage",
+    commands: [
+      "usage.tokens",
+      "usage.cost",
+      "usage.turns",
+      "usage.limits",
+      "usage.period.day",
+      "usage.period.week",
+      "usage.period.month",
+      "usage.period.quarter",
     ],
   },
 ];

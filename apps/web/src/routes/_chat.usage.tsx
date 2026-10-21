@@ -1,4 +1,4 @@
-import { createFileRoute, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router";
 import { isKnownProviderKind } from "@t3tools/contracts";
 import { useEffect, useMemo } from "react";
 
@@ -20,6 +20,7 @@ function UsageRouteView() {
   const search = Route.useSearch();
   const rawSearch = useRouterState({ select: (state) => state.location.search });
   const navigate = Route.useNavigate();
+  const router = useRouter();
   const hiddenProviders = useMemo(
     () => settings.usageHiddenProviders.filter(isKnownProviderKind),
     [settings.usageHiddenProviders],
@@ -40,6 +41,10 @@ function UsageRouteView() {
           defaults={{ tab: settings.usageTab, range: settings.usageRange }}
           hiddenProviders={hiddenProviders}
           onHiddenProvidersChange={(next) => updateSettings({ usageHiddenProviders: [...next] })}
+          onBack={() => {
+            if (router.history.canGoBack()) router.history.back();
+            else void router.navigate({ to: "/" });
+          }}
           onSearchChange={async (patch) => {
             // Pin the current entry's effective tab/range before the saved
             // defaults change, so Back restores what was on screen.

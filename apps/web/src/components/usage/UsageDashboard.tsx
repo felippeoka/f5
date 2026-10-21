@@ -16,6 +16,7 @@ import {
 import { AlertTriangleIcon, CoinsIcon, GaugeIcon, RefreshCwIcon, SigmaIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { useServerKeybindings } from "../../keybindings";
 import { formatAbsoluteTimeLabel } from "../../lib/relativeTime";
 import {
   accountJobsPending,
@@ -51,6 +52,7 @@ import {
 } from "./format";
 import { ProjectsThreadsCard } from "./ProjectsThreadsCard";
 import { UsageProviderFilter } from "./UsageProviderFilter";
+import { isUsageBackShortcut, resolveUsageShortcut } from "./usageShortcuts";
 import { UsagePriceEditor, type UsagePriceDraft } from "./UsagePriceEditor";
 
 export type { UsageSearch, UsageSearchPatch, UsageTab } from "../../lib/usageSearch";
@@ -914,6 +916,8 @@ export function UsageDashboard(props: {
   /** Saved provider filter; when omitted the dashboard keeps local state. */
   hiddenProviders?: ReadonlyArray<ProviderKind>;
   onHiddenProvidersChange?: (hiddenProviders: ReadonlyArray<ProviderKind>) => void;
+  /** Escape on the page; the route returns to the previous page. */
+  onBack?: () => void;
 }) {
   const [localSearch, setLocalSearch] = useState<UsageSearchPatch>({});
   const [localHidden, setLocalHidden] = useState<ReadonlyArray<ProviderKind>>([]);
@@ -927,6 +931,26 @@ export function UsageDashboard(props: {
   const tab = search.tab ?? props.defaults?.tab ?? "activity";
   const range = search.range ?? props.defaults?.range ?? "7d";
   const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
+  const keybindings = useServerKeybindings();
+  const handlersRef = useRef({ onSearchChange, onBack: props.onBack });
+  handlersRef.current = { onSearchChange, onBack: props.onBack };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (isUsageBackShortcut(event)) {
+        if (!handlersRef.current.onBack) return;
+        event.preventDefault();
+        handlersRef.current.onBack();
+        return;
+      }
+      const patch = resolveUsageShortcut(event, keybindings);
+      if (!patch) return;
+      event.preventDefault();
+      handlersRef.current.onSearchChange(patch);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [keybindings]);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6 sm:py-7">
