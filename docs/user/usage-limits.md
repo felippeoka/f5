@@ -11,7 +11,8 @@ The Usage page shows two things. **Activity** covers the tokens, cost and turns 
    (`usage.open` in **Settings → Keybindings**). Type `/usage-limits` in the composer for a quick
    read.
 2. Choose **Activity** or **Limits**.
-3. Pick a range (**24h**, **7d**, **30d**, **90d**) and, optionally, a provider or project.
+3. Pick a range (**24h**, **7d**, **30d**, **90d**) and, optionally, a project. The provider menu
+   next to the tabs limits both tabs to the providers you check, and F5 remembers that choice.
 4. Switch the chart between tokens, cost and turns.
 
 The URL keeps the tab, range and filters, so you can bookmark a view or share it.
@@ -69,9 +70,10 @@ separately; using a reset credit asks you to confirm first.
 <details>
 <summary>Details and limits</summary>
 
-**URL parameters.** `tab` (`activity`, `limits`), `range` (`24h`, `7d`, `30d`, `90d`), `provider`,
+**URL parameters.** `tab` (`activity`, `limits`), `range` (`24h`, `7d`, `30d`, `90d`),
 `projectId` and `metric` (`tokens`, `cost`, `turns`). F5 remembers the last tab and range. The
-default `tokens` metric is left out of the URL.
+default `tokens` metric is left out of the URL. The provider filter is a saved setting, not a URL
+parameter; F5 drops the older `provider` parameter.
 
 **Refresh timing**
 

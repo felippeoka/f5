@@ -3,6 +3,7 @@ import "../../index.css";
 import {
   ProjectId,
   ProviderInstanceId,
+  type ProviderKind,
   ThreadId,
   type UsageAccounts,
   type UsageBucket,
@@ -1103,6 +1104,50 @@ describe("query-connected usage dashboard", () => {
     }
   });
 
+  it("hides filtered providers from history and account cards on both tabs", async () => {
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue(accounts());
+    const onHiddenProvidersChange = vi.fn();
+    const queryClient = client();
+    const view = (tab: "activity" | "limits", hiddenProviders: ReadonlyArray<ProviderKind>) => (
+      <QueryClientProvider client={queryClient}>
+        <UsageDashboard
+          search={{ tab }}
+          onSearchChange={() => {}}
+          hiddenProviders={hiddenProviders}
+          onHiddenProvidersChange={onHiddenProvidersChange}
+        />
+      </QueryClientProvider>
+    );
+    const screen = await render(view("activity", []));
+    const accountCard = () => page.getByRole("heading", { name: "Codex — default configuration" });
+    try {
+      await expect.element(accountCard()).toBeVisible();
+      await page.getByRole("button", { name: "Usage providers" }).click();
+      await page.getByRole("menuitemcheckbox", { name: "Codex" }).click();
+      expect(onHiddenProvidersChange).toHaveBeenLastCalledWith(["codex"]);
+
+      await screen.rerender(view("activity", ["codex", "cursor"]));
+      await vi.waitFor(() =>
+        expect(api.getSummary).toHaveBeenLastCalledWith(
+          expect.objectContaining({ hiddenProviders: ["codex", "cursor"] }),
+        ),
+      );
+      await expect
+        .element(page.getByRole("button", { name: "Usage providers" }))
+        .toHaveTextContent(/providers/);
+      await expect.element(accountCard()).not.toBeInTheDocument();
+      await screen.rerender(view("limits", ["codex"]));
+      await expect.element(page.getByRole("button", { name: "Refresh limits" })).toBeVisible();
+      await expect.element(accountCard()).not.toBeInTheDocument();
+      await screen.rerender(view("limits", []));
+      await expect.element(accountCard()).toBeVisible();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
   it("preserves other params when one control changes and falls back to saved defaults", async () => {
     api.getSummary.mockResolvedValue(summary());
     api.getAccounts.mockResolvedValue(accounts());
@@ -1111,7 +1156,7 @@ describe("query-connected usage dashboard", () => {
     const screen = await renderDashboard(
       queryClient,
       <UsageDashboard
-        search={{ provider: "codex" }}
+        search={{ metric: "cost" }}
         defaults={{ tab: "activity", range: "30d" }}
         onSearchChange={onSearchChange}
       />,
@@ -1120,9 +1165,7 @@ describe("query-connected usage dashboard", () => {
       await expect
         .element(page.getByRole("button", { name: "30 days" }))
         .toHaveAttribute("aria-pressed", "true");
-      expect(api.getSummary).toHaveBeenCalledWith(
-        expect.objectContaining({ range: "30d", provider: "codex" }),
-      );
+      expect(api.getSummary).toHaveBeenCalledWith(expect.objectContaining({ range: "30d" }));
       await page.getByRole("button", { name: "7 days" }).click();
       expect(onSearchChange).toHaveBeenCalledWith({ range: "7d" });
       await page.getByRole("tab", { name: "Limits" }).click();

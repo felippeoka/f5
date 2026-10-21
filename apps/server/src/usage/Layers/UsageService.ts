@@ -171,6 +171,7 @@ const make = Effect.gen(function* () {
       const priceOverrides = settings.usagePriceOverrides;
       const filters = {
         ...(request.provider ? { provider: request.provider } : {}),
+        ...(request.hiddenProviders?.length ? { hiddenProviders: request.hiddenProviders } : {}),
         ...(request.projectId ? { projectId: request.projectId } : {}),
       };
       // SQLite executes synchronously, so these reads run sequentially.
@@ -180,6 +181,7 @@ const make = Effect.gen(function* () {
         startedAt: plan.startedAt,
         endedAt: plan.endedAt,
         ...(request.provider ? { provider: request.provider } : {}),
+        ...(request.hiddenProviders?.length ? { hiddenProviders: request.hiddenProviders } : {}),
       });
       const selectedProjectId = request.projectId ?? null;
       const aggregation = aggregateUsageScope({

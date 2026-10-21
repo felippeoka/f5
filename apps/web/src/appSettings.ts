@@ -349,6 +349,11 @@ export const AppSettingsSchema = Schema.Struct({
     Schema.withConstructorDefault(() => Option.some("7d" as const)),
     Schema.withDecodingDefault(() => "7d" as const),
   ),
+  // Stored as the hidden set so providers added later show by default.
+  usageHiddenProviders: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+    Schema.withDecodingDefault(() => []),
+  ),
   composerCollapseOnScroll: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(true)),
     Schema.withDecodingDefault(() => true),

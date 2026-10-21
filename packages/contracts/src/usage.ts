@@ -56,6 +56,8 @@ export type UsageTurnFact = typeof UsageTurnFact.Type;
 export const UsageGetSummaryInput = Schema.Struct({
   range: UsageRange,
   provider: Schema.optional(ProviderKind),
+  /** Providers left out of every total; the Usage page's provider filter. */
+  hiddenProviders: Schema.optional(Schema.Array(ProviderKind).check(Schema.isMaxLength(32))),
   projectId: Schema.optional(ProjectId),
   timeZone: TrimmedNonEmptyString,
 });
