@@ -4546,6 +4546,31 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         yield* updateResumeCursor(context);
       });
 
+    /**
+     * Fast mode can change after init (an availability check settles, usage credits
+     * get turned on), and every result frame reports it. Absent reason means nothing blocks it.
+     */
+    const refreshFastModeFromResult = (
+      context: ClaudeSessionContext,
+      message: Extract<SDKMessage, { type: "result" }>,
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const state = message.fast_mode_state;
+        if (typeof state !== "string") return;
+        const reason = message.fast_mode_disabled_reason;
+        if (
+          context.configuredBase.fast_mode_state === state &&
+          context.configuredBase.fast_mode_disabled_reason === reason
+        )
+          return;
+        const { fast_mode_disabled_reason: _previousReason, ...rest } = context.configuredBase;
+        yield* emitSessionConfigured(context, {
+          ...rest,
+          fast_mode_state: state,
+          ...(reason ? { fast_mode_disabled_reason: reason } : {}),
+        });
+      });
+
     const handleResultMessage = (
       context: ClaudeSessionContext,
       message: SDKMessage,
@@ -4555,6 +4580,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           return;
         }
         if (context.lifecycle.seenResults.has(message.uuid)) return;
+        yield* refreshFastModeFromResult(context, message);
         const ownedUuids = context.turnState?.userMessageUuids;
         const resultUuids =
           message.user_message_uuids ??
@@ -7461,6 +7487,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           ...(computerServer?.dispose ? { computerDispose: computerServer.dispose } : {}),
           ...(computerServer?.endTurn ? { computerEndTurn: computerServer.endTurn } : {}),
           startInput: input,
+          requestedRuntime: {
+            model: input.model,
+            effort: input.modelOptions?.claudeAgent?.effort,
+            thinking: input.modelOptions?.claudeAgent?.thinking,
+            // What F5 applied, which may come from modelSelection rather than modelOptions.
+            fastMode,
+          },
           nativeCompactionEnabled: providerOptions?.nativeCompaction !== false,
           ...(existingResumeSessionId && nativeResumeMetadata.providerTitle
             ? { lastProviderTitle: nativeResumeMetadata.providerTitle }
@@ -7717,6 +7750,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           yield* ensureLive;
         }
 
+        // A turn without model options keeps the session's applied fast mode.
+        let appliedFastMode = context.requestedRuntime?.fastMode;
         if (input.model || input.modelSelection || input.modelOptions) {
           const runtimeModelSelection = resolveClaudeRuntimeModelSelection({
             providerInstanceId: context.providerInstanceId,
@@ -7769,6 +7804,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               catch: (cause) => toRequestError(input.threadId, "turn/applyFlagSettings", cause),
             });
             yield* ensureLive;
+            appliedFastMode = runtimeTraits.fastMode;
             context.session = {
               ...context.session,
               model: runtimeModelSelection.baseModel,
@@ -7839,6 +7875,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         context.requestedRuntime = {
           model: input.model ?? context.startInput.model,
           ...input.modelOptions?.claudeAgent,
+          ...(appliedFastMode !== undefined ? { fastMode: appliedFastMode } : {}),
         };
         const turnId = TurnId.makeUnsafe(yield* Random.nextUUIDv4);
         const turnState: ClaudeTurnState = {

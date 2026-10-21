@@ -2954,6 +2954,76 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "reports a fast mode refusal that settles after init for a modelSelection request",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const events: Array<ProviderRuntimeEvent> = [];
+        const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => events.push(event)),
+        ).pipe(Effect.forkChild);
+        const sessionId = "550e8400-e29b-41d4-a716-446655440000";
+        // Fast mode arrives only through modelSelection, never through modelOptions.
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            "claude-opus-5-5",
+            [{ id: "fastMode", value: true }],
+          ),
+          runtimeMode: "full-access",
+        });
+        // A turn without model options keeps the fast mode the session applied.
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "go", attachments: [] });
+        harness.query.emit({
+          type: "system",
+          subtype: "init",
+          session_id: sessionId,
+          uuid: "fast-mode-init",
+          model: "claude-opus-5-5",
+          fast_mode_state: "off",
+          fast_mode_disabled_reason: "pending",
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          session_id: sessionId,
+          uuid: "fast-mode-result",
+          result: "done",
+          total_cost_usd: 0,
+          modelUsage: {},
+          stop_reason: "end_turn",
+          fast_mode_state: "off",
+          fast_mode_disabled_reason: "extra_usage_disabled",
+        } as unknown as SDKMessage);
+        yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+        yield* Fiber.interrupt(eventFiber);
+
+        const configs = events.flatMap((event) =>
+          event.type === "session.configured" ? [event.payload.config] : [],
+        );
+        assert.equal(
+          configs.some((config) => config.fast_mode_disabled_reason === "pending"),
+          true,
+        );
+        const latest = configs.at(-1);
+        assert.equal(latest?.fast_mode_disabled_reason, "extra_usage_disabled");
+        assert.deepEqual(latest?.runtimeInfo, {
+          requested: { fastMode: "on" },
+          effective: { model: "claude-opus-5-5", fastMode: "off" },
+          fallback: "fastMode: on → off (usage credits not enabled)",
+        });
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("maps legacy maxThinkingTokens to adaptive thinking on adaptive models", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
