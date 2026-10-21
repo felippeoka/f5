@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DEFAULT_UNIFIED_SETTINGS, ProjectId } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS, ProjectId, type ScheduledTask } from "@t3tools/contracts";
 import { ScheduledTaskDialog } from "./ScheduledTaskDialog";
 import { createTestServerProvider } from "../../testServerProvider";
 import { useStore } from "../../store";
@@ -11,10 +11,10 @@ import { TooltipProvider } from "../ui/tooltip";
 import { serverConfigQueryOptions } from "../../lib/serverReactQuery";
 import { gitBranchesQueryOptions } from "../../lib/gitReactQuery";
 import { projectSettingsQueryOptions } from "../../lib/projectSettingsQuery";
-const mocks = vi.hoisted(() => ({ preview: vi.fn(), create: vi.fn() }));
+const mocks = vi.hoisted(() => ({ preview: vi.fn(), create: vi.fn(), update: vi.fn() }));
 vi.mock("../../nativeApi", () => ({
   ensureNativeApi: () => ({
-    scheduledTasks: { previewSchedule: mocks.preview, create: mocks.create },
+    scheduledTasks: { previewSchedule: mocks.preview, create: mocks.create, update: mocks.update },
   }),
 }));
 vi.mock("../../hooks/useSettings", () => ({
@@ -34,7 +34,7 @@ const preview = {
   nextFireTimes: ["2099-01-01T09:00:00Z"],
   oneShotAt: null,
 };
-async function setup() {
+async function setup(task?: ScheduledTask) {
   const id = ProjectId.makeUnsafe("project");
   useStore.setState({
     projects: [
@@ -73,7 +73,12 @@ async function setup() {
   active = await render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <ScheduledTaskDialog projectId={id} onClose={() => {}} onSaved={() => {}} />
+        <ScheduledTaskDialog
+          projectId={id}
+          {...(task ? { task } : {})}
+          onClose={() => {}}
+          onSaved={() => {}}
+        />
       </TooltipProvider>
     </QueryClientProvider>,
   );
@@ -116,4 +121,52 @@ it("ignores a conversion response after its input changes", async () => {
   resolve(preview);
   await expect.element(page.getByRole("button", { name: "Save task" })).toBeDisabled();
   await expect.element(page.getByRole("button", { name: "Preview schedule" })).toBeEnabled();
+});
+
+it("saves metadata on an expired one-shot without changing or reconverting its target", async () => {
+  const task = {
+    id: "expired",
+    projectId: "project",
+    name: "Expired",
+    prompt: "Check",
+    modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" },
+    runtimeMode: "approval-required",
+    workspace: { kind: "projectRoot" },
+    cron: "0 0 15 1 1 * 2020",
+    timezone: "UTC",
+    scheduleSource: "once",
+    maxRuns: 1,
+    oneShotAt: "2020-01-01T15:00:00.000Z",
+    notify: "all",
+    enabled: false,
+    version: 1,
+    createdBy: "user",
+    authority: { kind: "user" },
+    createdAt: "2020-01-01T00:00:00Z",
+    updatedAt: "2020-01-01T00:00:00Z",
+    nextRunAt: null,
+    lastRunAt: null,
+    runsConsumed: 1,
+  } as ScheduledTask;
+  mocks.preview.mockResolvedValue({
+    ...preview,
+    cron: task.cron,
+    nextFireTimes: [],
+    oneShotAt: null,
+  });
+  mocks.update.mockResolvedValue({ task, warnings: [] });
+  await setup(task);
+  await page.getByRole("textbox", { name: "Task name" }).fill("Renamed");
+  await page.getByRole("button", { name: "Preview schedule" }).click();
+  await page.getByRole("button", { name: "Save task" }).click();
+  expect(mocks.update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      configuration: expect.objectContaining({
+        name: "Renamed",
+        oneShotAt: task.oneShotAt,
+        maxRuns: 1,
+        enabled: false,
+      }),
+    }),
+  );
 });

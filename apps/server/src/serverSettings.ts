@@ -1,3 +1,4 @@
+import { AGENT_BRIDGE_ACTIVATION_VERSION } from "@t3tools/contracts";
 import { validateManagedHome } from "./profiles/providerIsolation";
 import { assertAccountEnvironmentOverrides } from "./providerProcessEnv";
 /**
@@ -146,6 +147,21 @@ export interface ServerSettingsShape {
   readonly subscribeChanges: Effect.Effect<Stream.Stream<ServerSettings>, never, Scope.Scope>;
 }
 
+const withBridgeActivation = (
+  next: ServerSettings,
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+): ServerSettings => ({
+  ...next,
+  agentBridge: {
+    ...next.agentBridge,
+    activationVersion:
+      patch.agentBridge?.enabled === true
+        ? AGENT_BRIDGE_ACTIVATION_VERSION
+        : current.agentBridge.activationVersion,
+  },
+});
+
 export class ServerSettingsService extends ServiceMap.Service<
   ServerSettingsService,
   ServerSettingsShape
@@ -184,7 +200,11 @@ export class ServerSettingsService extends ServiceMap.Service<
             Ref.get(currentSettingsRef).pipe(
               Effect.flatMap((currentSettings) =>
                 Schema.decodeEffect(ServerSettings)(
-                  applyServerSettingsPatch(currentSettings, patch),
+                  withBridgeActivation(
+                    applyServerSettingsPatch(currentSettings, patch),
+                    currentSettings,
+                    patch,
+                  ),
                 ).pipe(
                   Effect.mapError(
                     (cause) =>
@@ -672,7 +692,7 @@ const makeServerSettings = Effect.gen(function* () {
             applyServerSettingsPatch(current, patch),
           );
           const next = yield* Schema.decodeEffect(ServerSettings)({
-            ...prepared.settings,
+            ...withBridgeActivation(prepared.settings, current, patch),
             scheduledTasks: {
               ...prepared.settings.scheduledTasks,
               ...(prepared.settings.scheduledTasks.enabled !== current.scheduledTasks.enabled

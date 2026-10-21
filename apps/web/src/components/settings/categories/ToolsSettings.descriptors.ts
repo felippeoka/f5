@@ -2,6 +2,15 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const TOOLS_SETTINGS_DESCRIPTORS = [
   {
+    id: "tools.agent-bridge",
+    category: "tools",
+    label: "Agent Bridge",
+    description: "Connect a local MCP client and explicitly grant scheduled task access.",
+    keywords: ["schedules", "MCP", "local", "agent", "permissions"],
+    targetSelector: '[data-settings-search-target="tools.agent-bridge"]',
+    scope: "global",
+  },
+  {
     id: "tools.mcp",
     category: "tools",
     label: "MCP servers",

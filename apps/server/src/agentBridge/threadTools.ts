@@ -331,6 +331,59 @@ const writes = {
 
 // ── tools ─────────────────────────────────────────────────────────────
 
+export const resolveBridgeProvider = (
+  providers: ReadonlyArray<ServerProvider>,
+  settings: ServerSettings,
+  requested: { readonly instanceId?: string; readonly model?: string },
+): Effect.Effect<{ provider: ServerProvider; model: string }, AgentBridgeToolError> =>
+  Effect.gen(function* () {
+    const usable = providers.filter(isProviderUsable);
+    const textDefault = settings.textGenerationModelSelection;
+    let provider: ServerProvider | undefined;
+    if (requested.instanceId !== undefined) {
+      const requestedProvider = providers.find(
+        (entry) => entry.enabled && entry.instanceId === requested.instanceId,
+      );
+      if (!requestedProvider) return yield* toolError("Provider not found or not enabled.");
+      if (!isProviderUsable(requestedProvider))
+        return yield* toolError(
+          `${providerLabel(requestedProvider)} is not ready in F5 (not installed, not signed in, or failing its health check).`,
+        );
+      provider = requestedProvider;
+      if (!supportsSupervisedTurns(provider.driver))
+        return yield* toolError(
+          `${providerLabel(provider)} cannot run supervised turns, so the Agent Bridge cannot use it.`,
+        );
+    } else {
+      provider =
+        usable.find(
+          (entry) =>
+            entry.instanceId === textDefault.instanceId && supportsSupervisedTurns(entry.driver),
+        ) ?? usable.find((entry) => supportsSupervisedTurns(entry.driver));
+      if (!provider) return yield* toolError("No ready provider in F5 supports supervised turns.");
+    }
+    if (requested.model !== undefined) {
+      if (
+        provider.models.length > 0 &&
+        !provider.models.some((model) => model.slug === requested.model && isListedModel(model))
+      )
+        return yield* toolError(`Unknown model for ${providerLabel(provider)}.`);
+      return { provider, model: requested.model };
+    }
+    // The text-generation setting picks the provider only: its model is the
+    // small one F5 uses for titles and commit messages, not for coding turns.
+    const driverDefault = isKnownProviderKind(provider.driver)
+      ? DEFAULT_MODEL_BY_PROVIDER[provider.driver as ProviderKind]
+      : undefined;
+    const model =
+      pickPreferredModel(provider.models, driverDefault ? [driverDefault] : [])?.slug ??
+      (provider.models.length === 0 ? driverDefault : undefined);
+    if (!model) return yield* toolError(`${providerLabel(provider)} reports no models.`);
+    return { provider, model };
+  });
+
+export const decodeAgentBridgeArgs = decodeArgs;
+
 export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridgeToolDefinition> {
   const { host, store, limiters } = deps;
   const mintId = deps.mintId ?? (() => crypto.randomUUID());
@@ -594,58 +647,6 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
           ),
         ),
       );
-    });
-
-  const resolveProvider = (
-    providers: ReadonlyArray<ServerProvider>,
-    settings: ServerSettings,
-    requested: { readonly instanceId?: string; readonly model?: string },
-  ): Effect.Effect<{ provider: ServerProvider; model: string }, AgentBridgeToolError> =>
-    Effect.gen(function* () {
-      const usable = providers.filter(isProviderUsable);
-      const textDefault = settings.textGenerationModelSelection;
-      let provider: ServerProvider | undefined;
-      if (requested.instanceId !== undefined) {
-        const requestedProvider = providers.find(
-          (entry) => entry.enabled && entry.instanceId === requested.instanceId,
-        );
-        if (!requestedProvider) return yield* toolError("Provider not found or not enabled.");
-        if (!isProviderUsable(requestedProvider))
-          return yield* toolError(
-            `${providerLabel(requestedProvider)} is not ready in F5 (not installed, not signed in, or failing its health check).`,
-          );
-        provider = requestedProvider;
-        if (!supportsSupervisedTurns(provider.driver))
-          return yield* toolError(
-            `${providerLabel(provider)} cannot run supervised turns, so the Agent Bridge cannot use it.`,
-          );
-      } else {
-        provider =
-          usable.find(
-            (entry) =>
-              entry.instanceId === textDefault.instanceId && supportsSupervisedTurns(entry.driver),
-          ) ?? usable.find((entry) => supportsSupervisedTurns(entry.driver));
-        if (!provider)
-          return yield* toolError("No ready provider in F5 supports supervised turns.");
-      }
-      if (requested.model !== undefined) {
-        if (
-          provider.models.length > 0 &&
-          !provider.models.some((model) => model.slug === requested.model && isListedModel(model))
-        )
-          return yield* toolError(`Unknown model for ${providerLabel(provider)}.`);
-        return { provider, model: requested.model };
-      }
-      // The text-generation setting picks the provider only: its model is the
-      // small one F5 uses for titles and commit messages, not for coding turns.
-      const driverDefault = isKnownProviderKind(provider.driver)
-        ? DEFAULT_MODEL_BY_PROVIDER[provider.driver as ProviderKind]
-        : undefined;
-      const model =
-        pickPreferredModel(provider.models, driverDefault ? [driverDefault] : [])?.slug ??
-        (provider.models.length === 0 ? driverDefault : undefined);
-      if (!model) return yield* toolError(`${providerLabel(provider)} reports no models.`);
-      return { provider, model };
     });
 
   /**
@@ -1087,12 +1088,16 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
               host.listProviderInstances,
               host.getSettings.pipe(hostError),
             ]);
-            const { provider, model: modelSlug } = yield* resolveProvider(providers, settings, {
-              ...(input.providerInstanceId !== undefined
-                ? { instanceId: input.providerInstanceId }
-                : {}),
-              ...(input.model !== undefined ? { model: input.model } : {}),
-            });
+            const { provider, model: modelSlug } = yield* resolveBridgeProvider(
+              providers,
+              settings,
+              {
+                ...(input.providerInstanceId !== undefined
+                  ? { instanceId: input.providerInstanceId }
+                  : {}),
+                ...(input.model !== undefined ? { model: input.model } : {}),
+              },
+            );
             const branch = yield* host.getProjectGitBranch(project.workspaceRoot);
             const useWorktree = (input.useWorktree ?? true) && branch !== null;
             const createdAt = now().toISOString();

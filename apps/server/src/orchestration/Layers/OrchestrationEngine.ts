@@ -1,3 +1,4 @@
+import { scheduledContinuationFor } from "../../scheduledTasks/continuations.ts";
 import { requireAttachmentOwner } from "../../attachmentOwnership.ts";
 import {
   WorkspaceWriteContext,
@@ -569,8 +570,26 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                         commandType: envelope.command.type,
                         detail: "The durable answer queue is unavailable.",
                       });
+                    const sourceInput = yield* sql<{
+                      turn_id: string | null;
+                    }>`SELECT json_extract(payload_json,'$.turnId') AS turn_id FROM projection_pending_user_inputs WHERE thread_id=${savedEvent.payload.threadId} AND request_id=${savedEvent.payload.requestId}`;
+                    const scheduledRun = yield* scheduledContinuationFor(
+                      savedEvent.payload.threadId,
+                      sourceInput[0]?.turn_id,
+                      "user_input",
+                    ).pipe(
+                      Effect.provideService(SqlClient.SqlClient, sql),
+                      Effect.mapError(
+                        (error) =>
+                          new OrchestrationCommandInvariantError({
+                            commandType: envelope.command.type,
+                            detail: error.message,
+                          }),
+                      ),
+                    );
                     yield* queueStore.value
                       .insertSubmission({
+                        scheduledRun,
                         submissionId: command.commandId,
                         itemId: command.commandId,
                         requestHash: canonicalRequestHash(command),

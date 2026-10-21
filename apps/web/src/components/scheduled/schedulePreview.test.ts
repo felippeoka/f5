@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { confirmedSchedule, validateScheduledDraft, type PreviewState } from "./schedulePreview";
+import {
+  isMetadataOnlyScheduleEdit,
+  confirmedSchedule,
+  validateScheduledDraft,
+  type PreviewState,
+} from "./schedulePreview";
 import type { ScheduledTaskConfiguration } from "@t3tools/contracts";
 const preview = {
   cron: "0 9 * * 1-5",
@@ -60,4 +65,26 @@ describe("schedule confirmation", () => {
         validateScheduledDraft({ ...value, ...patch } as ScheduledTaskConfiguration),
       ).toBeTruthy();
   });
+});
+
+it("allows metadata-only editing of expired schedules without changing their execution", () => {
+  const original = {
+    name: "Old",
+    prompt: "Check",
+    enabled: false,
+    cron: "0 0 15 1 1 * 2020",
+    timezone: "UTC",
+    oneShotAt: "2020-01-01T15:00:00Z",
+    maxRuns: 1,
+    workspace: { kind: "projectRoot" },
+    modelSelection: { instanceId: "codex", model: "m" },
+    runtimeMode: "approval-required",
+    notify: "all",
+    scheduleSource: "once",
+  } as ScheduledTaskConfiguration;
+  expect(
+    isMetadataOnlyScheduleEdit(original, { ...original, name: "Renamed", notify: "none" }),
+  ).toBe(true);
+  expect(isMetadataOnlyScheduleEdit(original, { ...original, prompt: "Other" })).toBe(false);
+  expect(isMetadataOnlyScheduleEdit(original, { ...original, enabled: true })).toBe(false);
 });

@@ -26,9 +26,9 @@ The server review corrections include:
 
 Two review suggestions need qualification. Removing a thread settles a provably unsent run as `failed/thread_removed`; a known active turn or uncertain provider handoff retains ownership until stopped or reconciled. Immediate release in that case would permit overlap. Notification claims already use an atomic exclusive SQL lease, so two owners cannot simultaneously claim the same unexpired notification. Phase 2 adds desktop/browser capability negotiation and presentation.
 
-## Verification and remaining delivery
+## Delivery and verification
 
-Phase 1 implements the server core, including the review corrections above. Phase 2 adds the Scheduled management route, project-scoped execution defaults, shared provider/model/options and prompt/skill controls, explicit NL confirmation, run history and origin badges. NL output is validated by the cron wrapper. Native notifications use the existing incarnation-bound Electron handshake and a leased outbox independently of renderer or computer-control permission; browser delivery falls back to in-app notices and wakes on pushes/reconnects/lease expiry. Ordinary thread notices check associated turn IDs, preserving notifications for later independent user turns. Phase 3 (Bridge restoration, grants, MCP tools) remains open.
+Phase 1 implements the server core, including the review corrections above. Phase 2 adds the Scheduled management route, project-scoped execution defaults, shared provider/model/options and prompt/skill controls, explicit NL confirmation, run history and origin badges. NL output is validated by the cron wrapper. Native notifications use the existing incarnation-bound Electron handshake and a leased outbox independently of renderer or computer-control permission; browser delivery falls back to in-app notices and wakes on pushes/reconnects/lease expiry. Ordinary thread notices check associated turn IDs, preserving notifications for later independent user turns. Phase 3 restores opt-in local MCP activation, adds explicit per-client scheduling grants, and exposes six tools through the same service. Persisted authority is rechecked before sends and continuations; revocation fences unsent work. Existing and new clients receive no implicit scheduling grant.
 
 Current verification uses Node 24:
 
@@ -38,8 +38,24 @@ Current verification uses Node 24:
 - Shared cron/slash-command coverage: 34 tests pass. Composer/queue web regressions: 81 tests pass.
 - Scheduler timing/recovery tests use Effect TestClock, an independent wall/monotonic clock, drain barriers and no real sleeps. Coverage includes forward/backward jumps, startup and running-loop transient failures, interrupted settlement, late recovery events, canceled queued delivery, capacity wakeup, one-run budgets, reserved-command replay and expired-task disablement.
 
-`bun run test:full` was attempted and stops before the exhaustive Git matrix at existing upstream-ledger process-identity failures (`ps` is denied with `EPERM`). A separate full server-unit run reports 4,814 passing tests and 23 failures in process inspection, editor discovery, storage/backup helpers and backup HTTP operations. The additional storage and representative backup/HTTP failures were reproduced on untouched `main`; prior baseline checks reproduced the process, editor and helper failures. No tests or ledger code were changed to bypass them.
+`bun run test:full` was attempted and stops before the exhaustive Git matrix at existing upstream-ledger process-identity failures (`ps` is denied with `EPERM`). A separate full server-unit run reports 4,842 passing tests and 23 failures in process inspection, editor discovery, storage/backup helpers and backup HTTP operations. The additional storage and representative backup/HTTP failures were reproduced on untouched `main`; prior baseline checks reproduced the process, editor and helper failures. No tests or ledger code were changed to bypass them.
 
-The user explicitly authorized reproduced baseline failures as an exception to the green phase-commit requirement. That exception applies only to verified baseline failures; feature regressions must still be repaired. Remaining phases will follow in separate commits before push and PR.
+The user explicitly authorized reproduced baseline failures as an exception to the green phase-commit requirement. That exception applies only to verified baseline failures; feature regressions must still be repaired. All three phases are delivered as separate commits.
 
 Phase 2 verification: the production web build passes its bundle budget; browser dialog/model/ordinary-notification tests pass (15 tests), server NL and outbox tests pass, and the desktop channel tests pass (21 tests). Workspace tests retain the explicitly allowed baseline process-identity failure. Phase 2 also adds the missing public origin type alias from Phase 1 and exposes associated turn IDs through a filtered run-history lookup for precise notification suppression.
+
+Phase 3 verification: 234 focused scheduler/Bridge/queue/orchestration tests pass, including real local MCP grant/create/run/revoke, immutable continuation settings, native user-input attention, and final-send fencing. The complete web unit suite passes 2,276 tests; focused browser settings/dialog tests pass five tests. The exhaustive real-Git matrix passes 142 tests independently of the baseline-blocked root suite. Full server unit coverage reports 4,842 passes and the same 23 baseline failures. Final formatting, lint, workspace typecheck, server build and web production build pass (the web bundle remains 40.2% below its baseline).
+
+Phase 3 also fixes earlier-phase lifecycle cases: completed turns retain unresolved input attention; user answers are durably associated and preserve execution settings and budget; known not-sent delivery failures settle after fencing; archived-thread failures retain their reason; metadata-only edits remain possible for expired one-shots.
+
+## Manual acceptance checklist
+
+- [ ] Confirm NL schedules, including first Monday and one-shot examples.
+- [ ] Run in a fresh worktree and explicitly at the project root; test project/provider skills and missing-skill warnings.
+- [ ] Respond to approval/input attention and observe settlement.
+- [ ] Restart across multiple fires; verify one catch-up, overlap/pending coalescing and capacity recovery.
+- [ ] Disable queued work and verify no send; resolve ambiguous delivery without resending.
+- [ ] Click desktop notifications with no renderer open and test browser fallback.
+- [ ] Activate local MCP, grant scheduling, create/manage a supervised task, reject unsafe mode, revoke authority.
+
+History retains terminal runs for 90 days with a 1,000-row per-task cap, delivered notifications for seven days, and undelivered terminal notifications for 30 days. Unfinished execution and unresolved evidence are retained. Deletion preserves existing threads/worktrees. Native notification delivery is bounded at-least-once; a crash between presentation and acknowledgement can repeat a notice.

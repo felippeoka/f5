@@ -270,6 +270,23 @@ for (const active of [false, true])
           expect((yield* store.run(run.id))!.run.status).toBe("needs_attention");
           expect((yield* store.run(run.id))!.owner).toBe(true);
           yield* store.sql`UPDATE projection_turns SET state='interrupted' WHERE thread_id=${current.run.threadId}`;
+          yield* projectScheduledRunEvent({
+            sequence: 100,
+            eventId: EventId.makeUnsafe("archive-settlement"),
+            aggregateKind: "thread",
+            aggregateId: current.run.threadId!,
+            occurredAt: new Date(0).toISOString(),
+            commandId: null,
+            causationEventId: null,
+            correlationId: null,
+            metadata: {},
+            type: "thread.session-set",
+            payload: {
+              threadId: current.run.threadId!,
+              settledTurnId: "active",
+              session: { status: "stopped", activeTurnId: null },
+            },
+          } as OrchestrationEvent);
           yield* service.reconcile;
         }
         expect((yield* store.run(run.id))!.run.status).toBe("failed");

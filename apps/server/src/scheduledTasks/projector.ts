@@ -28,10 +28,25 @@ export const makeScheduledRunProjector =
       if (!row || row.last_event_sequence >= event.sequence) return;
       const current = yield* store.run(row.id);
       if (!current) return;
+      if (current.canceled && current.run.reason === "thread_removed") {
+        const safe = yield* fenceScheduledRun(row.id, event.occurredAt);
+        if (safe) yield* store.transition(row.id, "failed", "thread_removed", event.occurredAt);
+        yield* sql`UPDATE scheduled_task_runs SET last_event_sequence=${event.sequence} WHERE id=${row.id}`;
+        return;
+      }
       const hasContinuation = (turnId: string) =>
         sql`SELECT submission_id FROM scheduled_run_submissions WHERE run_id=${row.id} AND parent_submission_id IN(SELECT submission_id FROM scheduled_run_submissions WHERE run_id=${row.id} AND turn_id=${turnId}) AND recovery_decision='continue'`.pipe(
           Effect.map((rows) => rows.length > 0),
         );
+      const pendingAttention = (turnId: string) =>
+        Effect.gen(function* () {
+          const approvals =
+            yield* sql`SELECT request_id FROM projection_pending_approvals WHERE thread_id=${event.aggregateId} AND status='pending' AND (turn_id=${turnId} OR turn_id IS NULL) LIMIT 1`;
+          if (approvals.length) return "approval" as const;
+          const inputs =
+            yield* sql`SELECT request_id FROM projection_pending_user_inputs WHERE thread_id=${event.aggregateId} AND resolution IS NULL AND (json_extract(payload_json,'$.turnId')=${turnId} OR json_extract(payload_json,'$.turnId') IS NULL) LIMIT 1`;
+          return inputs.length ? ("user_input" as const) : null;
+        });
       let status: ScheduledTaskRun["status"] | null = null;
       let reason: ScheduledTaskRun["reason"] = null;
       switch (event.type) {
@@ -54,7 +69,8 @@ export const makeScheduledRunProjector =
             if (associated.length) {
               yield* sql`UPDATE scheduled_task_runs SET turn_id=${session.activeTurnId} WHERE id=${row.id}`;
               yield* sql`UPDATE scheduled_run_submissions SET turn_id=${session.activeTurnId} WHERE run_id=${row.id} AND message_id=${turns[0]?.pending_message_id ?? null}`;
-              status = "running";
+              reason = yield* pendingAttention(session.activeTurnId);
+              status = reason ? "needs_attention" : "running";
             }
           } else if (
             event.payload.settledTurnId &&
@@ -89,8 +105,10 @@ export const makeScheduledRunProjector =
             current.run.reason === "recovery_pending"
           )
             break;
-          if (outcome?.state === "completed" && outcome.processing_quiesced_at)
-            status = "succeeded";
+          if (outcome?.state === "completed" && outcome.processing_quiesced_at) {
+            reason = yield* pendingAttention(event.payload.turnId);
+            status = reason ? "needs_attention" : "succeeded";
+          }
           if (outcome?.state === "error") {
             status = "failed";
             reason = "delivery_failed";
@@ -99,6 +117,25 @@ export const makeScheduledRunProjector =
             status = "needs_attention";
             reason = "interrupted";
           }
+          break;
+        }
+        case "thread.user-input-resolved": {
+          if (
+            !current.turnId ||
+            current.run.reason !== "user_input" ||
+            (yield* hasContinuation(current.turnId))
+          )
+            break;
+          reason = yield* pendingAttention(current.turnId);
+          const outcome = (yield* sql<{
+            state: string;
+            processing_quiesced_at: string | null;
+          }>`SELECT state,processing_quiesced_at FROM projection_turns WHERE thread_id=${event.aggregateId} AND turn_id=${current.turnId}`)[0];
+          status = reason
+            ? "needs_attention"
+            : outcome?.state === "completed" && outcome.processing_quiesced_at
+              ? "succeeded"
+              : "running";
           break;
         }
         case "thread.activity-appended": {
@@ -114,11 +151,8 @@ export const makeScheduledRunProjector =
             reason = "user_input";
           }
           if (activity.kind === "approval.resolved" || activity.kind === "user-input.resolved") {
-            const approvals =
-              yield* sql`SELECT request_id FROM projection_pending_approvals WHERE thread_id=${event.aggregateId} AND status='pending'`;
-            const inputs =
-              yield* sql`SELECT request_id FROM projection_pending_user_inputs WHERE thread_id=${event.aggregateId} AND resolution IS NULL`;
-            if (!approvals.length && !inputs.length) status = "running";
+            reason = yield* pendingAttention(current.turnId);
+            status = reason ? "needs_attention" : "running";
           }
           break;
         }

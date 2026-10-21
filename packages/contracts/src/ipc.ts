@@ -1044,6 +1044,9 @@ export interface NativeApi {
   };
   agentBridge: {
     getState: () => Promise<AgentBridgeState>;
+    setSchedulingGrant: (
+      input: import("./agentBridge").AgentBridgeSchedulingGrantInput,
+    ) => Promise<void>;
     /** Invalidation only: refetch state when it fires. */
     onStateChanged: (callback: (payload: AgentBridgeStateChanged) => void) => () => void;
     getTasks: (input: AgentBridgeGetTasksInput) => Promise<AgentBridgeGetTasksResult>;

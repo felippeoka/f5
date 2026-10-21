@@ -870,6 +870,8 @@ export function createWsNativeApi(): NativeApi {
     },
     agentBridge: {
       getState: () => transport.request(AGENT_BRIDGE_WS_METHODS.getState, {}),
+      setSchedulingGrant: (input) =>
+        transport.request(AGENT_BRIDGE_WS_METHODS.setSchedulingGrant, input),
       onStateChanged: (callback) => {
         agentBridgeStateChangedListeners.add(callback);
         return () => {

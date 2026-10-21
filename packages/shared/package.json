@@ -353,6 +353,10 @@
     "./cronSchedule": {
       "types": "./src/cronSchedule.ts",
       "import": "./src/cronSchedule.ts"
+    },
+    "./scheduledTasks": {
+      "types": "./src/scheduledTasks.ts",
+      "import": "./src/scheduledTasks.ts"
     }
   },
   "scripts": {

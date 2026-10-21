@@ -3201,7 +3201,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     getSettings: serverSettings.getSettings.pipe(Effect.mapError(toAgentBridgeHostError)),
     getProjectGitBranch: (cwd) =>
       git.status({ cwd }).pipe(
-        Effect.map((status) => status.branch),
+        Effect.flatMap((status) =>
+          status.branch
+            ? Effect.succeed(status.branch)
+            : git
+                .listBranches({ cwd })
+                .pipe(
+                  Effect.map((result) => result.branches.find((b) => b.isDefault)?.name ?? null),
+                ),
+        ),
         Effect.orElseSucceed(() => null),
       ),
     submitTurnSubmission: (body, options) =>
@@ -3301,6 +3309,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     yield* delivery.start;
   }
   const agentBridge = yield* makeAgentBridgeService({
+    schedules: scheduledTasks,
     host: agentBridgeHost,
     store: makeAgentBridgeStore(sql),
     tasks: makeBotTaskStore(sql),
@@ -3681,6 +3690,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* profileCall(() => accountService.status(id));
       }
 
+      case AGENT_BRIDGE_WS_METHODS.setSchedulingGrant:
+        return yield* agentBridge
+          .setSchedulingGrant(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       case AGENT_BRIDGE_WS_METHODS.getState:
         return yield* agentBridge.getState;
       case AGENT_BRIDGE_WS_METHODS.getTasks:

@@ -1,3 +1,4 @@
+import { scheduledExecutionConfiguration } from "@t3tools/shared/scheduledTasks";
 import type { SchedulePreview, ScheduledTaskConfiguration } from "@t3tools/contracts";
 export type PreviewState =
   | { kind: "unpreviewed" }
@@ -27,4 +28,16 @@ export function validateScheduledDraft(value: ScheduledTaskConfiguration): strin
   if (value.workspace.kind === "worktree" && !value.workspace.baseBranch.trim())
     return "Choose a base branch or explicitly use the project root.";
   return null;
+}
+
+export function isMetadataOnlyScheduleEdit(
+  original: ScheduledTaskConfiguration | undefined,
+  next: ScheduledTaskConfiguration,
+): boolean {
+  return (
+    !!original &&
+    original.enabled === next.enabled &&
+    JSON.stringify(scheduledExecutionConfiguration(original)) ===
+      JSON.stringify(scheduledExecutionConfiguration(next))
+  );
 }

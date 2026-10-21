@@ -45,3 +45,14 @@ export const setup = Effect.gen(function* () {
   return { store, host, settings, service, create };
 });
 export const testLayer = Layer.merge(layer, ServerSettingsService.layerTest());
+export const seedScheduledThread = (
+  store: import("./Store.ts").ScheduledTaskStoreShape,
+  task: import("@t3tools/contracts").ScheduledTask,
+  threadId: string,
+) =>
+  Effect.gen(function* () {
+    const { sql } = store;
+    const at = task.createdAt;
+    yield* sql`INSERT OR IGNORE INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES(${task.projectId},'Project','/repo','[]',${at},${at})`;
+    yield* sql`INSERT OR IGNORE INTO projection_threads(thread_id,project_id,title,model,model_selection_json,runtime_mode,created_at,last_interaction_at,updated_at) VALUES(${threadId},${task.projectId},'Scheduled',${task.modelSelection.model},${JSON.stringify(task.modelSelection)},${task.runtimeMode},${at},${at},${at})`;
+  });

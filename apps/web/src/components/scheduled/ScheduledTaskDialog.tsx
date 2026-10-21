@@ -45,7 +45,12 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
-import { confirmedSchedule, validateScheduledDraft, type PreviewState } from "./schedulePreview";
+import {
+  isMetadataOnlyScheduleEdit,
+  confirmedSchedule,
+  validateScheduledDraft,
+  type PreviewState,
+} from "./schedulePreview";
 
 export function ScheduledTaskDialog(props: {
   projectId: ProjectId;
@@ -228,9 +233,19 @@ function Editor(
         });
     }
   };
-  const candidate = confirmedSchedule(preview, key, mode === "natural_language");
+  const metadataOnly =
+    isMetadataOnlyScheduleEdit(props.task, value) &&
+    mode === "cron" &&
+    schedule === props.task?.cron;
+  const metadataPreview =
+    metadataOnly &&
+    (preview.kind === "ready" || preview.kind === "confirmed") &&
+    preview.key === key
+      ? preview.preview
+      : null;
+  const candidate = confirmedSchedule(preview, key, mode === "natural_language") ?? metadataPreview;
   const save = async () => {
-    if (!confirmedSchedule(preview, key, mode === "natural_language")) {
+    if (!confirmedSchedule(preview, key, mode === "natural_language") && !metadataPreview) {
       setError("This preview expired or changed. Preview the schedule again.");
       setPreview({ kind: "unpreviewed" });
       return;
@@ -240,9 +255,9 @@ function Editor(
       ...value,
       cron: candidate.cron,
       timezone: candidate.timezone,
-      scheduleSource: schedule,
-      oneShotAt: candidate.oneShotAt,
-      maxRuns: candidate.oneShotAt ? 1 : value.maxRuns,
+      scheduleSource: metadataOnly ? props.task!.scheduleSource : schedule,
+      oneShotAt: metadataOnly ? props.task!.oneShotAt : candidate.oneShotAt,
+      maxRuns: metadataOnly ? props.task!.maxRuns : candidate.oneShotAt ? 1 : value.maxRuns,
     };
     const problem = validateScheduledDraft(configuration);
     if (problem) {

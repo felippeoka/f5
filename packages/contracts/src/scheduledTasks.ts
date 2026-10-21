@@ -44,6 +44,9 @@ export const ScheduledTask = Schema.Struct({
   nextRunAt: Schema.NullOr(IsoDateTime),
   lastRunAt: Schema.NullOr(IsoDateTime),
   runsConsumed: Schema.Int,
+  disabledReason: Schema.optional(
+    Schema.NullOr(Schema.Literals(["authority_revoked", "project_missing"])),
+  ),
 });
 export type ScheduledTask = typeof ScheduledTask.Type;
 export const ScheduledRunStatus = Schema.Literals([

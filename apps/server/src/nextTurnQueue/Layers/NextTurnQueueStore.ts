@@ -1,5 +1,6 @@
 import {
   linkScheduledContinuation,
+  freezeScheduledContinuationCommand,
   scheduledContinuationFor,
 } from "../../scheduledTasks/continuations.ts";
 import { requireAttachmentOwner } from "../../attachmentOwnership.ts";
@@ -536,6 +537,13 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
                   "usage_limit",
                 ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
               };
+            if (input.scheduledRun) {
+              const command = yield* freezeScheduledContinuationCommand(
+                input.scheduledRun,
+                input.command,
+              ).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+              input = { ...input, command, requestHash: canonicalRequestHash(command) };
+            }
             const threadId = input.command.threadId;
             if (
               (yield* sql`SELECT 1 FROM workspace_transitions WHERE thread_id=${threadId} AND phase IN ('reserved','stopping','applying','applied','needs_recovery') LIMIT 1`)
@@ -742,10 +750,19 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
     getBySubmissionId: (submissionId) =>
       readSubmission(submissionId).pipe(Effect.mapError(normalizeError)),
 
-    insertSubmission: (input) =>
+    insertSubmission: (submission) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
+            const frozen = submission.scheduledRun
+              ? yield* freezeScheduledContinuationCommand(
+                  submission.scheduledRun,
+                  submission.command,
+                ).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+              : null;
+            const input = frozen
+              ? { ...submission, command: frozen, requestHash: canonicalRequestHash(frozen) }
+              : submission;
             const existing = yield* readSubmission(input.submissionId);
             if (existing) {
               if (existing.requestHash !== input.requestHash) {

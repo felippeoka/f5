@@ -1356,7 +1356,15 @@ const make = Effect.gen(function* () {
 
     yield* requireDeliverableThread(input.threadId);
     if (Option.isSome(sqlOption))
-      yield* assertScheduledDeliveryAllowed(input.deliveryId).pipe(
+      yield* assertScheduledDeliveryAllowed(input.deliveryId, {
+        instanceId:
+          activeSession?.providerInstanceId ??
+          input.modelSelection?.instanceId ??
+          persistedBinding?.providerInstanceId ??
+          defaultInstanceForProvider(recoveryProvider),
+        model: modelForTurn ?? activeSession?.model ?? input.modelSelection?.model ?? thread.model,
+        modelSelection: input.modelSelection,
+      }).pipe(
         Effect.provideService(SqlClient.SqlClient, sqlOption.value),
         Effect.provideService(ServerSettingsService, serverSettings),
       );

@@ -1,3 +1,5 @@
+import { scheduledExecutionConfiguration } from "@t3tools/shared/scheduledTasks";
+import { scheduleAuthorityCurrent } from "./authority.ts";
 import { toTurnSubmissionError } from "../TurnSubmissionError.ts";
 import { encodeScheduledRunCursor } from "./historyCursor.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -55,16 +57,7 @@ export type ScheduleActor = ScheduleAuthority & {
 export const userScheduleActor: ScheduleActor = { kind: "user" };
 const MAX_REQUEST_AGE = 86_400_000;
 const executionConfigurationHash = (value: ScheduledTaskConfiguration) =>
-  canonicalJsonHash({
-    prompt: value.prompt,
-    modelSelection: value.modelSelection,
-    runtimeMode: value.runtimeMode,
-    workspace: value.workspace,
-    cron: value.cron,
-    timezone: value.timezone,
-    maxRuns: value.maxRuns,
-    oneShotAt: value.oneShotAt,
-  });
+  canonicalJsonHash(scheduledExecutionConfiguration(value));
 export const makeScheduledTaskService = (deps: {
   store: ScheduledTaskStoreShape;
   host: AgentBridgeHostShape;
@@ -113,6 +106,15 @@ export const makeScheduledTaskService = (deps: {
     const checkActor = (actor: ScheduleActor, task: ScheduledTask) =>
       Effect.gen(function* () {
         if (actor.kind === "user") return;
+        if (
+          !(yield* scheduleAuthorityCurrent(
+            actor,
+            task.projectId,
+            yield* settings.getSettings,
+            sql,
+          ))
+        )
+          return yield* scheduleError("forbidden", "Scheduling permission is no longer valid.");
         if (task.runtimeMode !== "approval-required")
           return yield* scheduleError(
             "forbidden",
@@ -124,6 +126,8 @@ export const makeScheduledTaskService = (deps: {
     const validate = (configuration: ScheduledTaskConfiguration, at: string) =>
       Effect.try({
         try: () => {
+          if (!configuration.name.trim() || !configuration.prompt.trim())
+            throw new Error("Task name and prompt must not be empty.");
           if (configuration.prompt.length > 32768 || configuration.name.length > 200)
             throw new Error("Task name or prompt is too long.");
           if (/^\s*\/(?:model|plan|default)(?:\s|$)/i.test(configuration.prompt))
@@ -164,6 +168,11 @@ export const makeScheduledTaskService = (deps: {
       actor: ScheduleActor,
     ) =>
       Effect.gen(function* () {
+        if (
+          actor.kind === "agent" &&
+          !(yield* scheduleAuthorityCurrent(actor, projectId, yield* settings.getSettings, sql))
+        )
+          return yield* scheduleError("forbidden", "An active scheduling grant is required.");
         const snapshot = yield* host.readSnapshot.pipe(
           Effect.mapError(() => scheduleError("not_found", "Workspace unavailable.")),
         );
@@ -262,6 +271,17 @@ export const makeScheduledTaskService = (deps: {
       Effect.gen(function* () {
         const at = yield* now;
         yield* validateAge(input.requestedAt, at);
+        if (
+          actor.kind === "agent" &&
+          (!actor.visibleProjectIds?.has(input.projectId) ||
+            !(yield* scheduleAuthorityCurrent(
+              actor,
+              input.projectId,
+              yield* settings.getSettings,
+              sql,
+            )))
+        )
+          return yield* scheduleError("forbidden", "An active scheduling grant is required.");
         const hash = canonicalJsonHash({ input, actor });
         const prior = yield* store.task(input.id, true);
         if (prior) {
@@ -324,16 +344,75 @@ export const makeScheduledTaskService = (deps: {
           );
         }
       });
+    const revalidateAuthorities = Effect.gen(function* () {
+      const config = yield* settings.getSettings;
+      const at = yield* now;
+      const invalidTasks = [] as ScheduledTask[];
+      for (const task of yield* store.tasks())
+        if (
+          task.authority.kind === "agent" &&
+          (task.enabled || task.disabledReason !== "authority_revoked") &&
+          !(yield* scheduleAuthorityCurrent(task.authority, task.projectId, config, sql))
+        )
+          invalidTasks.push(task);
+      for (const task of invalidTasks)
+        yield* store.transaction(
+          Effect.gen(function* () {
+            const live = yield* store.task(task.id);
+            if (
+              !live ||
+              live.task.version !== task.version ||
+              (!live.task.enabled && live.task.disabledReason === "authority_revoked")
+            )
+              return;
+            yield* store.saveTask({
+              ...live.task,
+              enabled: false,
+              nextRunAt: null,
+              disabledReason: "authority_revoked",
+              updatedAt: at,
+              version: live.task.version + 1,
+            });
+            yield* store.revision;
+          }),
+        );
+      for (const run of yield* store.active)
+        if (
+          run.snapshot.authority.kind === "agent" &&
+          !(yield* scheduleAuthorityCurrent(
+            run.snapshot.authority,
+            run.snapshot.projectId,
+            config,
+            sql,
+          ))
+        )
+          yield* store.transaction(
+            Effect.gen(function* () {
+              const safe = yield* fenceScheduledRun(run.run.id, at).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+              );
+              if (safe) yield* store.transition(run.run.id, "skipped", "authority_revoked", at);
+              else if (!run.turnId)
+                yield* store.transition(run.run.id, "needs_attention", "delivery_unknown", at);
+            }),
+          );
+      if (invalidTasks.length) yield* changed(invalidTasks.map((task) => task.id));
+    });
     const update = (input: ScheduledTaskUpdateInput, actor: ScheduleActor) =>
       Effect.gen(function* () {
         const at = yield* now;
         const previous = yield* requireTask(input.id, actor);
         yield* checkActor(actor, previous);
-        if (input.configuration.name.length > 200)
+        if (!input.configuration.name.trim() || input.configuration.name.length > 200)
           return yield* scheduleError("invalid_schedule", "Task name is too long.");
         const executionChanged =
           executionConfigurationHash(previous) !== executionConfigurationHash(input.configuration);
         const adopting = executionChanged || (!previous.enabled && input.configuration.enabled);
+        if (adopting && actor.kind === "agent" && previous.disabledReason === "authority_revoked")
+          return yield* scheduleError(
+            "forbidden",
+            "The user must adopt or re-enable this revoked schedule.",
+          );
         const config = adopting
           ? yield* validate(input.configuration, at)
           : { ...input.configuration, nextRunAt: previous.nextRunAt };
@@ -352,6 +431,7 @@ export const makeScheduledTaskService = (deps: {
             const value: ScheduledTask = {
               ...current,
               ...config,
+              ...(adopting ? { disabledReason: null } : {}),
               nextRunAt: !config.enabled
                 ? null
                 : scheduleChanged || !previous.enabled
@@ -514,6 +594,11 @@ export const makeScheduledTaskService = (deps: {
         yield* validateAge(input.requestedAt, at);
         const task = yield* requireTask(input.taskId, actor);
         yield* checkActor(actor, task);
+        if (actor.kind === "agent" && task.disabledReason === "authority_revoked")
+          return yield* scheduleError(
+            "forbidden",
+            "The user must adopt this schedule before it can run again.",
+          );
         if (!(yield* settings.getSettings).scheduledTasks.enabled)
           return yield* scheduleError("disabled", "The scheduler is disabled.");
         const hash = canonicalJsonHash({ input, actor });
@@ -706,6 +791,17 @@ export const makeScheduledTaskService = (deps: {
         )
           return null;
         const task = (yield* store.task(current.run.taskId, true))!.task;
+        if (
+          !(yield* scheduleAuthorityCurrent(
+            current.snapshot.authority,
+            current.snapshot.projectId,
+            yield* settings.getSettings,
+            sql,
+          ))
+        ) {
+          yield* revalidateAuthorities;
+          return null;
+        }
         const snapshot = yield* host.readSnapshot;
         const project = snapshot.projects.find(
           (p) => p.id === current.snapshot.projectId && p.deletedAt === null,
@@ -717,6 +813,7 @@ export const makeScheduledTaskService = (deps: {
             enabled: false,
             nextRunAt: null,
             version: task.version + 1,
+            disabledReason: "project_missing",
           });
           return null;
         }
@@ -871,6 +968,18 @@ export const makeScheduledTaskService = (deps: {
           const at = yield* now;
           const config = (yield* settings.getSettings).scheduledTasks;
           if (!config.enabled) return;
+          const frozen = (yield* store.run(claimed.run.id))!;
+          if (
+            !(yield* scheduleAuthorityCurrent(
+              frozen.snapshot.authority,
+              frozen.snapshot.projectId,
+              yield* settings.getSettings,
+              sql,
+            ))
+          ) {
+            yield* revalidateAuthorities;
+            return;
+          }
           const marked =
             yield* sql`UPDATE scheduled_task_runs SET submission_started=1,state_json=json_set(state_json,'$.startedAt',${at}) WHERE id=${claimed.run.id} AND submission_started=0 AND owns_execution=1 AND canceled=0 AND capacity=1 RETURNING id`;
           if (!marked.length) return;
@@ -985,6 +1094,28 @@ export const makeScheduledTaskService = (deps: {
             continue;
           }
           if (!current.started || !current.submissionId) continue;
+          const rejected = yield* sql<{
+            state: string;
+            error_detail: string | null;
+          }>`SELECT d.state,d.error_detail FROM scheduled_run_submissions s JOIN provider_turn_deliveries d ON d.command_id=s.submission_id WHERE s.run_id=${current.run.id} AND (d.state='abandoned' OR (d.state='rejected' AND d.certainty='not_sent' AND d.usage_limit_json IS NULL)) ORDER BY d.updated_at DESC LIMIT 1`;
+          if (rejected.length && current.run.reason !== "recovery_pending") {
+            yield* store.transaction(
+              Effect.gen(function* () {
+                const safe = yield* fenceScheduledRun(current.run.id, at).pipe(
+                  Effect.provideService(SqlClient.SqlClient, sql),
+                );
+                if (safe)
+                  yield* store.transition(
+                    current.run.id,
+                    "failed",
+                    "delivery_failed",
+                    at,
+                    rejected[0]!.error_detail,
+                  );
+              }),
+            );
+            continue;
+          }
           const receipt = yield* host.getSubmission(CommandId.makeUnsafe(current.submissionId));
           const thread = snapshot.threads.find((t) => t.id === current.run.threadId);
           if (
@@ -1123,10 +1254,12 @@ export const makeScheduledTaskService = (deps: {
       });
     const start = Effect.gen(function* () {
       yield* retryScheduledOperation(
-        reconcileFor(true).pipe(
-          Effect.andThen(evaluate(true)),
-          Effect.andThen(sql`UPDATE scheduled_control SET ready=1 WHERE id=1`),
-        ),
+        revalidateAuthorities
+          .pipe(Effect.andThen(reconcileFor(true)))
+          .pipe(
+            Effect.andThen(evaluate(true)),
+            Effect.andThen(sql`UPDATE scheduled_control SET ready=1 WHERE id=1`),
+          ),
         "scheduledTasks.start",
       );
       yield* retryScheduledOperation(
@@ -1151,7 +1284,9 @@ export const makeScheduledTaskService = (deps: {
         "scheduledTasks.queueChanges",
       ).pipe(Effect.forkIn(scope));
       yield* retryScheduledOperation(
-        settings.streamChanges.pipe(Stream.runForEach(() => signal)),
+        settings.streamChanges.pipe(
+          Stream.runForEach(() => revalidateAuthorities.pipe(Effect.andThen(signal))),
+        ),
         "scheduledTasks.settingsChanges",
       ).pipe(Effect.forkIn(scope));
       const monotonic = deps.monotonic ?? (() => performance.now());
@@ -1168,6 +1303,7 @@ export const makeScheduledTaskService = (deps: {
         lastWall = wall;
         lastMono = mono;
         yield* evaluate(drift);
+        yield* revalidateAuthorities;
         yield* reconcile;
         yield* store.prune(new Date(wall).toISOString());
         yield* signal;
@@ -1216,6 +1352,7 @@ export const makeScheduledTaskService = (deps: {
       drainDispatches,
       dispatch,
       reconcile,
+      revalidateAuthorities,
       signal,
     };
   });
