@@ -2293,3 +2293,69 @@ the line numbers of 103 earlier evidence citations. Those were remapped
 through the git diff, and none of the cited lines had itself changed. A few
 citations from earlier workstreams already pointed at closing braces before
 this batch; they are unchanged.
+
+## 15r triage log: subagents and the Agents panel
+
+All 29 open 15r records are classified: 14 ported, 7 equivalent, 7 not
+applicable and 1 deferred.
+
+Twelve records already had implementations and failing-before reproductions
+from the Agents verify-first work above. Their cited tests pass again today,
+and they are now recorded as ported. Their evidence citations were also
+rewritten. Several pointed into the middle of a test, or at a blank line,
+because the files had shifted since the citations were first recorded. The
+15t remap only carried those stale lines forward. Each now names the test
+itself.
+
+Two fixes are new in this batch:
+
+- [t3code#16752](https://github.com/pingdotgg/t3code/pull/16752): F5 has no
+  agent-facing HTML layout guide, so the `html_render` tool description now
+  says to leave html, body and the outermost element without a background,
+  and to pad and round any box that needs its own.
+- [t3code#16878](https://github.com/pingdotgg/t3code/pull/16878): F5 folds
+  only the work groups above the newest user message, so a settled turn's
+  cards already stay visible. A steer adds such a message while a foreground
+  subagent keeps working. A group with an in-progress subagent now stays open
+  until the subagent ends. The fixture fails before the change.
+
+Equivalent:
+
+- [t3code#20785](https://github.com/pingdotgg/t3code/pull/20785): the Agents
+  panel counts live durable work from every turn. Unlike upstream, it keeps
+  listing live work from a reverted turn, because that work is still running
+  and can be stopped from the panel.
+- [t3code#14540](https://github.com/pingdotgg/t3code/pull/14540) and
+  [t3code#14994](https://github.com/pingdotgg/t3code/pull/14994): a
+  subagent's model comes from its own first snapshot, which includes
+  agent-file overrides, and the correction is pushed at once. Nested Agent
+  calls inherit the model of the subagent that launched them.
+- [t3code#13056](https://github.com/pingdotgg/t3code/pull/13056): agent cards
+  show the native effort. Upstream's speed value comes from an app-owned
+  child thread, which F5 does not have.
+- [t3code#16486](https://github.com/pingdotgg/t3code/pull/16486),
+  [t3code#18778](https://github.com/pingdotgg/t3code/pull/18778) and
+  [t3code#18375](https://github.com/pingdotgg/t3code/pull/18375): a background
+  task's progress and outcome are recorded against its own turn while the
+  parent is idle, a stop waits for the confirmed outcome, and progress rows
+  never repeat the prompt.
+
+Not applicable: upstream's changes for renamed worktree branches, shared
+worktree cleanup, pending approvals and questions, and resumed follow-ups
+([t3code#20079](https://github.com/pingdotgg/t3code/pull/20079),
+[t3code#19748](https://github.com/pingdotgg/t3code/pull/19748),
+[t3code#19630](https://github.com/pingdotgg/t3code/pull/19630),
+[t3code#16634](https://github.com/pingdotgg/t3code/pull/16634),
+[t3code#17696](https://github.com/pingdotgg/t3code/pull/17696)) all concern
+delegated child threads. F5 subagents run inside the parent's session, and
+their approvals and questions are already pending requests on the parent.
+[t3code#14108](https://github.com/pingdotgg/t3code/pull/14108) changes
+orchestration-v2 adapters only, and
+[t3code#15189](https://github.com/pingdotgg/t3code/pull/15189) is mobile.
+
+Deferred: [t3code#19291](https://github.com/pingdotgg/t3code/pull/19291) is
+mostly upstream's update-all flow. The part that applies is the desktop
+backend's kill grace. F5 kills the backend 2 seconds after asking it to
+stop, while its service launcher waits 5. Raising the grace also means
+retuning the stop timeouts and the 6-second quit cap. None of that can be
+exercised here without a runnable Electron build.

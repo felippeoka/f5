@@ -439,14 +439,14 @@
     {
       "upstreamSha": "039ddf1143d7dba0e25d0b1b7c8ed0cd3e19f588",
       "subject": "fix(web): match subagent timestamp fonts to chat (#16151)",
-      "reason": "Planned: implementation and focused evidence exist for the agent duration inherits the panel text font and retains tabular numbers; a Chromium computed-font reproduction fails before the change and all twelve panel cases pass after it. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(web): match subagent timestamp fonts to chat (#16151).",
+      "reason": "Ported: the agent duration uses the panel's text font and keeps tabular numbers. A Chromium computed-font reproduction fails before the change. Upstream change: fix(web): match subagent timestamp fonts to chat (#16151)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["cba5d87c4f6ca7faebfb654c9fde6040da13500d"],
       "evidence": [
         "apps/web/src/components/AgentsPanel.browser.tsx:149",
-        "apps/web/src/components/AgentsPanelRow.tsx:404"
+        "apps/web/src/components/AgentsPanelRow.tsx:406"
       ]
     },
     {
@@ -2265,12 +2265,12 @@
     {
       "upstreamSha": "109aaae6cd251e1d3aa595624209758a164d8b33",
       "subject": "fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996)",
-      "reason": "Planned: implementation and focused evidence exist for owned native task completion cancels that child's unanswered question or approval without cancelling the parent's request; both native terminal forms have failing-before reproductions. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996).",
+      "reason": "Ported: when an owned native task finishes, its unanswered question or approval is cancelled without touching the parent's own request. Both native terminal forms (task_notification and task_updated) have failing-before reproductions. Upstream change: fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["bb7b674bb952ff31f0b029e645e8531105ef036d"],
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13587"]
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13664"]
     },
     {
       "upstreamSha": "10ac2f2ba495508a2a2fd469e67eda5df73f0df1",
@@ -2441,18 +2441,17 @@
     {
       "upstreamSha": "11ce406d2cf1581748a3eb150716071f6674ec8e",
       "subject": "fix(server): background subagents keep T3 tools after the parent turn ends (#19751)",
-      "reason": "Planned: implementation and focused evidence exist for baseline F5 thread-tool transports and runtime handlers are independent of the current parent turn; a native MCP client/server fixture preserves access on parent-idle transition, fixes transport thread ownership and verifies runtime-owner revocation. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): background subagents keep T3 tools after the parent turn ends (#19751).",
+      "reason": "Ported: F5 thread-tool transports and runtime handlers do not depend on the current parent turn. A native MCP client/server fixture keeps the tools available after the parent turn ends, binds calls to the transport's thread and revokes them when the runtime owner goes away. Upstream change: fix(server): background subagents keep T3 tools after the parent turn ends (#19751)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": [
         "42d9a5862ed8c86c61bb4f953cfa616303301162",
         "8cdb0e714830ec326bdf3cc83ec0fe23eadcfede"
       ],
       "evidence": [
-        "apps/server/src/provider/Layers/claudeThreadTools.ts:1",
-        "apps/server/src/mcp/threadToolRuntime.ts:16",
-        "apps/server/src/provider/Layers/claudeThreadTools.test.ts:1"
+        "apps/server/src/provider/Layers/claudeThreadTools.test.ts:9",
+        "apps/server/src/mcp/threadToolRuntime.ts:16"
       ]
     },
     {
@@ -2930,14 +2929,14 @@
     {
       "upstreamSha": "151c241cd2cc22c3b10ba8735e44f83fb723a511",
       "subject": "fix(client-runtime): format subagent descriptions as display names (#14999)",
-      "reason": "Planned: implementation and focused evidence exist for native agent path descriptions are formatted as display names by a shared utility; a failing-before fixture covers the visible name and preserves shell titles and provider identities. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(client-runtime): format subagent descriptions as display names (#14999).",
+      "reason": "Ported: native agent path descriptions are formatted as display names by a shared utility. A failing-before fixture covers the visible name and keeps shell titles and provider identities unchanged. Upstream change: fix(client-runtime): format subagent descriptions as display names (#14999)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["c3fd0ec72843f894b94561017dca7378d1711c7c"],
       "evidence": [
-        "packages/shared/src/subagentDisplay.test.ts:1",
-        "apps/web/src/lib/agentsModel.test.ts:459"
+        "packages/shared/src/subagentDisplay.test.ts:4",
+        "apps/web/src/lib/agentsModel.test.ts:460"
       ]
     },
     {
@@ -5295,10 +5294,17 @@
     {
       "upstreamSha": "265fb7000f84d12a44c4e87c17426e1f29e0bb36",
       "subject": "fix(server): apply confirmed Claude subagent outcomes (#18778)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): apply confirmed Claude subagent outcomes (#18778).",
+      "reason": "Equivalent: a native stop in F5 waits for the task notification that confirms the outcome, and settles the exact persisted run when the session stops. The orchestration-v2 adapter and effect worker that upstream changed do not exist in F5. Upstream change: fix(server): apply confirmed Claude subagent outcomes (#18778)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "f9dd5cbdb535d96c38fec8137275a3bfc9fc3b08",
+        "9c6934ecdb66243b8b7553f1f0c9738661316dbe"
+      ],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13165",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13960"
+      ]
     },
     {
       "upstreamSha": "266d70cc4d887b7459ec6557c430ec7bb92bd3fc",
@@ -5612,10 +5618,14 @@
     {
       "upstreamSha": "29366ea29abf4ceb41ab250d06e190a22258bd18",
       "subject": "fix(web): show subagent effort and speed in hover cards (#13056)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): show subagent effort and speed in hover cards (#13056).",
+      "reason": "Equivalent: F5 shows a native subagent's effort on its Agents panel card. Upstream's speed value comes from an app-owned child thread's model selection, which F5 does not have. Upstream change: fix(web): show subagent effort and speed in hover cards (#13056)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "equivalent",
+      "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"],
+      "evidence": [
+        "apps/web/src/components/AgentsPanelRow.tsx:294",
+        "apps/web/src/components/AgentsPanel.browser.tsx:229"
+      ]
     },
     {
       "upstreamSha": "294dd123410c77eead2810a052c31fb0cfd3e0c1",
@@ -6818,10 +6828,17 @@
     {
       "upstreamSha": "30d1010443d92d7c17f9d773639375a4c6de77bc",
       "subject": "fix(server): Claude subagent progress no longer re-stores the unchanged prompt (#18375)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude subagent progress no longer re-stores the unchanged prompt (#18375).",
+      "reason": "Equivalent: F5's progress activities carry only the bounded description, last tool and usage, never the subagent's prompt; the prompt is stored once when the background work starts. Upstream's change deduplicates prompts in orchestration-v2 subagent rows, which F5 does not have. Upstream change: fix(server): Claude subagent progress no longer re-stores the unchanged prompt (#18375)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "8168bd456ae23521e21bf68b08d0d860a6abd901",
+        "17c70b51183d091f4076b8c52d6859f8ad5eebce"
+      ],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:2182",
+        "apps/server/src/orchestration/Layers/ThreadBackgroundWork.ts:117"
+      ]
     },
     {
       "upstreamSha": "30e3649c3281fe88b3d8d125293f1bb58132a3c2",
@@ -9427,15 +9444,15 @@
     {
       "upstreamSha": "43bd6677392b80cd12742f865c277c9939239543",
       "subject": "fix(web): Claude skill calls show the skill name (#14980)",
-      "reason": "Planned: implementation and focused evidence exist for skill headings derive from complete or streamed native input and survive activity compaction; an actual Chromium timeline fixture covers available persisted input. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(web): Claude skill calls show the skill name (#14980).",
+      "reason": "Ported: skill headings come from the complete or streamed native input and survive activity compaction. A Chromium timeline fixture covers persisted input. Upstream change: fix(web): Claude skill calls show the skill name (#14980)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["5d74a6bde2b856176f0d85637995688a5832bb31"],
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13677",
-        "packages/shared/src/orchestrationActivityPayload.test.ts:1",
-        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:1"
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13755",
+        "packages/shared/src/orchestrationActivityPayload.test.ts:929",
+        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:522"
       ]
     },
     {
@@ -10444,10 +10461,15 @@
     {
       "upstreamSha": "4b063a042ec93418a196c020b852459f57e17b57",
       "subject": "fix(mcp): agent HTML pages stop painting slab backgrounds (#16752)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(mcp): agent HTML pages stop painting slab backgrounds (#16752).",
+      "reason": "Ported in F5's terms: F5 has no agent-facing HTML layout guide, so the html_render tool description now carries the rule. It asks for no background on html, body and the outermost element, and for at least 16px of padding and rounded corners on a box that needs its own background. Upstream change: fix(mcp): agent HTML pages stop painting slab backgrounds (#16752)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "ported",
+      "plannedWorkstream": "15r",
+      "f5Shas": ["b1c78672b16009a9b21cc0ec7b979c5e0615560d"],
+      "evidence": [
+        "apps/server/src/mcp/threadMcpTools.ts:160",
+        "apps/server/src/mcp/threadMcpTools.test.ts:13"
+      ]
     },
     {
       "upstreamSha": "4b26132d2c740ff344ef3fae7ae62e9765759e29",
@@ -10904,10 +10926,9 @@
     {
       "upstreamSha": "4e85a93b20c80c005f395c8cc3bc2c79e41ac175",
       "subject": "fix(server): subagents pick up their parent's renamed worktree branch (#20079)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): subagents pick up their parent's renamed worktree branch (#20079).",
+      "reason": "Not applicable: upstream moves orchestration-v2 subagent child threads onto their parent's renamed worktree branch. F5 subagents run inside the parent's provider session and cwd, with no child threads to update. Upstream change: fix(server): subagents pick up their parent's renamed worktree branch (#20079)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4e89d74436a167c01f25a6a5283638843398ea3a",
@@ -11032,10 +11053,14 @@
     {
       "upstreamSha": "4f7760e6a0037b06917adaae1b8a220e3ee6e5cc",
       "subject": "fix(server): Claude subagents show the model their agent file picks (#14994)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): Claude subagents show the model their agent file picks (#14994).",
+      "reason": "Equivalent: upstream moves an orchestration-v2 child thread to the model a Claude agent file picks. F5 has no child threads; the subagent's work entry takes the model reported by its first snapshot, which includes agent-file overrides. Upstream change: fix(server): Claude subagents show the model their agent file picks (#14994)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "equivalent",
+      "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4755",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7423"
+      ]
     },
     {
       "upstreamSha": "4f782bedaf49b914903eb08501f35c0940845c51",
@@ -14043,10 +14068,9 @@
     {
       "upstreamSha": "65731f986ba2175063b0182deb6a143f8f323b74",
       "subject": "fix(mobile): show complete subagent details (#15189)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(mobile): show complete subagent details (#15189).",
+      "reason": "Not applicable: upstream completes the mobile subagent row and sheet, and moves the web hover card's model and workspace labels into shared client-runtime code for mobile to reuse. F5 has no mobile app, and the workspace labels describe delegated child threads, which F5 does not have. Upstream change: fix(mobile): show complete subagent details (#15189)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6586a01f41bd692f02d565d38f97b52a8067317e",
@@ -15305,10 +15329,15 @@
     {
       "upstreamSha": "6ecb82dc42c4c721fd2c03c92316ee5361306cdb",
       "subject": "fix(clients): running subagent cards stay visible after their parent turn settles (#16878)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(clients): running subagent cards stay visible after their parent turn settles (#16878).",
+      "reason": "Ported in F5's terms: F5 folds only work groups above the newest user message, so the latest turn's cards already stay visible after it settles. A steer adds such a message while a foreground subagent keeps working; a group with an in-progress subagent entry now stays open until the subagent ends. The fixture fails before the change. Background agents that outlive their turn stay listed in the Agents panel. Upstream change: fix(clients): running subagent cards stay visible after their parent turn settles (#16878)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "ported",
+      "plannedWorkstream": "15r",
+      "f5Shas": ["7532d9212398154a3b444fdb22dcada43ff2a5c2"],
+      "evidence": [
+        "apps/web/src/components/chat/MessagesTimeline.tsx:4216",
+        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:3674"
+      ]
     },
     {
       "upstreamSha": "6ecc15fa25c808922a58f07377add25b55d9ac90",
@@ -15675,16 +15704,16 @@
     {
       "upstreamSha": "7111501be3e25f4a4fc18ab579377cb0d0c397b1",
       "subject": "fix(server): wake threads whose subagents' background work a restart cut (#19750)",
-      "reason": "Planned: implementation and focused evidence exist for opt-in graceful and unplanned restart recovery for an idle parent's owned background work; exact session-generation fences, a bounded persisted interruption note and terminal unavailable-work status; reproductions fail before the change. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): wake threads whose subagents' background work a restart cut (#19750).",
+      "reason": "Ported: an idle parent whose owned background work a graceful or unplanned restart cut is woken once, behind the opt-in restart-recovery setting, with exact session-generation fences, a bounded persisted interruption note and a terminal unavailable-work status. The reproductions fail before the change. Upstream change: fix(server): wake threads whose subagents' background work a restart cut (#19750)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["17ae03011e8431f201eb3220699cded2f2933f36"],
       "evidence": [
-        "apps/server/src/provider/Layers/ProviderService.test.ts:4108",
+        "apps/server/src/provider/Layers/ProviderService.test.ts:4179",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:1234",
-        "apps/server/src/orchestration/Layers/TurnLifecycle.test.ts:364",
-        "apps/server/src/persistence/Migrations/130_RestartBackgroundWork.test.ts:1"
+        "apps/server/src/orchestration/Layers/TurnLifecycle.test.ts:365",
+        "apps/server/src/persistence/Migrations/130_RestartBackgroundWork.test.ts:8"
       ]
     },
     {
@@ -17088,10 +17117,18 @@
     {
       "upstreamSha": "7ab800a43c770b2c48a2d9306c89b6177f61ad4a",
       "subject": "fix(server): Claude subagents with their own model no longer show the parent's model (#14540)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): Claude subagents with their own model no longer show the parent's model (#14540).",
+      "reason": "Equivalent: F5 refines a subagent's model from its own assistant snapshot and pushes the correction at once, a nested Agent call inherits the reported model of the subagent that launched it, and an early snapshot model is kept until the task registers. Upstream change: fix(server): Claude subagents with their own model no longer show the parent's model (#14540)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "d8606c47cb81de499bdea2c5ebf6f6120a64c885",
+        "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"
+      ],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4755",
+        "apps/server/src/provider/claudeSubagentSelection.test.ts:25",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7359"
+      ]
     },
     {
       "upstreamSha": "7ac5ec6b15593f5b682fe73b483bc8e24de76665",
@@ -17908,15 +17945,15 @@
     {
       "upstreamSha": "818e2be75e1a68bbcac122eac1b6fb815ccf4b73",
       "subject": "fix(server): route Copilot ACP subagent output into subagent threads (#17714)",
-      "reason": "Planned: implementation and focused evidence exist for the explicit local Copilot ACP runtime requests bounded raw attribution and filters private child text, reasoning and tool frames before parent coalescing; a real stdio reproduction fails before the fix and passes in both hardening modes, including identical parent/child text, late frames, ownership bounds and disposal. Native child-thread UI remains excluded; remaining Agents lifecycle and installed-provider validation are deferred. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): route Copilot ACP subagent output into subagent threads (#17714).",
+      "reason": "Ported in F5's terms: the local Copilot ACP runtime requests bounded raw attribution and filters a native child's text, reasoning and tool frames out of the parent stream before coalescing. A real stdio reproduction fails before the fix and passes in both hardening modes, covering identical parent and child text, late frames, ownership bounds and disposal. F5 has no child threads, so the child output is kept private rather than routed into one. Upstream change: fix(server): route Copilot ACP subagent output into subagent threads (#17714)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["17d7e773a76af058efae7d74d2414bb42df749cf"],
       "evidence": [
-        "apps/server/src/provider/acp/CopilotAcpRouting.test.ts:1",
-        "apps/server/src/provider/acp/CustomAcpSupport.test.ts:47",
-        "apps/server/src/provider/acp/AcpSessionRuntime.ts:417"
+        "apps/server/src/provider/acp/CustomAcpSupport.test.ts:52",
+        "apps/server/src/provider/acp/CopilotAcpRouting.test.ts:33",
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:451"
       ]
     },
     {
@@ -20978,15 +21015,16 @@
     {
       "upstreamSha": "98beed1a226c42b85c52ff5ee9d5dbb67d776a77",
       "subject": "fix(server): Claude subagents show the reasoning effort they run at (#17496)",
-      "reason": "Planned: implementation and focused evidence exist for native child model/effort propagation, bounded metadata, inherited nested selection and durable effort display. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): Claude subagents show the reasoning effort they run at (#17496).",
+      "reason": "Ported: a native subagent's model and effort propagate from its launch, with bounded metadata and inherited nested selection, and the effort is stored durably and shown on its Agents panel card. The low-effort launch fixture fails before the change. Upstream change: fix(server): Claude subagents show the reasoning effort they run at (#17496)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"],
       "evidence": [
-        "apps/server/src/provider/claudeSubagentSelection.test.ts:1",
-        "apps/server/src/persistence/Migrations/129_BackgroundWorkEffort.test.ts:1",
-        "apps/web/src/components/AgentsPanel.browser.tsx:1"
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7423",
+        "apps/server/src/provider/claudeSubagentSelection.test.ts:14",
+        "apps/server/src/persistence/Migrations/129_BackgroundWorkEffort.test.ts:7",
+        "apps/web/src/components/AgentsPanel.browser.tsx:229"
       ]
     },
     {
@@ -21152,14 +21190,14 @@
     {
       "upstreamSha": "9a01524f3faca628699cdf65b43ad020b40b86d8",
       "subject": "fix(clients): a resumed subagent no longer moves the later turn's Worked for row (#19338)",
-      "reason": "Planned: implementation and focused evidence exist for a background task retains its original turn through newer parent model/effort changes, steering, progress, native completion and resume metadata; the later-turn attribution reproduction fails before the fix. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(clients): a resumed subagent no longer moves the later turn's Worked for row (#19338).",
+      "reason": "Ported: a background task keeps its original turn through later parent model and effort changes, steering, progress, native completion and resume metadata, so a resumed subagent no longer moves a later turn's Worked for row. The later-turn attribution reproduction fails before the fix. Upstream change: fix(clients): a resumed subagent no longer moves the later turn's Worked for row (#19338)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13737",
-        "apps/server/src/provider/claudeResumeState.test.ts:18"
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13816",
+        "apps/server/src/provider/claudeResumeState.test.ts:16"
       ]
     },
     {
@@ -23091,10 +23129,17 @@
     {
       "upstreamSha": "a8c480241836a7f6b79862e4504f37801cda6cde",
       "subject": "fix(server): a background Claude subagent's work shows while its parent is idle (#16486)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): a background Claude subagent's work shows while its parent is idle (#16486).",
+      "reason": "Equivalent: F5 emits a background task's progress and completion against the task's own turn whether or not the parent has an active turn, and stores it as durable background work. Upstream's change streams child transcripts into orchestration-v2 child threads, which F5 does not have. Upstream change: fix(server): a background Claude subagent's work shows while its parent is idle (#16486)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "8498153f6ed9b2ab1b6e7c4db37b400976fa9a35",
+        "9c6934ecdb66243b8b7553f1f0c9738661316dbe"
+      ],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:3659",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13816"
+      ]
     },
     {
       "upstreamSha": "a8cd2ad2ebb32ad789e8e0ecd2fc713c2edc38f4",
@@ -23967,14 +24012,15 @@
     {
       "upstreamSha": "afd98d7d1840ed76f57d3ece556257aebc00f1bc",
       "subject": "fix(server): stopped native subagents no longer read as Running (#17223)",
-      "reason": "Planned: implementation and focused evidence exist for native stop acknowledgements still await confirmed terminal outcomes; session-stop and progress events retain the exact persisted run identity, with failing-before reproductions for previously unaddressable task rows. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): stopped native subagents no longer read as Running (#17223).",
+      "reason": "Ported: a native stop acknowledgement still waits for the confirmed terminal outcome, and session-stop and progress events carry the exact persisted run identity, so a stopped subagent no longer reads as Running. Task rows that were previously unaddressable have failing-before reproductions. Upstream change: fix(server): stopped native subagents no longer read as Running (#17223)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13891",
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13090"
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13960",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13079",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13165"
       ]
     },
     {
@@ -25027,10 +25073,18 @@
     {
       "upstreamSha": "b7e376e96e2eb6fe5f23985ddf54172dd5f1fd98",
       "subject": "fix(client-runtime): the agents pill counts background agents from earlier turns (#20785)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(client-runtime): the agents pill counts background agents from earlier turns (#20785).",
+      "reason": "Equivalent: F5's Agents panel counts live durable work from every turn rather than the active turn's roster, so background agents from earlier turns are counted. A fixture confirms older and current live work are both counted. F5 keeps live work from a reverted turn listed because it is still running and can be stopped there. Upstream change: fix(client-runtime): the agents pill counts background agents from earlier turns (#20785)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "848bc1063123debf957c74f0b2dcc8c298510e4a",
+        "8498153f6ed9b2ab1b6e7c4db37b400976fa9a35",
+        "d8606c47cb81de499bdea2c5ebf6f6120a64c885"
+      ],
+      "evidence": [
+        "apps/web/src/lib/agentsModel.ts:533",
+        "apps/web/src/lib/agentsModel.test.ts:282"
+      ]
     },
     {
       "upstreamSha": "b7fc81dea2b7c963c34a365b82644ce963df19a2",
@@ -26850,10 +26904,9 @@
     {
       "upstreamSha": "c572cb71d2711d8cdb4ff7e0ba88af5e9a23aa81",
       "subject": "fix(server): track resumed subagent follow-ups as separate tasks (#17696)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): track resumed subagent follow-ups as separate tasks (#17696).",
+      "reason": "Not applicable: upstream tracks follow-ups to resumed delegated subagents as separate tasks in its orchestrator MCP service and delegated-completion delivery. F5 has neither. Upstream change: fix(server): track resumed subagent follow-ups as separate tasks (#17696)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c57a04b722f2172e3be2c8f73c936d10b4582431",
@@ -29370,13 +29423,13 @@
     {
       "upstreamSha": "d81afa0a6f403bd6e5562ffcee2484089a1fdc3f",
       "subject": "fix(muse): workflow subagents no longer stall on hidden approvals (#17329)",
-      "reason": "Planned: implementation and focused evidence exist for workflow child approvals are addressed to the parent thread without borrowing a native child-run ID as an F5 turn; active/idle parent reproductions fail before the fix, parent completion preserves the request, and malformed bounded origin metadata fails closed. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(muse): workflow subagents no longer stall on hidden approvals (#17329).",
+      "reason": "Ported: a Muse workflow child's approval is addressed to its parent thread without borrowing the native child-run ID as an F5 turn. Active and idle parent reproductions fail before the fix, parent completion preserves the request, and malformed bounded origin metadata fails closed. Upstream change: fix(muse): workflow subagents no longer stall on hidden approvals (#17329)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["3f49f7e09a5fae7ee0942c9a25fffa8382ffc069"],
       "evidence": [
-        "apps/server/src/provider/Layers/MuseAdapter.test.ts:338",
+        "apps/server/src/provider/Layers/MuseAdapter.test.ts:340",
         "apps/server/src/provider/msp/MuseEventMapping.test.ts:54"
       ]
     },
@@ -29692,14 +29745,14 @@
     {
       "upstreamSha": "daa1d0ed947c276cb74b08025b5903e2ffe31278",
       "subject": "fix(web): subagent cards name the provider account (#15493)",
-      "reason": "Planned: implementation and focused evidence exist for agent cards retain the recorded provider-instance ID and show that configured account's name from the existing cached provider catalog; failing-before model and Chromium reproductions cover two accounts, while unknown or mismatched instances do not borrow another account's label. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(web): subagent cards name the provider account (#15493).",
+      "reason": "Ported: agent cards keep the recorded provider-instance ID and show that configured account's name from the cached provider catalog. Failing-before model and Chromium reproductions cover two accounts; an unknown or mismatched instance never borrows another account's label. Upstream change: fix(web): subagent cards name the provider account (#15493)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15r",
       "f5Shas": ["67d45053138a5e98d15d2e26ea4c0c5c64039225"],
       "evidence": [
-        "apps/web/src/components/AgentsPanel.browser.tsx:166",
-        "apps/web/src/lib/agentsModel.test.ts:430"
+        "apps/web/src/components/AgentsPanel.browser.tsx:164",
+        "apps/web/src/lib/agentsModel.test.ts:429"
       ]
     },
     {
@@ -31514,10 +31567,9 @@
     {
       "upstreamSha": "e733a40295f3c961260f64f8eb850b561a04937b",
       "subject": "fix(server): clean up worktrees shared by subagents (#19748)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): clean up worktrees shared by subagents (#19748).",
+      "reason": "Not applicable: upstream lets storage cleanup remove a worktree shared by a parent and its subagent child threads. F5 has no subagent child threads, and its cleanup keeps any worktree another thread claims. Upstream change: fix(server): clean up worktrees shared by subagents (#19748)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e74c668d786ffc14f40a9540cd3aede02ba5d62e",
@@ -32346,10 +32398,9 @@
     {
       "upstreamSha": "ed4ea1083d477b67304f50d5691ba5fc2b9496cd",
       "subject": "fix(chat): surface pending subagent questions on parents (#16634)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(chat): surface pending subagent questions on parents (#16634).",
+      "reason": "Not applicable: upstream reads delegated child threads' pending questions onto the parent and explicitly skips provider-native subagents. F5 has no delegated child threads; a native subagent's question is already a pending request on the parent thread. Upstream change: fix(chat): surface pending subagent questions on parents (#16634)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ed57bed8e71b2e89a9350c94bda0dacc71cd4817",
@@ -32524,18 +32575,16 @@
     {
       "upstreamSha": "eea9f7cfebbdb51d27f07a816119c71a67509997",
       "subject": "fix(orchestration-v2): show reported subagent models (#14108)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(orchestration-v2): show reported subagent models (#14108).",
+      "reason": "Not applicable: upstream keeps reported subagent models in its orchestration-v2 Codex, ACP and Cursor adapters. F5 has none of those adapters, and its Codex and ACP subagent rows record no per-subagent model, so adding one would be a new feature rather than this fix. Upstream change: fix(orchestration-v2): show reported subagent models (#14108)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "eeaac49a9d20d94970b26fe7775fc8ddb4672f4f",
       "subject": "fix: update all no longer runs agents twice or loses background work (#19291)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: update all no longer runs agents twice or loses background work (#19291).",
+      "reason": "Deferred: most of the change is upstream's update-all flow and orchestration-v2 restart continuation, which F5 does not have. The applicable part is the desktop backend's SIGKILL grace: F5 force-kills after 2 seconds (apps/desktop/src/main.ts:3012 and 3072) while its service launcher waits 5 (apps/server/src/distribution/handoff.ts:405). Raising it also means retuning the 5-second stop timeouts and the 6-second quit cap, and that cannot be exercised without a runnable Electron build here. Upstream change: fix: update all no longer runs agents twice or loses background work (#19291)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "eed974c122e192de45b54b7dac7ca1a51448c08f",
@@ -33573,10 +33622,9 @@
     {
       "upstreamSha": "f4df79477709185c490627a3fd43af96674ae778",
       "subject": "fix(clients): a thread comes back when its subagent needs approval (#19630)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(clients): a thread comes back when its subagent needs approval (#19630).",
+      "reason": "Not applicable: upstream surfaces a delegated child thread's pending approval on its parent. F5 has no delegated child threads; a native subagent's approval is a pending request on the parent thread itself, and settles with its agent (ClaudeAdapter.test.ts:13664). Upstream change: fix(clients): a thread comes back when its subagent needs approval (#19630)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f4ef5155fb8aab7776a41fc8ec73d5367f53ba1f",

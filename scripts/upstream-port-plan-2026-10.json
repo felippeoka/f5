@@ -564,13 +564,15 @@
     },
     {
       "upstreamSha": "b7e376e96e2eb6fe5f23985ddf54172dd5f1fd98",
-      "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(client-runtime): the agents pill counts background agents from earlier turns (#20785).",
+      "classification": "equivalent:apps/web/src/lib/agentsModel.ts:533",
+      "reason": "Equivalent: F5's Agents panel counts live durable work from every turn rather than the active turn's roster, so background agents from earlier turns are counted. A fixture confirms older and current live work are both counted. F5 keeps live work from a reverted turn listed because it is still running and can be stopped there. Upstream change: fix(client-runtime): the agents pill counts background agents from earlier turns (#20785)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-20785"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["apps/web/src/lib/agentsModel.test.ts:282"],
+      "f5Shas": [
+        "848bc1063123debf957c74f0b2dcc8c298510e4a",
+        "8498153f6ed9b2ab1b6e7c4db37b400976fa9a35",
+        "d8606c47cb81de499bdea2c5ebf6f6120a64c885"
+      ]
     },
     {
       "upstreamSha": "3b618903d63687c0e7fa402b90e6ba920faec40b",
@@ -3138,13 +3140,9 @@
     },
     {
       "upstreamSha": "4e85a93b20c80c005f395c8cc3bc2c79e41ac175",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): subagents pick up their parent's renamed worktree branch (#20079).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-20079"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not applicable: upstream moves orchestration-v2 subagent child threads onto their parent's renamed worktree branch. F5 subagents run inside the parent's provider session and cwd, with no child threads to update. Upstream change: fix(server): subagents pick up their parent's renamed worktree branch (#20079)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f459165344bbe3072f2db185cf17afe1a29d840d",
@@ -3217,13 +3215,9 @@
     },
     {
       "upstreamSha": "e733a40295f3c961260f64f8eb850b561a04937b",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): clean up worktrees shared by subagents (#19748).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-19748"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not applicable: upstream lets storage cleanup remove a worktree shared by a parent and its subagent child threads. F5 has no subagent child threads, and its cleanup keeps any worktree another thread claims. Upstream change: fix(server): clean up worktrees shared by subagents (#19748)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b8e829dc8cbeb9c83968e961996a3614dc1a056f",
@@ -3881,13 +3875,9 @@
     },
     {
       "upstreamSha": "f4df79477709185c490627a3fd43af96674ae778",
-      "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(clients): a thread comes back when its subagent needs approval (#19630).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-19630"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not applicable: upstream surfaces a delegated child thread's pending approval on its parent. F5 has no delegated child threads; a native subagent's approval is a pending request on the parent thread itself, and settles with its agent (ClaudeAdapter.test.ts:13664). Upstream change: fix(clients): a thread comes back when its subagent needs approval (#19630)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "22af947e0d353c9e89c6db2a268836baa71bece5",
@@ -4565,13 +4555,9 @@
     },
     {
       "upstreamSha": "eeaac49a9d20d94970b26fe7775fc8ddb4672f4f",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: update all no longer runs agents twice or loses background work (#19291).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-19291"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: most of the change is upstream's update-all flow and orchestration-v2 restart continuation, which F5 does not have. The applicable part is the desktop backend's SIGKILL grace: F5 force-kills after 2 seconds (apps/desktop/src/main.ts:3012 and 3072) while its service launcher waits 5 (apps/server/src/distribution/handoff.ts:405). Raising it also means retuning the 5-second stop timeouts and the 6-second quit cap, and that cannot be exercised without a runnable Electron build here. Upstream change: fix: update all no longer runs agents twice or loses background work (#19291)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "3bbfdc7755db099081ad546ff9e8263fc07b82e9",
@@ -4618,13 +4604,14 @@
     },
     {
       "upstreamSha": "30d1010443d92d7c17f9d773639375a4c6de77bc",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude subagent progress no longer re-stores the unchanged prompt (#18375).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:2182",
+      "reason": "Equivalent: F5's progress activities carry only the bounded description, last tool and usage, never the subagent's prompt; the prompt is stored once when the background work starts. Upstream's change deduplicates prompts in orchestration-v2 subagent rows, which F5 does not have. Upstream change: fix(server): Claude subagent progress no longer re-stores the unchanged prompt (#18375)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-18375"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadBackgroundWork.ts:117"],
+      "f5Shas": [
+        "8168bd456ae23521e21bf68b08d0d860a6abd901",
+        "17c70b51183d091f4076b8c52d6859f8ad5eebce"
+      ]
     },
     {
       "upstreamSha": "8b460a3c851d629df896f7420aa32eb32df1daca",
@@ -5079,13 +5066,14 @@
     },
     {
       "upstreamSha": "265fb7000f84d12a44c4e87c17426e1f29e0bb36",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): apply confirmed Claude subagent outcomes (#18778).",
+      "classification": "equivalent:apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13165",
+      "reason": "Equivalent: a native stop in F5 waits for the task notification that confirms the outcome, and settles the exact persisted run when the session stops. The orchestration-v2 adapter and effect worker that upstream changed do not exist in F5. Upstream change: fix(server): apply confirmed Claude subagent outcomes (#18778)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-18778"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13960"],
+      "f5Shas": [
+        "f9dd5cbdb535d96c38fec8137275a3bfc9fc3b08",
+        "9c6934ecdb66243b8b7553f1f0c9738661316dbe"
+      ]
     },
     {
       "upstreamSha": "5d6e4192bfcf9eca09741605e12c72b5970025e4",
@@ -7117,13 +7105,9 @@
     },
     {
       "upstreamSha": "c572cb71d2711d8cdb4ff7e0ba88af5e9a23aa81",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): track resumed subagent follow-ups as separate tasks (#17696).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-17696"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not applicable: upstream tracks follow-ups to resumed delegated subagents as separate tasks in its orchestrator MCP service and delegated-completion delivery. F5 has neither. Upstream change: fix(server): track resumed subagent follow-ups as separate tasks (#17696)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "fa9f936ef5cbbe4bd4f9890b638766fc92f45075",
@@ -7360,13 +7344,9 @@
     },
     {
       "upstreamSha": "ed4ea1083d477b67304f50d5691ba5fc2b9496cd",
-      "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(chat): surface pending subagent questions on parents (#16634).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-16634"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not applicable: upstream reads delegated child threads' pending questions onto the parent and explicitly skips provider-native subagents. F5 has no delegated child threads; a native subagent's question is already a pending request on the parent thread. Upstream change: fix(chat): surface pending subagent questions on parents (#16634)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "318201caa520525517ef2bee8f4bbeedb2fec1d7",
@@ -9168,13 +9148,14 @@
     },
     {
       "upstreamSha": "a8c480241836a7f6b79862e4504f37801cda6cde",
-      "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): a background Claude subagent's work shows while its parent is idle (#16486).",
+      "classification": "equivalent:apps/server/src/provider/Layers/ClaudeAdapter.ts:3659",
+      "reason": "Equivalent: F5 emits a background task's progress and completion against the task's own turn whether or not the parent has an active turn, and stores it as durable background work. Upstream's change streams child transcripts into orchestration-v2 child threads, which F5 does not have. Upstream change: fix(server): a background Claude subagent's work shows while its parent is idle (#16486)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-16486"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13816"],
+      "f5Shas": [
+        "8498153f6ed9b2ab1b6e7c4db37b400976fa9a35",
+        "9c6934ecdb66243b8b7553f1f0c9738661316dbe"
+      ]
     },
     {
       "upstreamSha": "4d976d1fc233d3aa971fa7dcbf2e7316bfa3ac72",
@@ -9698,13 +9679,11 @@
     },
     {
       "upstreamSha": "29366ea29abf4ceb41ab250d06e190a22258bd18",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): show subagent effort and speed in hover cards (#13056).",
+      "classification": "equivalent:apps/web/src/components/AgentsPanelRow.tsx:294",
+      "reason": "Equivalent: F5 shows a native subagent's effort on its Agents panel card. Upstream's speed value comes from an app-owned child thread's model selection, which F5 does not have. Upstream change: fix(web): show subagent effort and speed in hover cards (#13056)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-13056"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["apps/web/src/components/AgentsPanel.browser.tsx:229"],
+      "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"]
     },
     {
       "upstreamSha": "9503155da67add4fbd7fbc51c99ec19a0c8c4a2c",
@@ -9714,13 +9693,9 @@
     },
     {
       "upstreamSha": "eea9f7cfebbdb51d27f07a816119c71a67509997",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(orchestration-v2): show reported subagent models (#14108).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-14108"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not applicable: upstream keeps reported subagent models in its orchestration-v2 Codex, ACP and Cursor adapters. F5 has none of those adapters, and its Codex and ACP subagent rows record no per-subagent model, so adding one would be a new feature rather than this fix. Upstream change: fix(orchestration-v2): show reported subagent models (#14108)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "78552a8c6162c9b5248231bc70be8bffdb50cbd3",
@@ -11516,13 +11491,9 @@
     },
     {
       "upstreamSha": "65731f986ba2175063b0182deb6a143f8f323b74",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(mobile): show complete subagent details (#15189).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-15189"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream completes the mobile subagent row and sheet, and moves the web hover card's model and workspace labels into shared client-runtime code for mobile to reuse. F5 has no mobile app, and the workspace labels describe delegated child threads, which F5 does not have. Upstream change: fix(mobile): show complete subagent details (#15189)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "aad732901e4b7d485574eaef5a9c1fb388c4291a",
@@ -11793,13 +11764,11 @@
     },
     {
       "upstreamSha": "4f7760e6a0037b06917adaae1b8a220e3ee6e5cc",
-      "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): Claude subagents show the model their agent file picks (#14994).",
+      "classification": "equivalent:apps/server/src/provider/Layers/ClaudeAdapter.ts:4755",
+      "reason": "Equivalent: upstream moves an orchestration-v2 child thread to the model a Claude agent file picks. F5 has no child threads; the subagent's work entry takes the model reported by its first snapshot, which includes agent-file overrides. Upstream change: fix(server): Claude subagents show the model their agent file picks (#14994)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-14994"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7423"],
+      "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"]
     },
     {
       "upstreamSha": "858b98b8fa618cf9b9528b5415493fcf0572ac88",
@@ -12210,13 +12179,17 @@
     },
     {
       "upstreamSha": "7ab800a43c770b2c48a2d9306c89b6177f61ad4a",
-      "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): Claude subagents with their own model no longer show the parent's model (#14540).",
+      "classification": "equivalent:apps/server/src/provider/Layers/ClaudeAdapter.ts:4755",
+      "reason": "Equivalent: F5 refines a subagent's model from its own assistant snapshot and pushes the correction at once, a nested Agent call inherits the reported model of the subagent that launched it, and an early snapshot model is kept until the task registers. Upstream change: fix(server): Claude subagents with their own model no longer show the parent's model (#14540)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-14540"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": [
+        "apps/server/src/provider/claudeSubagentSelection.test.ts:25",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7359"
+      ],
+      "f5Shas": [
+        "d8606c47cb81de499bdea2c5ebf6f6120a64c885",
+        "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"
+      ]
     },
     {
       "upstreamSha": "783ccf0fdde0d20824ad87af10a870fc28005835",
