@@ -2468,3 +2468,37 @@ Still deferred, because F5 chose differently:
 - [t3code#9033](https://github.com/pingdotgg/t3code/pull/9033) aligns a
   composer un-settle banner that F5 does not have; un-settling is in the
   thread header.
+
+## 15j triage log: PR hub UX
+
+All 12 open 15j records were already implemented with focused tests. They are
+now recorded as ported, and each cites its specific tests instead of a whole
+file. The records cover:
+
+- middle-click and modified clicks opening PR links in the browser
+  ([t3code#19854](https://github.com/pingdotgg/t3code/pull/19854))
+- the setting to open PR links on the forge
+  ([t3code#19719](https://github.com/pingdotgg/t3code/pull/19719))
+- confirming PR panel actions in place
+  ([t3code#17710](https://github.com/pingdotgg/t3code/pull/17710))
+- the opt-in removal of agent credits from merge messages
+  ([t3code#16192](https://github.com/pingdotgg/t3code/pull/16192))
+- head-fenced branch deletion after merge or close
+  ([t3code#19257](https://github.com/pingdotgg/t3code/pull/19257))
+- Shift-held, fast and right-click PR actions
+  ([t3code#15549](https://github.com/pingdotgg/t3code/pull/15549),
+  [t3code#16627](https://github.com/pingdotgg/t3code/pull/16627),
+  [t3code#16612](https://github.com/pingdotgg/t3code/pull/16612))
+- per-forge and per-item capabilities
+  ([t3code#17774](https://github.com/pingdotgg/t3code/pull/17774),
+  [t3code#17667](https://github.com/pingdotgg/t3code/pull/17667))
+- bot and resolved filters for review threads
+  ([t3code#17645](https://github.com/pingdotgg/t3code/pull/17645))
+- dragging a linked PR into the composer
+  ([t3code#20102](https://github.com/pingdotgg/t3code/pull/20102))
+
+The cited server, contracts and web unit suites pass 107, 15 and 35 cases, and
+the linked-PR drop case in `ChatView.browser.tsx` passes. The combined browser
+run passed 37 of 38 cases. The one failure was an uncited case, "returns focus
+from a composer option menu on Escape", which timed out; its file passes all 10
+cases when run alone.

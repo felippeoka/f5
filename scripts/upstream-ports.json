@@ -55,12 +55,12 @@
     {
       "upstreamSha": "00cdceb196edf661652dee6efe983c0d40662971",
       "subject": "fix(web): middle-click opens pull requests in the browser, like cmd+click (#19854)",
-      "reason": "Planned: implementation and focused scenario evidence exist for modified and middle PR clicks explicitly bypassing both panel and preview; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(web): middle-click opens pull requests in the browser, like cmd+click (#19854).",
+      "reason": "Ported: a middle click, like cmd- or ctrl-click, opens a PR link in the system browser and bypasses both the PR panel and the preview browser. Upstream change: fix(web): middle-click opens pull requests in the browser, like cmd+click (#19854)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["144d0a24603f77fd51f7cf8935bc418d471fb864"],
-      "evidence": ["apps/web/src/components/OpenLinkAnchor.browser.tsx:1"]
+      "evidence": ["apps/web/src/components/OpenLinkAnchor.browser.tsx:70"]
     },
     {
       "upstreamSha": "00d46188bedfae81a5d219c8eba4b63e8cf90036",
@@ -4284,14 +4284,14 @@
     {
       "upstreamSha": "1f093d119b91263deb83f0d18e1504b791fdbbd4",
       "subject": "feat(web): pr panel actions confirm in place (#17710)",
-      "reason": "Planned: implementation and focused scenario evidence exist for PR-panel confirmations reusing durable action forms in place while preserving the thread draft; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): pr panel actions confirm in place (#17710).",
+      "reason": "Ported: PR panel confirmations reuse the action forms in place and need an explicit second action, and opening a PR beside the thread keeps its draft. Upstream change: feat(web): pr panel actions confirm in place (#17710)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["144d0a24603f77fd51f7cf8935bc418d471fb864"],
       "evidence": [
-        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1",
-        "apps/web/src/components/prHub/PrActionDialogs.tsx:1"
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:240",
+        "apps/web/src/components/OpenLinkAnchor.browser.tsx:55"
       ]
     },
     {
@@ -4988,16 +4988,15 @@
     {
       "upstreamSha": "24238fee321e2c6bc711832b8cf3698b1f6b30ca",
       "subject": "feat(source-control): omit agent credits from PR merge messages (#16192)",
-      "reason": "Planned: implementation and focused scenario evidence exist for opt-in head-fenced GitHub merge and auto-merge message cleanup preserving human and quoted credits; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(source-control): omit agent credits from PR merge messages (#16192).",
+      "reason": "Ported: an opt-in setting removes recognized agent trailers and generated footers from GitHub merge and auto-merge messages, keeps human co-authors, quoted and fenced examples, and fences the cleanup to the prepared head. Upstream change: feat(source-control): omit agent credits from PR merge messages (#16192)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["4c564ea5464d6e330eb771f3d724b4338e12e369"],
       "evidence": [
-        "apps/server/src/git/mergeMessage.test.ts:1",
-        "apps/server/src/git/githubHttpOperations.test.ts:1",
-        "apps/server/src/prHub/githubForge.test.ts:1",
-        "packages/contracts/src/settings.test.ts:1"
+        "apps/server/src/git/mergeMessage.test.ts:5",
+        "apps/server/src/prHub/githubForge.test.ts:252",
+        "packages/contracts/src/settings.test.ts:195"
       ]
     },
     {
@@ -7230,17 +7229,16 @@
     {
       "upstreamSha": "339179f50a84dc599cce373dbb48f172f182f44e",
       "subject": "feat(pr): delete branches after merge or close (#19257)",
-      "reason": "Planned: implementation and focused scenario evidence exist for opt-in merge/close branch cleanup with fresh source permissions, exact-head remote/local compare-and-delete, occupied-worktree preservation and read-only unknown-outcome recovery; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pr): delete branches after merge or close (#19257).",
+      "reason": "Ported: opt-in branch cleanup after merge or close deletes the remote ref only at the captured head, never retries a lost response, and removes a local branch only when it is unused, unmoved and proven gone remotely. Upstream change: feat(pr): delete branches after merge or close (#19257)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["9bec7e8c0639014203a1e3bb3f81f6102c44f8d4"],
       "evidence": [
-        "apps/server/src/git/githubBranchDeletion.test.ts:1",
-        "apps/server/src/prHub/localBranchCleanup.test.ts:1",
-        "apps/server/src/prHub/PrHubExtensions.test.ts:1",
-        "apps/server/src/git/Layers/GitCore.extended.ts:1",
-        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+        "apps/server/src/git/githubBranchDeletion.test.ts:96",
+        "apps/server/src/git/githubBranchDeletion.test.ts:154",
+        "apps/server/src/prHub/localBranchCleanup.test.ts:74",
+        "apps/server/src/prHub/localBranchCleanup.test.ts:101"
       ]
     },
     {
@@ -7281,14 +7279,14 @@
     {
       "upstreamSha": "33b7d7b3ae2a7b1c3d1bd58c04cb9bf581ec2fe7",
       "subject": "feat(web): add shift-held pull request quick actions (#15549)",
-      "reason": "Planned: implementation and focused scenario evidence exist for Shift-only quick actions clearing on other modifiers, focus and visibility changes; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): add shift-held pull request quick actions (#15549).",
+      "reason": "Ported: holding Shift shows PR quick actions, which clear on any other modifier, blur or visibility change. Upstream change: feat(web): add shift-held pull request quick actions (#15549)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
       "evidence": [
-        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1",
-        "apps/web/src/lib/prQuickActions.test.ts:1"
+        "apps/web/src/components/prHub/PrSpineList.browser.tsx:26",
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:170"
       ]
     },
     {
@@ -15059,15 +15057,15 @@
     {
       "upstreamSha": "6cd02e98f7edd78b7bde9ceff26c829476dbeb77",
       "subject": "feat(web): filter PR comments by bots and resolved threads (#17645)",
-      "reason": "Planned: implementation and focused scenario evidence exist for persisted Review threads bot/resolution filters with reachable human-reply pagination; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): filter PR comments by bots and resolved threads (#17645).",
+      "reason": "Ported: review threads filter bots and resolved threads independently, persist both choices, and keep human replies under a hidden bot root and later pages reachable. Upstream change: feat(web): filter PR comments by bots and resolved threads (#17645)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["9a81a5a47ccc3f1d9294a8503648d942b1f53115"],
       "evidence": [
-        "apps/web/src/components/prHub/PrReviewThreadsTab.browser.tsx:1",
-        "apps/web/src/components/prHub/prCommentFilters.test.ts:1",
-        "apps/server/src/prHub/reviewThreads.test.ts:1"
+        "apps/web/src/components/prHub/PrReviewThreadsTab.browser.tsx:94",
+        "apps/web/src/components/prHub/PrReviewThreadsTab.browser.tsx:118",
+        "apps/web/src/components/prHub/prCommentFilters.test.ts:29"
       ]
     },
     {
@@ -21467,14 +21465,15 @@
     {
       "upstreamSha": "9b40d3746388e573370488f73b50e1e869b79a45",
       "subject": "feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774)",
-      "reason": "Planned: implementation and focused scenario evidence exist for shared forge capability defaults narrowed by server permissions and fresh PR state; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774).",
+      "reason": "Ported: quick actions come from each forge's shared capabilities, narrowed by server-reported permissions and the current PR state, and an action outside the freshly loaded capabilities is rejected before preparation. Upstream change: feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
       "evidence": [
-        "apps/web/src/lib/prQuickActions.test.ts:1",
-        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+        "apps/web/src/lib/prQuickActions.test.ts:4",
+        "apps/web/src/lib/prQuickActions.test.ts:16",
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:300"
       ]
     },
     {
@@ -23516,14 +23515,14 @@
     {
       "upstreamSha": "ab28039ef77ca8847c6bfe845c3502ff7e348c30",
       "subject": "feat(web): add fast actions to linked pull requests (#16627)",
-      "reason": "Planned: implementation and focused scenario evidence exist for linked-PR quick actions routed through a fresh thread-owned PR panel and explicit confirmation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): add fast actions to linked pull requests (#16627).",
+      "reason": "Ported: linked PRs offer quick actions that route through a fresh thread-owned PR panel with an inline preview and explicit confirmation. Upstream change: feat(web): add fast actions to linked pull requests (#16627)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
       "evidence": [
-        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1",
-        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:264",
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:170"
       ]
     },
     {
@@ -24931,16 +24930,15 @@
     {
       "upstreamSha": "b67ac65b74feae961f5bdb39e65027bebb99f0cf",
       "subject": "feat(web): drag a linked pull request into the composer as a context chip (#20102)",
-      "reason": "Planned: implementation and focused scenario evidence exist for bounded linked-PR drags and persistent Lexical reference chips with explicit-send and undo proof; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): drag a linked pull request into the composer as a context chip (#20102).",
+      "reason": "Ported: dragging a linked PR into the composer adds a bounded reference chip that survives styling, deletion and undo, and nothing is sent until the user submits. Upstream change: feat(web): drag a linked pull request into the composer as a context chip (#20102)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["8009be2ed8abfaebf0f425fcf0780c20b6bd6934"],
       "evidence": [
-        "apps/web/src/lib/pullRequestReference.test.ts:1",
-        "apps/web/src/components/ComposerPromptEditor.browser.tsx:1",
-        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1",
-        "apps/web/src/components/ChatView.browser.tsx:1"
+        "apps/web/src/components/ChatView.browser.tsx:5156",
+        "apps/web/src/components/ComposerPromptEditor.browser.tsx:162",
+        "apps/web/src/lib/pullRequestReference.test.ts:34"
       ]
     },
     {
@@ -26765,19 +26763,19 @@
     {
       "upstreamSha": "c3243f05088c3c20e9439f285fc6d7b0bfe1747d",
       "subject": "feat(pull-requests): hosts can report edit and resolve permissions per item (#17667)",
-      "reason": "Planned: implementation and focused scenario evidence exist for host per-item edit and directional thread permissions, including revocation before saved operation dispatch; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pull-requests): hosts can report edit and resolve permissions per item (#17667).",
+      "reason": "Ported: hosts report per-item edit and per-thread resolve permissions, which override authorship, cannot widen host capabilities, and are rechecked before a saved operation is dispatched. Upstream change: feat(pull-requests): hosts can report edit and resolve permissions per item (#17667)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": [
         "98944a6cfef77b479b9a7d92d574039cfc73de93",
         "144d0a24603f77fd51f7cf8935bc418d471fb864"
       ],
       "evidence": [
-        "apps/server/src/prHub/forgeModel.test.ts:1",
-        "apps/server/src/prHub/PrHubExtensions.test.ts:1",
-        "apps/server/src/prHub/githubPrDetails.test.ts:1",
-        "apps/web/src/components/prHub/PrReviewThreadsTab.browser.tsx:1"
+        "apps/server/src/prHub/PrHubExtensions.test.ts:554",
+        "apps/server/src/prHub/PrHubExtensions.test.ts:579",
+        "apps/server/src/prHub/forgeModel.test.ts:15",
+        "apps/web/src/components/prHub/PrReviewThreadsTab.browser.tsx:131"
       ]
     },
     {
@@ -28007,14 +28005,14 @@
     {
       "upstreamSha": "cd34df59a1ba7eb48318549d628b5ec7c9b759c5",
       "subject": "feat(web): setting to open pull request links on GitHub (#19719)",
-      "reason": "Planned: implementation and focused scenario evidence exist for profile-local PR-link preference with thread-owned PR panels and system-browser escape; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): setting to open pull request links on GitHub (#19719).",
+      "reason": "Ported: a profile-local setting opens PR links on the forge directly, bypassing the PR panel and the preview browser; otherwise the thread-owned PR panel keeps a system-browser escape. Upstream change: feat(web): setting to open pull request links on GitHub (#19719)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["144d0a24603f77fd51f7cf8935bc418d471fb864"],
       "evidence": [
-        "apps/web/src/components/OpenLinkAnchor.browser.tsx:1",
-        "apps/web/src/components/prHub/PrLinkedPanel.browser.tsx:1"
+        "apps/web/src/components/OpenLinkAnchor.browser.tsx:80",
+        "apps/web/src/components/prHub/PrLinkedPanel.browser.tsx:55"
       ]
     },
     {
@@ -29590,14 +29588,14 @@
     {
       "upstreamSha": "d8d037eae1b77a77f372fd1afd2662a31ebe37c8",
       "subject": "fix(web): open pull request row actions on right-click (#16612)",
-      "reason": "Planned: implementation and focused scenario evidence exist for inbox and linked-PR row context menus with explicit saved-operation confirmation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(web): open pull request row actions on right-click (#16612).",
+      "reason": "Ported: right-clicking an inbox or linked-PR row opens its action menu without a host read, and saved operations still need explicit confirmation. Upstream change: fix(web): open pull request row actions on right-click (#16612)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15j",
       "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
       "evidence": [
-        "apps/web/src/components/prHub/PrSpineList.browser.tsx:1",
-        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1"
+        "apps/web/src/components/prHub/PrSpineList.browser.tsx:59",
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:145"
       ]
     },
     {
