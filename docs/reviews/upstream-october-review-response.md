@@ -2103,3 +2103,29 @@ diff through the forge API instead, which needs no checkout, and its tests
 cover the same run rules: coalescing, head changes, credential changes and
 restarts. [t3code#18267](https://github.com/pingdotgg/t3code/pull/18267) is
 the mobile guide and not applicable.
+
+## 15e triage log: MCP apps
+
+All 6 open 15e records are classified. One is ported:
+[t3code#17962](https://github.com/pingdotgg/t3code/pull/17962) bounds long
+alert dialog descriptions so the actions stay on screen. f5's MCP app approval
+dialog already bounded its payload, but the shared dialog did not, and f5's
+other confirmations use it.
+
+Three are equivalent: inline MCP apps
+([t3code#16236](https://github.com/pingdotgg/t3code/pull/16236)), the
+blocked-cookie bootstrap
+([t3code#17027](https://github.com/pingdotgg/t3code/pull/17027)) and the host
+color scheme for saved apps
+([t3code#17026](https://github.com/pingdotgg/t3code/pull/17026)). f5 injects
+both bootstraps when it saves the snapshot, not when it serves it. Two React
+Compiler cleanups
+([t3code#20759](https://github.com/pingdotgg/t3code/pull/20759),
+[t3code#20691](https://github.com/pingdotgg/t3code/pull/20691)) are deferred.
+
+Two items the plan added beyond upstream are not built: single-use approval
+tokens valid for 60 seconds, and durable receipts for MCP app tool calls. f5
+checks approval against the session identity the user reviewed and sends each
+mutation once, never replaying it after a timeout. The server still accepts
+the client's `approved` flag, though, and there is no idempotent operation id
+to dedupe a retried call. These remain open plan work.

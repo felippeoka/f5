@@ -642,13 +642,9 @@
     },
     {
       "upstreamSha": "37ea8a88dee3fe3256e6333e10dd43c214ec660c",
-      "classification": "planned:15e",
-      "reason": "Planned: implementation and focused scenario evidence exist for stable frame bridge lifetime through native approval updates; delivery remains deferred until the required full-workspace release gate passes. Upstream change: refactor(web): the MCP app frame keeps its caching without \"use memo\" hooks (#20759).",
+      "classification": "deferred",
+      "reason": "Deferred: upstream replaced the MCP app frame's \"use memo\" caching hooks as part of its React Compiler adoption. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: refactor(web): the MCP app frame keeps its caching without \"use memo\" hooks (#20759)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15e-pr-20759"],
-        "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      },
       "evidence": [
         "apps/web/src/components/chat/McpAppFrame.tsx:1",
         "apps/web/src/components/chat/McpAppFrame.browser.tsx:1"
@@ -1898,13 +1894,9 @@
     },
     {
       "upstreamSha": "38b43572be93a8c35c955303cdc237da134ba7a8",
-      "classification": "planned:15e",
-      "reason": "Planned: implementation and focused scenario evidence exist for MCP app bridge lifetime without manual memoization hooks; delivery remains deferred until the required full-workspace release gate passes. Upstream change: perf(web): the MCP app frame compiles without manual memoization (#20691).",
+      "classification": "deferred",
+      "reason": "Deferred: upstream removed manual memoization from the MCP app frame for the React Compiler allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the MCP app frame compiles without manual memoization (#20691)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15e-pr-20691"],
-        "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      },
       "evidence": [
         "apps/web/src/components/chat/McpAppFrame.tsx:1",
         "apps/web/src/components/chat/McpAppFrame.browser.tsx:1"
@@ -5990,17 +5982,12 @@
     },
     {
       "upstreamSha": "ac2cc78d4a4aa9508acb65ad5e9dab319dd1962a",
-      "classification": "planned:15e",
-      "reason": "Planned: implementation and focused scenario evidence exist for blocked-cookie compatibility bootstrap in saved app snapshots; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(client): tolerate blocked cookies in MCP app sandboxes (#17027).",
+      "classification": "equivalent:packages/shared/src/mcpApp.ts:228",
+      "reason": "Equivalent: saved MCP app snapshots get a bootstrap after the CSP that turns the opaque document's SecurityError on document.cookie into an empty cookie string, without granting storage. Upstream change: fix(client): tolerate blocked cookies in MCP app sandboxes (#17027)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15e-pr-17027"],
-        "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      },
       "evidence": [
-        "packages/shared/src/mcpApp.ts:1",
-        "packages/shared/src/mcpApp.test.ts:1",
-        "apps/server/src/mcpApps/McpAppSnapshot.ts:1"
+        "apps/server/src/mcpApps/McpAppSnapshot.ts:80",
+        "packages/shared/src/mcpApp.test.ts:187"
       ],
       "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
@@ -6022,17 +6009,12 @@
     },
     {
       "upstreamSha": "2e19207b179dca57d57ecd24a4b0b0776a41e0bf",
-      "classification": "planned:15e",
-      "reason": "Planned: implementation and focused scenario evidence exist for host theme bootstrap in owned app snapshots; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(client): apply host color scheme to saved MCP apps (#17026).",
+      "classification": "equivalent:packages/shared/src/mcpApp.ts:197",
+      "reason": "Equivalent: saved MCP app snapshots get a theme bootstrap after the CSP that applies the host's color scheme from the initialize result and host-context changes, accepting messages from the parent window only. f5 injects it when the snapshot is saved rather than when the asset is served. Upstream change: fix(client): apply host color scheme to saved MCP apps (#17026)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15e-pr-17026"],
-        "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      },
       "evidence": [
-        "packages/shared/src/mcpApp.ts:1",
-        "packages/shared/src/mcpApp.test.ts:1",
-        "apps/server/src/mcpApps/McpAppSnapshot.ts:1"
+        "apps/server/src/mcpApps/McpAppSnapshot.ts:80",
+        "packages/shared/src/mcpApp.test.ts:61"
       ],
       "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
@@ -9502,18 +9484,12 @@
     },
     {
       "upstreamSha": "4d976d1fc233d3aa971fa7dcbf2e7316bfa3ac72",
-      "classification": "planned:15e",
-      "reason": "Planned: implementation and focused scenario evidence exist for Codex app capture, owned attachments, scoped RPCs, durable context, document revocation and confirmed interactions; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat: MCP apps render and run inline in threads (#16236).",
+      "classification": "equivalent:apps/web/src/components/chat/McpAppFrame.tsx:36",
+      "reason": "Equivalent: Codex MCP apps render inline from owned snapshots in an opaque sandbox. Tool calls, resource reads and messages resolve the originating activity on the server, non-read-only calls and ui/message need explicit approval, and approvals are rejected after a session replacement or MCP reload. Upstream change: feat: MCP apps render and run inline in threads (#16236)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15e-pr-16236"],
-        "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      },
       "evidence": [
-        "apps/server/src/mcpApps/McpAppCapture.test.ts:1",
-        "apps/server/src/mcpApps/McpAppService.test.ts:1",
-        "apps/server/src/codexMcpApps.test.ts:1",
-        "apps/web/src/components/chat/McpAppFrame.browser.tsx:1"
+        "apps/web/src/components/chat/McpAppFrame.browser.tsx:131",
+        "apps/server/src/mcpApps/McpAppService.test.ts:149"
       ],
       "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
