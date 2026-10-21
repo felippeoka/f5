@@ -1,7 +1,9 @@
 import { holdsWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Cause, Effect, Layer, Metric } from "effect";
+import { Cause, Effect, Layer, Metric, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { GitCoreTestLive as GitCoreLive } from "../testLayers.ts";
 import { GitCommandError } from "../Errors.ts";
+import { GitServiceLive } from "./GitService.ts";
 import { GitCore } from "../Services/GitCore.ts";
 import {
   GitService,
@@ -984,6 +987,105 @@ it("rejects option-shaped checkout targets without running a checkout", async ()
     ),
   ).rejects.toThrow("Invalid branch name");
   expect(scripted.calls.some((call) => call.args[0] === "checkout")).toBe(false);
+});
+
+describe("pull output beyond the output cap", () => {
+  const runGit = (cwd: string, args: string[]) =>
+    execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+
+  // A fast-forward that prints over 1 MB takes thousands of files, so the real pull's output is
+  // padded past the cap instead.
+  async function makePaddedCore(stream: "stdout" | "stderr") {
+    const padding = new Uint8Array(1_000_001).fill(0x20);
+    const spawnerLayer = Layer.effect(
+      ChildProcessSpawner.ChildProcessSpawner,
+      Effect.gen(function* () {
+        const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
+        return ChildProcessSpawner.make((command) =>
+          Effect.gen(function* () {
+            const handle = yield* delegate.spawn(command);
+            const isPull =
+              ChildProcess.isStandardCommand(command) &&
+              command.args.includes("pull") &&
+              command.args.includes("--ff-only");
+            return isPull
+              ? ChildProcessSpawner.makeHandle({
+                  ...handle,
+                  [stream]: Stream.concat(handle[stream], Stream.make(padding)),
+                })
+              : handle;
+          }),
+        );
+      }),
+    ).pipe(Layer.provide(NodeServices.layer));
+    const layer = GitCoreLive.pipe(
+      Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "f5-git-core-pull-" })),
+      Layer.provide(GitServiceLive),
+      Layer.provide(Layer.merge(NodeServices.layer, spawnerLayer)),
+    );
+    return Effect.runPromise(Effect.service(GitCore).pipe(Effect.provide(layer)));
+  }
+
+  function cloneBehindRemote() {
+    const root = mkdtempSync(join(tmpdir(), "f5-git-core-pull-"));
+    const [cwd, remote, updater] = ["local", "remote.git", "updater"].map((name) =>
+      join(root, name),
+    ) as [string, string, string];
+    for (const dir of [cwd, remote, updater]) mkdirSync(dir);
+    const configure = (repo: string) => {
+      runGit(repo, ["config", "user.email", "test@test.com"]);
+      runGit(repo, ["config", "user.name", "Test"]);
+      runGit(repo, ["config", "commit.gpgsign", "false"]);
+    };
+    runGit(remote, ["init", "--bare", "--initial-branch=main"]);
+    runGit(cwd, ["init", "--initial-branch=main"]);
+    configure(cwd);
+    writeFileSync(join(cwd, "README.md"), "initial\n");
+    runGit(cwd, ["add", "README.md"]);
+    runGit(cwd, ["commit", "-m", "initial"]);
+    runGit(cwd, ["remote", "add", "origin", remote]);
+    runGit(cwd, ["push", "-u", "origin", "main"]);
+    runGit(updater, ["clone", remote, "."]);
+    configure(updater);
+    writeFileSync(join(updater, "remote.txt"), "remote\n");
+    runGit(updater, ["add", "remote.txt"]);
+    runGit(updater, ["commit", "-m", "remote commit"]);
+    runGit(updater, ["push", "origin", "HEAD:main"]);
+    return { root, cwd, remoteHead: runGit(updater, ["rev-parse", "HEAD"]) };
+  }
+
+  it.each(["stdout", "stderr"] as const)(
+    "reports a fast-forward whose %s passes the cap as pulled",
+    async (stream) => {
+      const core = await makePaddedCore(stream);
+      const { root, cwd, remoteHead } = cloneBehindRemote();
+      try {
+        const result = await Effect.runPromise(core.pullCurrentBranch(cwd));
+        expect(result.status).toBe("pulled");
+        expect(runGit(cwd, ["rev-parse", "HEAD"])).toBe(remoteHead);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  it("still fails a pull that Git rejects, whatever its output size", async () => {
+    const core = await makePaddedCore("stderr");
+    const { root, cwd } = cloneBehindRemote();
+    try {
+      // A local commit the remote lacks: `pull --ff-only` cannot fast-forward.
+      writeFileSync(join(cwd, "local.txt"), "local\n");
+      runGit(cwd, ["add", "local.txt"]);
+      runGit(cwd, ["commit", "-m", "local commit"]);
+
+      const error = await Effect.runPromise(Effect.flip(core.pullCurrentBranch(cwd)));
+      expect(error.operation).toBe("GitCore.pullCurrentBranch.pull");
+      expect(error.detail).not.toContain("exceeded");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 it("terminates option parsing before configuration keys", async () => {

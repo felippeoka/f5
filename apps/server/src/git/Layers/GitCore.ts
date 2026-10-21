@@ -103,7 +103,11 @@ interface ExecuteGitOptions {
   fallbackErrorMessage?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   onStderrChunk?: ((chunk: Uint8Array) => void) | undefined;
+  onStdoutChunk?: ((chunk: Uint8Array) => void) | undefined;
 }
+
+// Streams output past the cap while keeping a bounded tail for failure details.
+const discardOutputChunk = () => {};
 
 function sameStringSet(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
   const expected = new Set(right);
@@ -305,6 +309,7 @@ const makeGitCore = Effect.gen(function* () {
         args,
         ...(options.env ? { env: options.env } : {}),
         ...(options.onStderrChunk ? { onStderrChunk: options.onStderrChunk } : {}),
+        ...(options.onStdoutChunk ? { onStdoutChunk: options.onStdoutChunk } : {}),
         allowNonZeroExit: true,
         ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
       })
@@ -1821,9 +1826,13 @@ const makeGitCore = Effect.gen(function* () {
       yield* withRepositoryLock(
         "GitCore.pullCurrentBranch",
         cwd,
+        // HEAD before and after decides the result, so the output is not needed. A large
+        // fast-forward's diffstat can exceed the output cap, which must not fail a pull Git applied.
         executeGit("GitCore.pullCurrentBranch.pull", cwd, ["pull", "--ff-only"], {
           timeoutMs: 30_000,
           fallbackErrorMessage: "git pull failed",
+          onStdoutChunk: discardOutputChunk,
+          onStderrChunk: discardOutputChunk,
         }),
       );
       const afterSha = yield* runGitStdout(
