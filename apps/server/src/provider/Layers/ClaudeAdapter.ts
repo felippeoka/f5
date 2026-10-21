@@ -66,6 +66,7 @@ import type { RuntimeUsageLimit } from "@t3tools/contracts";
 import { claudeLimitState, usageLimitFromWindows } from "../usageLimitMessages.ts";
 import { isProviderResumeFailureText } from "../resumeFailure.ts";
 import { appendClaudeStderrTail, parseClaudeProcessExit } from "../claudeProcessExit.ts";
+import { makeClaudeProcessGroupSpawner } from "../claudeProcessGroup.ts";
 /**
  * ClaudeAdapterLive - Scoped live implementation for the Claude Agent provider adapter.
  *
@@ -7547,6 +7548,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             }),
         });
         const processDiagnostics = { stderrTail: "" };
+        const recordStderr = (data: string) => {
+          processDiagnostics.stderrTail = appendClaudeStderrTail(
+            processDiagnostics.stderrTail,
+            data,
+          );
+        };
+        const spawnClaudeCodeProcess = makeClaudeProcessGroupSpawner(recordStderr);
         const queryOptions: ClaudeQueryOptions = {
           ...(pendingForks.has(threadId) ? { forkSession: true } : {}),
           enableFileCheckpointing: providerOptions?.enableFileCheckpointing !== false,
@@ -7554,12 +7562,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           ...(!existingResumeSessionId && input.threadTitle ? { title: input.threadTitle } : {}),
           ...(input.cwd ? { cwd: input.cwd } : {}),
           ...(runtimeModelSelection.apiModel ? { model: runtimeModelSelection.apiModel } : {}),
-          stderr: (data: string) => {
-            processDiagnostics.stderrTail = appendClaudeStderrTail(
-              processDiagnostics.stderrTail,
-              data,
-            );
-          },
+          stderr: recordStderr,
+          ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
           ...sdkExecutableOptions,
           settingSources: [...CLAUDE_SETTING_SOURCES],
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
