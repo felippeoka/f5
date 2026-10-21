@@ -34,6 +34,7 @@ import {
   gateMainFrameRequests,
 } from "./preview/previewNavigationGuard";
 import { registerPreviewWindowOpen } from "./preview/previewWindowOpen";
+import { installAgentDownloadHandler } from "./preview/agentDownloads";
 import { captureMacWindow } from "./snapShot/MacSnapShot";
 import { profileStateDir } from "@t3tools/shared/profilePaths";
 import { closeWindowsForQuit } from "./quitPreflight";
@@ -929,6 +930,14 @@ function registerPreviewWebContents(tabId: string, webContentsId: number): boole
   entry.removeListeners = [];
   entry.ownerWebContentsId = guest.hostWebContents?.id ?? null;
   entry.webContentsId = webContentsId;
+  installAgentDownloadHandler(guest.session, {
+    directory: Path.join(STATE_DIR, "preview-downloads"),
+    isAgentDriven: (sourceId) =>
+      [...previewTabs.entries()].some(
+        ([candidateTabId, candidate]) =>
+          candidate.webContentsId === sourceId && isAgentPreviewNavigation(candidateTabId),
+      ),
+  });
   // Preserve the new-tab zoom default rather than inheriting an unrelated guest zoom.
 
   const owner = guest.hostWebContents ? BrowserWindow.fromWebContents(guest.hostWebContents) : null;
