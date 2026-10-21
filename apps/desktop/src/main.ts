@@ -35,6 +35,7 @@ import {
 } from "./preview/previewNavigationGuard";
 import { registerPreviewWindowOpen } from "./preview/previewWindowOpen";
 import { installAgentDownloadHandler } from "./preview/agentDownloads";
+import { installPreviewPermissionPolicy } from "./preview/previewPermissions";
 import { captureMacWindow } from "./snapShot/MacSnapShot";
 import { profileStateDir } from "@t3tools/shared/profilePaths";
 import { closeWindowsForQuit } from "./quitPreflight";
@@ -3806,6 +3807,9 @@ function createWindow(
     // before this tab's allowlist and navigation listeners exist. The renderer navigates
     // once the guest registers and those are in place.
     params.src = "about:blank";
+    installPreviewPermissionPolicy(electronSession.fromPartition(partition));
+    // A page that goes fullscreen fills its own webview instead of the whole F5 window.
+    webPreferences.disableHtmlFullscreenWindowResize = true;
     // Agent-driven previews may be hidden or headless; keep timers and rendering running.
     webPreferences.backgroundThrottling = false;
     webPreferences.sandbox = true;
