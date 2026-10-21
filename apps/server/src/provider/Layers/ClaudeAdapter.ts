@@ -63,7 +63,11 @@ import {
 import { providerRuntimeCapabilities } from "@t3tools/shared/providerRuntimeCapabilities";
 import type { ProviderSessionStartInput } from "@t3tools/contracts";
 import type { RuntimeUsageLimit } from "@t3tools/contracts";
-import { claudeLimitState, usageLimitFromWindows } from "../usageLimitMessages.ts";
+import {
+  claudeGatewayUsageLimit,
+  claudeLimitState,
+  usageLimitFromWindows,
+} from "../usageLimitMessages.ts";
 import { isProviderResumeFailureText } from "../resumeFailure.ts";
 import { appendClaudeStderrTail, parseClaudeProcessExit } from "../claudeProcessExit.ts";
 import { makeClaudeProcessGroupSpawner } from "../claudeProcessGroup.ts";
@@ -4971,7 +4975,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             /usage.?limit|rate.?limit|authentication|unauthorized/i.test(originalError)) &&
           rejectedWindows.length > 0
             ? usageLimitFromWindows(rejectedWindows)
-            : undefined;
+            : status === "failed" && !hint
+              ? claudeGatewayUsageLimit(message, yield* nowIso)
+              : undefined;
         const resumeErrorText =
           message.subtype === "success" ? undefined : message.errors.join("\n") || undefined;
         let resumeRejected = false;

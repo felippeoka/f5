@@ -6797,6 +6797,51 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("schedules a resume from a gateway's wrapped rate-limit cooldown", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "hello", attachments: [] });
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 503,
+        result:
+          'API Error: 503 [claude/claude-opus-5-5] [429]: {"type":"error","error":{"type":"rate_limit_error","message":"Please try again later."}} (reset after 4m 6s).',
+        session_id: "gateway-session",
+        uuid: "gateway-result",
+        usage: {},
+        modelUsage: {},
+      } as unknown as SDKMessage);
+      const events = Array.from(
+        yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+        ),
+      );
+      const completed = events.find((event) => event.type === "turn.completed");
+      assert.equal(completed?.type === "turn.completed" && completed.payload.state, "failed");
+      const usageLimit =
+        completed?.type === "turn.completed" ? completed.payload.usageLimit : undefined;
+      assert.equal(usageLimit?.resetSource, "message");
+      assert.closeTo(
+        Date.parse(usageLimit?.resetsAt ?? "") - Date.parse(completed?.createdAt ?? ""),
+        246_000,
+        1_000,
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   for (const originalError of [undefined, "usage limit reached"] as const) {
     it.effect(
       `requires positive usage evidence outside a turn (${originalError ?? "no error text"})`,
