@@ -222,6 +222,13 @@ export function makeForgeSourceControlProvider(options: {
           .some((part) => !part || part === "." || part === ".." || /[\\?#\s]/.test(part))
       )
         return yield* error("repository", "Invalid repository name.", "forbidden");
+      // `/repositories/<workspace>` lists a workspace, so a one-part name never names a repository.
+      if (kind === "bitbucket" && repositoryOverride && repositoryOverride.split("/").length !== 2)
+        return yield* error(
+          "repository",
+          "Bitbucket repositories must be specified as workspace/repository.",
+          "forbidden",
+        );
       const url = `${root(repositoryOverride ? { ...a, repository: repositoryOverride } : a)}${suffix}${kind === "azure-devops" ? `${suffix.includes("?") ? "&" : "?"}api-version=7.1` : ""}`;
       const budget = forgeRequestBudget(a);
       if (!budget)

@@ -512,6 +512,21 @@ it("matches quoted native UTF8 filenames and ignores header-like hunk contents",
   ]);
   expect((await Effect.runPromise(provider.getFiles(ref)))[0]?.patch).toBe(diff);
 });
+it("rejects a Bitbucket repository that is not workspace/repository before any request", async () => {
+  for (const repository of ["repo", "team/repo/extra"]) {
+    const { provider, calls } = fixture("bitbucket");
+    const failure = await Effect.runPromise(
+      Effect.flip(provider.getRepositoryCloneUrls({ cwd: "/w", repository })),
+    );
+    expect(failure.message).toContain("workspace/repository");
+    expect(calls).toEqual([]);
+  }
+  const { provider, calls } = fixture("bitbucket", [
+    { links: { clone: [{ name: "https", href: "https://bitbucket.org/team/other.git" }] } },
+  ]);
+  await Effect.runPromise(provider.getRepositoryCloneUrls({ cwd: "/w", repository: "team/other" }));
+  expect(calls[0]?.url).toContain("api.bitbucket.org/2.0/repositories/team/other");
+});
 it("continues native Bitbucket metadata pagination without following arbitrary next URLs", async () => {
   const { provider, ref, calls } = fixture("bitbucket", [
     {
