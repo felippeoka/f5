@@ -132,9 +132,21 @@ export function describeProviderStatus(label: string, status: ServerProvider | n
   return message ? `${label}. ${message}` : `${label} is unavailable.`;
 }
 
+/**
+ * A sub-provider whose name reads as its provider plus a qualifier ("OpenCode
+ * Zen" under "OpenCode") stands alone, since joining the two would show
+ * "OpenCode · OpenCode Zen".
+ */
 export function getProviderLabel(provider: ProviderKind, model?: ModelPickerModelOption): string {
   const providerLabel = PROVIDER_LABEL_BY_PROVIDER[provider];
-  return model?.subProvider ? `${providerLabel} · ${model.subProvider}` : providerLabel;
+  const subProvider = model?.subProvider?.trim();
+  if (!subProvider) {
+    return providerLabel;
+  }
+  if (subProvider.toLowerCase().startsWith(`${providerLabel.toLowerCase()} `)) {
+    return subProvider;
+  }
+  return `${providerLabel} · ${subProvider}`;
 }
 
 export function getDisplayModelName(
