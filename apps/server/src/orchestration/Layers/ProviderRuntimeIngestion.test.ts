@@ -7130,6 +7130,41 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("never lets a provider name overwrite a title the user set", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-user-rename"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        title: "My own title",
+      }),
+    );
+    harness.emit({
+      type: "thread.metadata.updated",
+      eventId: asEventId("evt-provider-rename-after-user"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: { name: "Provider name" },
+    });
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-after-provider-rename"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-after-rename"),
+      createdAt: now,
+      payload: {},
+    });
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.latestTurn?.turnId === "turn-after-rename",
+    );
+    expect(thread.title).toBe("My own title");
+  });
+
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

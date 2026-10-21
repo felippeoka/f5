@@ -5364,7 +5364,13 @@ const make = Effect.gen(function* () {
             createdAt: now,
           });
       }
-      if (event.type === "thread.metadata.updated" && event.payload.name) {
+      // A provider name only fills a thread that still has its default title: it must not
+      // overwrite a title the user typed or F5 generated.
+      if (
+        event.type === "thread.metadata.updated" &&
+        event.payload.name &&
+        thread.titleSource === "default"
+      ) {
         yield* orchestrationEngine.dispatch({
           type: "thread.meta.update",
           commandId: providerCommandId(event, "thread-meta-update"),
