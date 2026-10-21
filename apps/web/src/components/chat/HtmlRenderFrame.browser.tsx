@@ -170,6 +170,25 @@ it("forwards configured trusted shortcuts using captured native key getters", as
     window.removeEventListener("keydown", receive);
   }
 });
+it("scrolls the thread when the wheel turns over an inline page", async () => {
+  source = '<p style="height:300px;margin:0">Hello</p>';
+  active = await render(
+    <QueryClientProvider client={new QueryClient()}>
+      <TooltipProvider>
+        <div data-testid="thread" style={{ height: "500px", overflowY: "auto" }}>
+          <HtmlRenderFrame reference={reference} onImageExpand={vi.fn()} />
+          <div style={{ height: "1000px" }} />
+        </div>
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+  const thread = page.getByTestId("thread").element();
+  const frame = page.getByTitle("HTML widget", { exact: true });
+  // The reported height shows the page's script is connected and handling the wheel.
+  await expect.poll(() => frame.query()?.getBoundingClientRect().height).toBe(300);
+  await userEvent.wheel(frame, { delta: { y: 100 } });
+  await expect.poll(() => thread.scrollTop).toBeGreaterThan(0);
+});
 it("holds the page's height with a skeleton while the page loads", async () => {
   vi.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>(() => undefined));
   active = await render(
