@@ -3894,13 +3894,11 @@
     },
     {
       "upstreamSha": "21bedfb175b9eec8652adc35d7882bdc3c3c9d59",
-      "classification": "planned:15c",
-      "reason": "Planned: implement and verify the explicitly approved 15c scenario. Upstream change: feat(storage): clean up settled thread worktrees (#15208).",
+      "classification": "equivalent:apps/server/src/storage/StorageCleanupWorker.ts:156",
+      "reason": "Equivalent: the worktree cleanup rules have an onSettle rule, off by default, and cleanup skips a worktree while settlement scripts are pending, running or orphaned. Upstream change: feat(storage): clean up settled thread worktrees (#15208)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-15208"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/storage/StorageCleanupWorker.test.ts:184"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "c814e51af2ba962c9291c9459ee64b4f57e0b5ce",
@@ -4073,13 +4071,11 @@
     },
     {
       "upstreamSha": "bf8ffe81a63c82d3de5fbaa9991fd5f30034a452",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: feat(settings): inactivity auto-settle can keep threads with a PR (#14642).",
+      "classification": "equivalent:apps/server/src/orchestration/threadSettlement.ts:90",
+      "reason": "Equivalent: inactivity auto-settle keeps threads with linked PRs unless autoSettleKeepPullRequests is turned off. Upstream change: feat(settings): inactivity auto-settle can keep threads with a PR (#14642)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-14642"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/threadSettlement.test.ts:154"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "464fad9a433c246b4a5b73c8640787c174c2c195",
@@ -4350,13 +4346,9 @@
     },
     {
       "upstreamSha": "519d64f6cec0a0f9ed18fbca4a3f8695cac44506",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: fix(server): settled and idle-released threads no longer stay Waiting (#19355).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-19355"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not applicable: upstream's provider session manager releases idle sessions and settled threads, which left background tasks marked Waiting after the CLI exited. f5 settling neither releases nor unloads the provider session, and it refuses to settle while background work is active (apps/server/src/orchestration/Layers/OrchestrationEngine.ts:501). Upstream change: fix(server): settled and idle-released threads no longer stay Waiting (#19355)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "adb04202b25c1c45255e76be9f03f0b346b9c5c4",
@@ -4526,13 +4518,11 @@
     },
     {
       "upstreamSha": "6edd44f405bf874a85d8d4f7559149a42bf6c547",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: fix(web): settle shortcut moves to the next thread like the sidebar (#19328).",
+      "classification": "equivalent:apps/web/src/hooks/useThreadActionController.ts:327",
+      "reason": "Equivalent: upstream made its settle shortcut match its sidebar button, which settles and opens the next thread. In f5 the shortcut, the row menu and the header menu all run the same thread action, so they cannot diverge. Upstream change: fix(web): settle shortcut moves to the next thread like the sidebar (#19328)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-19328"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/web/src/components/ChatView.tsx:4233"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "e6626ee1643f62c53ca0c2680b46cf11cab9942d",
@@ -8794,13 +8784,11 @@
     },
     {
       "upstreamSha": "37eaf5d293ef83ce86d2ce9a1583792696c82bbc",
-      "classification": "planned:15c",
-      "reason": "Planned: implement and verify the explicitly approved 15c scenario. Upstream change: fix(server): an agent can settle its own thread when its turn ends (#17145).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:144",
+      "reason": "Equivalent: thread_settle during a running turn records an intent that applies once the turn's terminal processing quiesces; Stop or new user activity cancels it. Upstream change: fix(server): an agent can settle its own thread when its turn ends (#17145)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-17145"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:320"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "85975585579188be20f46d96b4972ce46c33f4bc",
@@ -9511,23 +9499,19 @@
     },
     {
       "upstreamSha": "611132c171f3a821bd2e32f22261135cef6330ac",
-      "classification": "planned:15c",
-      "reason": "Planned: implement and verify the explicitly approved 15c scenario. Upstream change: feat(server,web,mobile): agents see snooze state and link to threads (#16782).",
+      "classification": "equivalent:apps/server/src/mcp/threadToolRuntime.ts:38",
+      "reason": "Equivalent: thread_status reports the thread's settled time, who settled it and its snooze time. Upstream change: feat(server,web,mobile): agents see snooze state and link to threads (#16782)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-16782"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/mcp/threadMcpTools.test.ts:8"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "cd41c4ada0c70cc2eec95ecd7266f3dab010c58c",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: fix(server): threads settle as soon as a client sees their PR merge (#16761).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:540",
+      "reason": "Equivalent: every PR hub change, including a client's detail read seeing a merge, requests a settlement sweep. Upstream change: fix(server): threads settle as soon as a client sees their PR merge (#16761)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-16761"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:586"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "c93080b0a3bf4faffb375169c5ec06adce05eb2f",
@@ -9560,13 +9544,11 @@
     },
     {
       "upstreamSha": "453e596da7e98d973e3853a5c2728681dedf363b",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: fix(server): settled threads stop polling their pull requests (#16762).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:401",
+      "reason": "Equivalent: thread links do not drive PR polling in f5, and the settlement sweep drops settled threads before any PR read, so a settled thread never reads its pull requests. Upstream change: fix(server): settled threads stop polling their pull requests (#16762)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-16762"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:586"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "655dfbe8ba87f0f9ef1d6fad83c20634634653aa",
@@ -9576,13 +9558,11 @@
     },
     {
       "upstreamSha": "079e4bccdcffc56c54bd69523ed77c006553ea21",
-      "classification": "planned:15c",
-      "reason": "Planned: implement and verify the explicitly approved 15c scenario. Upstream change: feat(server): run a project action when a worktree thread settles (#16290).",
+      "classification": "equivalent:apps/server/src/orchestration/threadSettlementHooks.ts:39",
+      "reason": "Equivalent: project scripts marked runOnWorktreeSettle run in the thread's owned worktree when it settles, as persisted hooks. A failure records a fixed notice and later hooks continue; a wake cancels pending hooks and the owned process. Upstream change: feat(server): run a project action when a worktree thread settles (#16290)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-16290"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/threadSettlementHooks.test.ts:158"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "a1830915ecf70e3ad4fbe8efb15ae9f18517eb54",
@@ -11027,13 +11007,9 @@
     },
     {
       "upstreamSha": "cf3e714b0f58e29c8fa8660db50d2187e3263b65",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: fix(server): Stop ends a Codex command after its thread was settled (#15546).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-15546"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not applicable: upstream unsubscribes Codex threads on settle, so Codex unloads them and a later Stop got \"thread not found\". f5 settling does not unsubscribe or unload the provider thread. Upstream change: fix(server): Stop ends a Codex command after its thread was settled (#15546)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "250e052f44dd313b658abebc707242a7b25be340",
@@ -11319,13 +11295,11 @@
     },
     {
       "upstreamSha": "253dea360ef0c743c5de8ba04f8412a7eb4694ac",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: fix(server): keep settled threads asleep after restarts (#15604).",
+      "classification": "equivalent:apps/server/src/nextTurnQueue/restartMarkerCapture.ts:45",
+      "reason": "Equivalent: f5 records a restart continuation only for a thread with an active turn or live background work, and both refuse settlement. A restart-cut turn stays unquiesced until recovery queues its continuation, which also blocks settling, so a settled thread never holds a restart marker. Upstream change: fix(server): keep settled threads asleep after restarts (#15604)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-15604"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/decider.ts:727"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "b3b6ae2cebbae39a706038911dbb8c85c7120be7",
@@ -11571,13 +11545,11 @@
     },
     {
       "upstreamSha": "1826fb55cc4c9c6246d31175e15a496ba4778e07",
-      "classification": "planned:15c",
-      "reason": "Planned: implement and verify the explicitly approved 15c scenario. Upstream change: feat(web): sweep sidebar buttons to settle, un-settle, and wake threads (#14768).",
+      "classification": "equivalent:apps/web/src/components/Sidebar.tsx:639",
+      "reason": "Equivalent: the project menu has Settle idle threads, rows offer Settle and Unsettle, and settled threads sit in a collapsed bucket that stays reachable. Upstream change: feat(web): sweep sidebar buttons to settle, un-settle, and wake threads (#14768)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-14768"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/web/src/components/ThreadSidebar.browser.tsx:1052"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "0c8112013760617230d382e55447ddb75627a997",
@@ -11754,13 +11726,11 @@
     },
     {
       "upstreamSha": "243d1e7c4499d7ba4dc5b22794fcd2c880936c2d",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: fix(server): merged threads settle even after the agent wakes on its own (#15388).",
+      "classification": "equivalent:apps/server/src/orchestration/threadSettlement.ts:58",
+      "reason": "Equivalent: the PR rule compares the merge time with the latest human-authored message, so an agent waking on its own does not hold back settlement. Upstream change: fix(server): merged threads settle even after the agent wakes on its own (#15388)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-15388"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:290"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "d65cd33a03983751598f6bdce76b402ac7bf2cca",
@@ -12129,13 +12099,11 @@
     },
     {
       "upstreamSha": "ca4f84e702428656665d53635e16251112091657",
-      "classification": "planned:15c",
-      "reason": "Planned: implement and verify the explicitly approved 15c scenario. Upstream change: fix(server): threads settle as soon as an agent merges their PR (#15024).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:540",
+      "reason": "Equivalent: a PR hub change, such as the agent's own merge, triggers an immediate settlement sweep. Upstream change: fix(server): threads settle as soon as an agent merges their PR (#15024)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-15024"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:586"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "736130c2fd39b85cd515fa2a41cd10c8a8a52630",
@@ -13174,13 +13142,11 @@
     },
     {
       "upstreamSha": "1d6f23b51929117d5e69ded8c5c0f8e195d75d4a",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: perf(server): background sweeps only read threads that can still settle (#13765).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:401",
+      "reason": "Equivalent: the sweep filters on the in-memory read model before any database or forge read, and bounds and rotates remote lookups. Upstream change: perf(server): background sweeps only read threads that can still settle (#13765)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-13765"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:811"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "294dd123410c77eead2810a052c31fb0cfd3e0c1",
@@ -13190,13 +13156,11 @@
     },
     {
       "upstreamSha": "6f97b0f66a51fbafabd54a5616da8827ebdf6020",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: perf(clients): sort projects and settled threads without re-parsing dates per comparison (#13759).",
+      "classification": "equivalent:apps/web/src/lib/threadOrdering.ts:12",
+      "reason": "Equivalent: f5 sorts projects and threads by comparing ISO timestamp strings, so no date is parsed per comparison. Upstream change: perf(clients): sort projects and settled threads without re-parsing dates per comparison (#13759)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-13759"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/web/src/lib/threadOrdering.test.ts:180"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "8b873eab0d74b731bc0f387be84a8561eace789f",
@@ -13396,13 +13360,11 @@
     },
     {
       "upstreamSha": "3b0a495b0e05d11dbf88ff2148e7c21b49508172",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: perf(server): per-thread settlement and PR checks no longer rebuild the whole thread list (#13691).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:81",
+      "reason": "Equivalent: per-thread settlement checks read one thread's queue, requests, background work and watches with a single scoped query instead of rebuilding the thread list. Upstream change: perf(server): per-thread settlement and PR checks no longer rebuild the whole thread list (#13691)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-13691"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:224"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "6989856aa630611dd7d6dcc8cfe9f97456816284",
@@ -13592,13 +13554,11 @@
     },
     {
       "upstreamSha": "1a0c915c41024ddb47e16befd9fc730c1173af02",
-      "classification": "planned:15c",
-      "reason": "Planned: implement and verify the explicitly approved 15c scenario. Upstream change: fix(terminal): settling a thread closes its idle shells (#13673).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:180",
+      "reason": "Equivalent: settling closes the thread's freshly verified idle shells and keeps their history; a shell that receives input during the probe stays open. Upstream change: fix(terminal): settling a thread closes its idle shells (#13673)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-13673"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": ["apps/server/src/terminal/Layers/Manager.test.ts:264"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "fd996d15e220144ac6e66670169aa87d074ce846",
@@ -13948,13 +13908,14 @@
     },
     {
       "upstreamSha": "0109670411d13b9e380766e98b386b2f756ecf5b",
-      "classification": "planned:15c",
-      "reason": "Planned: reconcile the approved 15c feature and its follow-ups. Upstream change: feat(threads): add per-thread auto-settle switch (#11846).",
+      "classification": "equivalent:apps/web/src/components/thread/ThreadSettlementControl.tsx:42",
+      "reason": "Equivalent: the thread header has a persisted per-thread Auto-settle switch, and automatic settlement rejects a thread that has it off. Upstream change: feat(threads): add per-thread auto-settle switch (#11846)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15c-pr-11846"],
-        "targetModules": ["apps/server/src/orchestration", "apps/server/src/nextTurnQueue"]
-      }
+      "evidence": [
+        "apps/web/src/components/thread/ThreadSettlementControl.browser.tsx:68",
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:161"
+      ],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "d5d48742c9ab00dff82fe8bcbc8da0ba68748959",

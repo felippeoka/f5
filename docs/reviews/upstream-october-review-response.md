@@ -2129,3 +2129,31 @@ checks approval against the session identity the user reviewed and sends each
 mutation once, never replaying it after a timeout. The server still accepts
 the client's `approved` flag, though, and there is no idempotent operation id
 to dedupe a retried call. These remain open plan work.
+
+## 15c triage log: thread settlement
+
+All 21 open 15c records are classified. Two are ported:
+
+- [t3code#17258](https://github.com/pingdotgg/t3code/pull/17258): a refused
+  settle now names its blocker and what to do first. Before, every blocker gave
+  one generic message, and the row and header menus showed nothing at all.
+- [t3code#17148](https://github.com/pingdotgg/t3code/pull/17148): a merge
+  seen by the thread's Git status now starts a settlement sweep at once.
+  Before, it waited for the PR hub or the five-minute schedule.
+
+Seventeen are equivalent to the settlement f5 already ships: the settings
+and per-thread switch, agent-requested settles, PR and inactivity rules,
+settle scripts, worktree cleanup, idle shells, sweep triggers and the sidebar
+bucket. [t3code#15604](https://github.com/pingdotgg/t3code/pull/15604) (keep
+settled threads asleep after restarts) holds by construction. f5 records a
+restart continuation only for an active turn or live background work, and
+both refuse settlement.
+[t3code#19328](https://github.com/pingdotgg/t3code/pull/19328) aligned
+upstream's settle shortcut with its sidebar button. In f5 they already run
+the same action.
+
+Two are not applicable:
+[t3code#19355](https://github.com/pingdotgg/t3code/pull/19355) and
+[t3code#15546](https://github.com/pingdotgg/t3code/pull/15546) handle
+upstream releasing or unloading provider sessions when a thread settles. f5
+settling leaves the session alone.
