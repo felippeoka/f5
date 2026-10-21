@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { fastModeDisabledReasonHelp, normalizeProviderRuntimeInfo } from "./runtimeInfo";
+import {
+  fastModeDisabledReasonHelp,
+  normalizeProviderRuntimeInfo,
+  refusedFastModeReason,
+} from "./runtimeInfo";
 import { readRuntimeConfiguredPayload } from "./orchestrationActivityPayload";
 describe("normalized runtime information", () => {
   it("keeps requested and effective values distinct, including disabled toggles", () => {
@@ -52,6 +56,43 @@ describe("normalized runtime information", () => {
     expect(fastModeDisabledReasonHelp("model_not_allowed").links.map((link) => link.url)).toEqual([
       "https://code.claude.com/docs/en/fast-mode#requirements",
     ]);
+  });
+  it("gives transient and environment reasons their own help", () => {
+    expect(fastModeDisabledReasonHelp("pending")).toEqual({
+      text: expect.stringContaining("still checking"),
+      links: [],
+    });
+    expect(fastModeDisabledReasonHelp("network_error").links[0]?.url).toBe(
+      "https://code.claude.com/docs/en/fast-mode#use-fast-mode-behind-proxies-and-llm-gateways",
+    );
+    expect(fastModeDisabledReasonHelp("disabled_by_env").text).toContain(
+      "CLAUDE_CODE_DISABLE_FAST_MODE",
+    );
+  });
+  it("reports a refusal only for fast mode the user requested", () => {
+    const refused = {
+      fastModeState: "off",
+      fastModeDisabledReason: "extra_usage_disabled",
+      runtimeInfo: normalizeProviderRuntimeInfo(
+        { fastMode: true },
+        { fast_mode_state: "off", fast_mode_disabled_reason: "extra_usage_disabled" },
+      ),
+    };
+    expect(refusedFastModeReason(refused)).toBe("extra_usage_disabled");
+    expect(
+      refusedFastModeReason({
+        ...refused,
+        runtimeInfo: normalizeProviderRuntimeInfo({ fastMode: false }, { fast_mode_state: "off" }),
+      }),
+    ).toBeUndefined();
+    expect(refusedFastModeReason({ ...refused, runtimeInfo: undefined })).toBeUndefined();
+    // Activities stored before requests were normalized say "enabled".
+    expect(
+      refusedFastModeReason({
+        ...refused,
+        runtimeInfo: { requested: { fastMode: "enabled" }, effective: { fastMode: "off" } },
+      }),
+    ).toBe("extra_usage_disabled");
   });
   it("ignores a disabled reason when fast mode matches the request", () => {
     expect(

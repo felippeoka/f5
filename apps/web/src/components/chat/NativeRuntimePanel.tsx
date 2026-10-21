@@ -19,6 +19,7 @@ import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
 import {
   describeFastModeDisabledReason,
   fastModeDisabledReasonHelp,
+  refusedFastModeReason,
 } from "@t3tools/shared/runtimeInfo";
 import { OpenLinkAnchor } from "../OpenLinkAnchor";
 import { useEffect, useState } from "react";
@@ -158,10 +159,8 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   const normalized = info?.runtimeInfo;
   const effective = normalized?.effective;
   const requested = normalized?.requested;
-  const fastModeHelp =
-    requested?.fastMode === "on" && info?.fastModeDisabledReason
-      ? fastModeDisabledReasonHelp(info.fastModeDisabledReason)
-      : undefined;
+  const fastModeRefusal = refusedFastModeReason(info);
+  const fastModeHelp = fastModeRefusal ? fastModeDisabledReasonHelp(fastModeRefusal) : undefined;
   const signInProvider = supportsMcpSignIn(props.provider, props.sessionStatus)
     ? props.provider
     : null;
@@ -230,10 +229,10 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                   <dd>{effective?.fastMode ?? info?.fastModeState}</dd>
                 </>
               )}
-              {info?.fastModeDisabledReason && (
+              {fastModeRefusal && (
                 <>
                   <dt>Fast mode unavailable</dt>
-                  <dd>{describeFastModeDisabledReason(info.fastModeDisabledReason)}</dd>
+                  <dd>{describeFastModeDisabledReason(fastModeRefusal)}</dd>
                 </>
               )}
               {props.outcome && (
@@ -247,19 +246,21 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
             {fastModeHelp && (
               <section aria-label="Fast mode help" className="space-y-1">
                 <p className="text-muted-foreground">{fastModeHelp.text}</p>
-                <p className="flex flex-wrap gap-x-4">
-                  {fastModeHelp.links.map((link) => (
-                    <OpenLinkAnchor
-                      key={link.url}
-                      className="underline"
-                      href={link.url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {link.label}
-                    </OpenLinkAnchor>
-                  ))}
-                </p>
+                {fastModeHelp.links.length > 0 && (
+                  <p className="flex flex-wrap gap-x-4">
+                    {fastModeHelp.links.map((link) => (
+                      <OpenLinkAnchor
+                        key={link.url}
+                        className="underline"
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {link.label}
+                      </OpenLinkAnchor>
+                    ))}
+                  </p>
+                )}
               </section>
             )}
             {signInServers.length > 0 && signInProvider && props.projectId && (

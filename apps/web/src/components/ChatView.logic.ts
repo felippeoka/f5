@@ -26,7 +26,7 @@ import {
   isReservedHostLocalSlashCommandName,
   normalizeHostCompatibleRuntimeSlashCommandName,
 } from "@t3tools/shared/slashCommands";
-import { describeFastModeDisabledReason } from "@t3tools/shared/runtimeInfo";
+import { describeFastModeDisabledReason, refusedFastModeReason } from "@t3tools/shared/runtimeInfo";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/worktree";
 import { type ChatMessage } from "../types";
 import { CLAUDE_SUBAGENT_MODEL_INHERIT, getAppModelOptions } from "../appSettings";
@@ -840,9 +840,7 @@ function fastModeEntry(
   runtime: CompactRuntimeConfiguredActivityPayload | null,
 ): ProviderRuntimeInfoEntry | null {
   if (!runtime?.fastModeState) return null;
-  // Only explain a refusal the user asked for; an unrequested "off" needs no reason.
-  const reason =
-    runtime.runtimeInfo?.requested.fastMode === "on" ? runtime.fastModeDisabledReason : undefined;
+  const reason = refusedFastModeReason(runtime);
   return {
     label: "Fast mode",
     value: reason

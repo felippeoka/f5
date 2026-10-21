@@ -39,24 +39,68 @@ const FAST_MODE_REQUIREMENTS_LINK = {
   label: "Fast mode requirements",
   url: "https://code.claude.com/docs/en/fast-mode#requirements",
 };
+const FAST_MODE_DISABLED_REASON_HELP: Record<string, FastModeDisabledReasonHelp> = {
+  extra_usage_disabled: {
+    text:
+      "Fast mode is billed to usage credits, which are off for this Claude account. On Pro and Max, " +
+      "turn them on under Usage credits in Settings > Usage on claude.ai. On Team and Enterprise, " +
+      "a member with billing access turns them on in Organization settings > Usage.",
+    links: [
+      { label: "Open Claude usage settings", url: "https://claude.ai/settings/usage" },
+      FAST_MODE_REQUIREMENTS_LINK,
+    ],
+  },
+  pending: {
+    text: "Claude Code was still checking whether fast mode is available. This updates after the next turn.",
+    links: [],
+  },
+  network_error: {
+    text:
+      "Claude Code could not reach api.anthropic.com to check fast mode availability, so turns run " +
+      "at standard speed until a check succeeds. Proxies and LLM gateways can block this check.",
+    links: [
+      {
+        label: "Fast mode behind proxies and gateways",
+        url: "https://code.claude.com/docs/en/fast-mode#use-fast-mode-behind-proxies-and-llm-gateways",
+      },
+    ],
+  },
+  disabled_by_env: {
+    text:
+      "An environment variable such as CLAUDE_CODE_DISABLE_FAST_MODE turned fast mode off. Remove it " +
+      "from the environment F5 starts Claude Code in, then start a new session.",
+    links: [],
+  },
+};
 /** What the user can do about a refused fast mode, with where to do it. */
 export function fastModeDisabledReasonHelp(reason: string): FastModeDisabledReasonHelp {
-  if (reason === "extra_usage_disabled") {
-    return {
-      text:
-        "Fast mode is billed to usage credits, which are off for this Claude account. On Pro and Max, " +
-        "turn them on under Usage credits in Settings > Usage on claude.ai. On Team and Enterprise, " +
-        "a member with billing access turns them on in Organization settings > Usage.",
-      links: [
-        { label: "Open Claude usage settings", url: "https://claude.ai/settings/usage" },
-        FAST_MODE_REQUIREMENTS_LINK,
-      ],
-    };
-  }
-  return {
-    text: "Claude Code turned fast mode off for this session.",
-    links: [FAST_MODE_REQUIREMENTS_LINK],
-  };
+  return (
+    FAST_MODE_DISABLED_REASON_HELP[reason] ?? {
+      text: "Claude Code reported that fast mode is not available. The requirements list what it needs.",
+      links: [FAST_MODE_REQUIREMENTS_LINK],
+    }
+  );
+}
+/**
+ * The provider's reason for refusing fast mode the user requested. Absent when fast mode was not
+ * requested or is running, so a blocked but unrequested fast mode stays quiet. Accepts the
+ * `enabled` vocabulary of activities stored before requests were normalized to `on`.
+ */
+export function refusedFastModeReason(
+  runtime:
+    | {
+        readonly runtimeInfo?: ProviderRuntimeInfo | undefined;
+        readonly fastModeState?: string | undefined;
+        readonly fastModeDisabledReason?: string | undefined;
+      }
+    | null
+    | undefined,
+): string | undefined {
+  const requested = fastModeText(runtime?.runtimeInfo?.requested.fastMode);
+  const effective = fastModeText(
+    runtime?.runtimeInfo?.effective.fastMode ?? runtime?.fastModeState,
+  );
+  return requested === "on" && effective !== "on" ? runtime?.fastModeDisabledReason : undefined;
 }
 /** Report only observed values; absent provider reports remain unknown. Costs and usage stay untouched. */
 export function normalizeProviderRuntimeInfo(
