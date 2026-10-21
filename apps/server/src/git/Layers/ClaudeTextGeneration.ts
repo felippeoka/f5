@@ -202,6 +202,10 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         "--tools",
         "",
         "--disable-slash-commands",
+        // A default permission mode from the user's settings (plan mode, for one) must not
+        // change how metadata is generated.
+        "--permission-mode",
+        "dontAsk",
         // Claude refuses the strict flag next to a managed-mcp.json, which
         // already excludes every other MCP source.
         ...(hasClaudeManagedMcpConfig() ? [] : ["--strict-mcp-config"]),

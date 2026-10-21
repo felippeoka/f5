@@ -28,7 +28,7 @@ const env = process.env;
 const argv = process.argv.slice(2);
 const args = argv.join(" ");
 const value = (flag) => argv[argv.indexOf(flag) + 1];
-if (!argv.includes("--tools") || value("--tools") !== "" || !argv.includes("--disable-slash-commands") || !argv.includes("--strict-mcp-config") || argv.includes("--dangerously-skip-permissions")) throw new Error("unsafe metadata capabilities");
+if (!argv.includes("--tools") || value("--tools") !== "" || !argv.includes("--disable-slash-commands") || !argv.includes("--strict-mcp-config") || value("--permission-mode") !== "dontAsk" || argv.includes("--dangerously-skip-permissions")) throw new Error("unsafe metadata capabilities");
 if (JSON.parse(value("--settings")).disableAllHooks !== true) throw new Error("hooks enabled");
 if (!require("node:path").basename(process.cwd()).startsWith("f5-claude-metadata-")) throw new Error("metadata cwd not isolated");
 const input = fs.readFileSync(0, "utf8");
