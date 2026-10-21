@@ -261,3 +261,42 @@ it.effect(
       expect(mockedRunProcess).toHaveBeenCalledTimes(3);
     }),
 );
+
+it.effect.each(["gh", "http"] as const)(
+  "sends captured requests through the %s transport the setting names",
+  (githubTransport) =>
+    Effect.gen(function* () {
+      const { ServerSettingsService } = yield* Effect.promise(() => import("../../serverSettings"));
+      const { DEFAULT_SERVER_SETTINGS } = yield* Effect.promise(() => import("@t3tools/contracts"));
+      const settings = { ...DEFAULT_SERVER_SETTINGS, githubTransport };
+      mockedRunProcess.mockResolvedValue({
+        stdout:
+          'HTTP/2.0 200 Response\r\nContent-Type: application/json\r\n\r\n{"id":7,"login":"via-gh"}',
+        stderr: "",
+        code: 0,
+        signal: null,
+        timedOut: false,
+      });
+      const fetcher = vi.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>(async () =>
+        Response.json({ id: 7, login: "via-http" }),
+      );
+      vi.stubGlobal("fetch", fetcher);
+      const { makeGitHubCli } = yield* Effect.promise(() => import("./GitHubCli.ts"));
+      const gh = yield* makeGitHubCli({ resolveToken: () => Effect.succeed("token") }).pipe(
+        Effect.provideService(
+          ServerSettingsService,
+          ServerSettingsService.of({
+            getSettings: Effect.succeed(settings),
+          } as unknown as typeof ServerSettingsService.Service),
+        ),
+      );
+
+      const context = yield* gh.getCredentialContext({ cwd: "/repo", host: "github.com" });
+
+      expect(context.login).toBe(githubTransport === "gh" ? "via-gh" : "via-http");
+      expect(
+        mockedRunProcess.mock.calls.some(([file, args]) => file === "gh" && args[0] === "api"),
+      ).toBe(githubTransport === "gh");
+      expect(fetcher).toHaveBeenCalledTimes(githubTransport === "gh" ? 0 : 1);
+    }),
+);

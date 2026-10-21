@@ -389,6 +389,9 @@ export type WorktreeDisposablePaths = typeof WorktreeDisposablePaths.Type;
 export const ComputerUseExecutionMode = Schema.Literals(["foreground", "background"]);
 export type ComputerUseExecutionMode = typeof ComputerUseExecutionMode.Type;
 
+export const GitHubTransport = Schema.Literals(["http", "gh"]);
+export type GitHubTransport = typeof GitHubTransport.Type;
+
 export const AutoSettleAfterDays = Schema.NullOr(
   Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 365 })),
 );
@@ -500,6 +503,11 @@ export const ServerSettings = Schema.Struct({
   /** Allow agents to control approved apps. Off by default. */
   enableAgentComputerUse: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   autoPullDefaultBranch: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  /**
+   * How GitHub API requests travel: f5's HTTP client, or `gh api` as before
+   * the HTTP move. "gh" is a fallback kept for one release.
+   */
+  githubTransport: GitHubTransport.pipe(Schema.withDecodingDefault(() => "http" as const)),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -655,6 +663,7 @@ export const ServerSettingsPatch = Schema.Struct({
   computerUseBackend: Schema.optionalKey(Schema.Literals(["auto", "f5"])),
   computerUseExecutionMode: Schema.optionalKey(ComputerUseExecutionMode),
   autoPullDefaultBranch: Schema.optionalKey(Schema.Boolean),
+  githubTransport: Schema.optionalKey(GitHubTransport),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),

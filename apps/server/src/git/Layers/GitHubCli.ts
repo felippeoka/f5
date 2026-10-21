@@ -3,6 +3,7 @@ import { isGithubPlaceholderToken } from "../GithubCliProjection";
 import { buildAccountExecutionEnvironment } from "../../providerProcessEnv";
 import * as NodePath from "node:path";
 import { ServerConfig } from "../../config";
+import { ServerSettingsService } from "../../serverSettings";
 import { ServerSecretStore } from "../../auth/Services/ServerSecretStore";
 import { normalizeGitHubCliError } from "../githubCliError.ts";
 import { enforceGitHubRequestPolicy } from "../githubRequestPolicy.ts";
@@ -30,6 +31,7 @@ export const makeGitHubCli = (
     const scheduler = options.scheduler ?? githubRequestScheduler;
     const secretStore = yield* Effect.serviceOption(ServerSecretStore);
     const serverConfig = yield* Effect.serviceOption(ServerConfig);
+    const serverSettings = yield* Effect.serviceOption(ServerSettingsService);
     const isolated = Option.isSome(serverConfig);
     const execute: GitHubCliShape["execute"] = (input) =>
       Effect.gen(function* () {
@@ -168,8 +170,19 @@ export const makeGitHubCli = (
       });
 
     const cliTokens = new Map<string, { token: string; expires: number }>();
+    const httpTransport = makeGitHubHttpTransport();
+    // `githubTransport: "gh"` sends the same captured requests through `gh api`,
+    // as before the HTTP move. Read per request so the setting applies at once.
+    const transport: GitHubCliShape["execute"] = (input) =>
+      (Option.isSome(serverSettings)
+        ? serverSettings.value.getSettings.pipe(
+            Effect.map((settings) => settings.githubTransport),
+            Effect.orElseSucceed(() => "http" as const),
+          )
+        : Effect.succeed("http" as const)
+      ).pipe(Effect.flatMap((mode) => (mode === "gh" ? execute(input) : httpTransport(input))));
     const api = makeGitHubApi(
-      makeGitHubHttpTransport(),
+      transport,
       scheduler,
       (host, cwd) =>
         Effect.gen(function* () {
