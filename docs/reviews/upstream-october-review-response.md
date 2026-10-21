@@ -2527,3 +2527,41 @@ shares model favorites, hidden models and order across clients. F5 keeps them
 in each client's local settings, so this means moving them into server settings
 and migrating existing values. Upstream's change is about a thousand lines, so
 it is feature work for its own block.
+
+## 15l triage log: Pi
+
+All 21 open 15l records are classified: 17 ported, 1 equivalent and 3 not
+applicable. The Pi driver from the earlier 15l checkpoints already covered 16
+of the ported records. Each record now cites the specific tests for its
+behavior instead of whole files, and those tests pass.
+
+New port: [t3code#18639](https://github.com/pingdotgg/t3code/pull/18639).
+Pi can start native extension work before its wake reaches F5. A prompt sent
+in that window had no `streamingBehavior`, so Pi rejected it and the user's
+turn failed. Prompts now ask Pi to steer, so Pi queues the prompt into the
+running work or starts an idle run as before. The fake Pi process gains a
+`streaming` case that rejects a prompt without `streamingBehavior`, as real
+Pi does. That case fails before the fix (the turn ends `failed`) and passes
+after it. A wake that F5 has already seen still waits for queue admission.
+
+Equivalent: [t3code#17407](https://github.com/pingdotgg/t3code/pull/17407)
+adds driver tests for continuation offers. F5 covers the offer, admission and
+adoption in the adapter and continuation-worker tests.
+
+Not applicable: three upstream refactors. They switch to namespace imports
+([t3code#17375](https://github.com/pingdotgg/t3code/pull/17375)), apply
+upstream's Effect service conventions
+([t3code#17542](https://github.com/pingdotgg/t3code/pull/17542)), and move Pi
+into its own package
+([t3code#17302](https://github.com/pingdotgg/t3code/pull/17302)). F5 keeps
+the Pi driver in the server app with the other providers.
+
+All of this is tested against a scripted Pi RPC process. No installed Pi or
+real Pi account was used, because Pi is not installed on this machine. Pi
+stays in early access, and `docs/providers/pi.md` now says so instead of
+calling the Pi phase undelivered.
+
+Validation: 339 server tests in 23 files, including every Pi test file, pass,
+as do the 2 shared native-history reconciliation tests, the 18 browser cases
+for the model picker and question panel, and the 2 ChatView prefill cases.
+The server typecheck passes.

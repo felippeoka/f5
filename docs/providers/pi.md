@@ -78,5 +78,6 @@ host turns against Pi's active ancestry. Unlocated turns and other providers rem
 queued prompts pause for review, and late writes cannot recreate retired turns.
 Reconciliation needs the same idle native session before and after acknowledgement.
 Unexpected native session switches, incomplete ancestry or unconfirmed projection
-still block new prompts. Real Pi account validation remains pending. These items
-and the required full validation gates prevent marking the Pi phase delivered.
+still block new prompts. The integration is tested against a scripted Pi RPC
+process; validation with a real Pi account is still pending, so Pi stays in early
+access.

@@ -7793,13 +7793,9 @@
     },
     {
       "upstreamSha": "31b04e2ee929660d80d5931ed53fd17bf1d33ce6",
-      "classification": "planned:15l",
-      "reason": "Planned: partial implementation and focused evidence exist for Effect-owned RPC, session, metadata and cancellation lifetimes within F5 provider layers; full 15l delivery and required release gates remain deferred. Upstream change: refactor(provider): bring opencode, muse, pi, core and testing in line with Effect conventions (#17542).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream refactors its OpenCode, Muse, Pi, core and testing packages to its Effect service conventions. F5's Pi adapter is structured differently, so there is no behavior to port. Upstream change: refactor(provider): bring opencode, muse, pi, core and testing in line with Effect conventions (#17542)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15l-pr-17542"],
-        "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
         "afc90b20382bc63045665a054a3159710e1862fc",
@@ -8037,13 +8033,9 @@
     },
     {
       "upstreamSha": "2c7a446e657e705c257db28540819f4c0115b2fc",
-      "classification": "planned:15l",
-      "reason": "Planned: partial implementation and focused evidence exist for a single mcp__f5__ namespace and owned bridge-source approval checks; full 15l delivery and required release gates remain deferred. Upstream change: refactor(providers): namespace-import service modules in core, Muse, Pi, and testing (#17375).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream switches its provider packages to namespace imports of service modules. F5's Pi code lives in the server app and has no matching module layout, so there is no behavior to port. Upstream change: refactor(providers): namespace-import service modules in core, Muse, Pi, and testing (#17375)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15l-pr-17375"],
-        "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
         "afc90b20382bc63045665a054a3159710e1862fc",
@@ -8207,13 +8199,9 @@
     },
     {
       "upstreamSha": "9b0df1358f9f9c3277bcb33777c2435b88ee75c4",
-      "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: refactor(provider-pi): move Pi into its own provider package (#17302).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15l-pr-17302"],
-        "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream moves Pi into its own provider package. F5 keeps the Pi driver with the other providers in the server app, so there is no behavior to port. Upstream change: refactor(provider-pi): move Pi into its own provider package (#17302)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2c1160783ea4b4dcc1c1f1ab04639ffc0aaa289d",

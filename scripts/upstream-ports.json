@@ -1559,9 +1559,9 @@
     {
       "upstreamSha": "0b6ec43c54165a87941b7a070849be8979646040",
       "subject": "fix(server): Pi discovers workspace skills and commands (#17190)",
-      "reason": "Planned: partial implementation and focused evidence exist for workspace command and skill discovery with bounded selected-skill expansion; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi discovers workspace skills and commands (#17190).",
+      "reason": "Ported: a Pi session lists the workspace's commands and skills from the live Pi process, mapping Pi's user and project skill scopes onto F5's. Upstream change: fix(server): Pi discovers workspace skills and commands (#17190)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -1569,8 +1569,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/commands.test.ts:1"
+        "apps/server/src/provider/pi/commands.test.ts:10",
+        "apps/server/src/provider/pi/commands.test.ts:99"
       ]
     },
     {
@@ -3078,9 +3078,9 @@
     {
       "upstreamSha": "160b18c8667f8370f46708d273d368648316b200",
       "subject": "fix(pi): keep thinking defaults specific to each model (#17835)",
-      "reason": "Planned: partial implementation and focused evidence exist for qualified model discovery, model-specific thinking defaults and native selection read-back; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): keep thinking defaults specific to each model (#17835).",
+      "reason": "Ported: each Pi model offers only the thinking levels it supports, and Pi's default level is clamped per model instead of carried across models. Upstream change: fix(pi): keep thinking defaults specific to each model (#17835)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -3088,9 +3088,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/thinkingCapabilities.test.ts:1",
-        "apps/server/src/provider/Layers/PiAdapter.test.ts:1"
+        "apps/server/src/provider/pi/thinkingCapabilities.test.ts:31",
+        "apps/server/src/provider/pi/discovery.test.ts:6"
       ]
     },
     {
@@ -6228,10 +6227,9 @@
     {
       "upstreamSha": "2c7a446e657e705c257db28540819f4c0115b2fc",
       "subject": "refactor(providers): namespace-import service modules in core, Muse, Pi, and testing (#17375)",
-      "reason": "Planned: partial implementation and focused evidence exist for a single mcp__f5__ namespace and owned bridge-source approval checks; full 15l delivery and required release gates remain deferred. Upstream change: refactor(providers): namespace-import service modules in core, Muse, Pi, and testing (#17375).",
+      "reason": "Not applicable: upstream switches its provider packages to namespace imports of service modules. F5's Pi code lives in the server app and has no matching module layout, so there is no behavior to port. Upstream change: refactor(providers): namespace-import service modules in core, Muse, Pi, and testing (#17375)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15l",
+      "disposition": "not-applicable",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
         "afc90b20382bc63045665a054a3159710e1862fc",
@@ -6984,10 +6982,9 @@
     {
       "upstreamSha": "31b04e2ee929660d80d5931ed53fd17bf1d33ce6",
       "subject": "refactor(provider): bring opencode, muse, pi, core and testing in line with Effect conventions (#17542)",
-      "reason": "Planned: partial implementation and focused evidence exist for Effect-owned RPC, session, metadata and cancellation lifetimes within F5 provider layers; full 15l delivery and required release gates remain deferred. Upstream change: refactor(provider): bring opencode, muse, pi, core and testing in line with Effect conventions (#17542).",
+      "reason": "Not applicable: upstream refactors its OpenCode, Muse, Pi, core and testing packages to its Effect service conventions. F5's Pi adapter is structured differently, so there is no behavior to port. Upstream change: refactor(provider): bring opencode, muse, pi, core and testing in line with Effect conventions (#17542)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15l",
+      "disposition": "not-applicable",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
         "afc90b20382bc63045665a054a3159710e1862fc",
@@ -7918,9 +7915,9 @@
     {
       "upstreamSha": "38c187bfb7a0020db36ccc1479e7c3501b205fb8",
       "subject": "fix(pi): preserve tool images and structured results (#17851)",
-      "reason": "Planned: partial implementation and focused evidence exist for bounded structured tool completions and authenticated tool-image storage without inline queued bytes; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve tool images and structured results (#17851).",
+      "reason": "Ported: Pi tool completions keep structured results and native error flags in a bounded envelope. Tool images are moved to the authenticated attachment store instead of travelling inline with queued events. Upstream change: fix(pi): preserve tool images and structured results (#17851)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -7928,9 +7925,9 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/PiToolOutput.test.ts:1",
-        "apps/server/src/provider/Layers/PiAdapter.test.ts:1"
+        "apps/server/src/provider/pi/PiToolOutput.test.ts:16",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:51",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:12"
       ]
     },
     {
@@ -8294,9 +8291,9 @@
     {
       "upstreamSha": "3b6af0bd1600f034b0466e1b8ff017fbabeba910",
       "subject": "fix(server): Pi loads every selected skill without losing prompt text (#17194)",
-      "reason": "Planned: partial implementation and focused evidence exist for bounded expansion of all selected workspace skill blocks; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi loads every selected skill without losing prompt text (#17194).",
+      "reason": "Ported: every selected skill is loaded once, and the prompt's own prose, whitespace and images are kept around the expanded skill blocks. Upstream change: fix(server): Pi loads every selected skill without losing prompt text (#17194)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -8304,8 +8301,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:507",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:549"
       ]
     },
     {
@@ -10483,17 +10480,16 @@
     {
       "upstreamSha": "4ae976dbae39b3e80243b864a8b61da00f642dc4",
       "subject": "fix(server): Pi thread titles use linked PR context (#16210)",
-      "reason": "Planned: implementation and focused evidence exist for five title-context cases fail before the fix. Saved links now reach asynchronous title generation and the real Pi metadata process through shared provider input, with a five-link local projection lookup and separately bounded, quoted untrusted prompt context. Ordinary titles and corrupt/missing link fallback remain available without a forge probe or active-turn delay. All 205 cases in 12 title, provider, PR-reader and reactor suites, all eight typechecks, formatter and lint pass; real installed Pi account proof and the remaining 15l release obligations are still open. The remaining 15l per-SHA audit and required release gates are not complete. Upstream change: fix(server): Pi thread titles use linked PR context (#16210).",
+      "reason": "Ported: title generation, including Pi's, receives the thread's five most recent saved PR links as bounded, quoted context. A missing or corrupt link falls back to an ordinary title. Upstream change: fix(server): Pi thread titles use linked PR context (#16210)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": ["df422a304e160ba3782bc2bdf95b00c8390e7c45"],
       "evidence": [
-        "apps/server/src/provider/pi/PiMetadata.test.ts:84",
-        "apps/server/src/git/promptTextGeneration.ts:98",
-        "apps/server/src/prHub/threadLinks.test.ts:1",
-        "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts:3751",
-        "apps/server/src/git/Prompts.test.ts:15"
+        "apps/server/src/provider/pi/PiMetadata.test.ts:82",
+        "apps/server/src/git/Prompts.test.ts:16",
+        "apps/server/src/prHub/threadLinks.test.ts:21",
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts:3753"
       ]
     },
     {
@@ -10832,19 +10828,16 @@
     {
       "upstreamSha": "4d7683557ad4a2411d6de405e500e4a56b43d0e1",
       "subject": "fix(pi): load T3 tool schemas for completion gateways (#18643)",
-      "reason": "Planned: partial implementation and focused evidence exist for completion-gateway schemas and active-tool exclusions in the executable MCP extension fixture; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): load T3 tool schemas for completion gateways (#18643).",
+      "reason": "Ported: completion gateways get the F5 tool schemas again after a model switch or an older tool loadout, without the tools that are excluded. Upstream change: fix(pi): load T3 tool schemas for completion gateways (#18643)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
         "afc90b20382bc63045665a054a3159710e1862fc",
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
-      "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
-      ]
+      "evidence": ["apps/server/src/provider/pi/mcpExtensionSource.test.ts:170"]
     },
     {
       "upstreamSha": "4d83436415c0f6020afe84c127b88874b6f0103c",
@@ -13291,9 +13284,9 @@
     {
       "upstreamSha": "5f7294d452a5c6d6e0b7bd2c992478f830fbe212",
       "subject": "fix(pi): allow known read-only T3 tools without approval (#17852)",
-      "reason": "Planned: partial implementation and focused evidence exist for verified read-only tool exemptions and mutation blocking in read-only workflows; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): allow known read-only T3 tools without approval (#17852).",
+      "reason": "Ported: F5 tools that the bridge annotates as read-only run without an approval prompt, while mutating tools and tools replaced by another extension still need approval. Upstream change: fix(pi): allow known read-only T3 tools without approval (#17852)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -13301,8 +13294,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:307",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:603"
       ]
     },
     {
@@ -13734,19 +13727,16 @@
     {
       "upstreamSha": "62da1cd48bb43def11a79cd6aa033dbc478e4dfd",
       "subject": "fix(pi): preserve shell command exit codes (#17834)",
-      "reason": "Planned: partial implementation and focused evidence exist for original shell exit codes and separate transport and semantic outcomes; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve shell command exit codes (#17834).",
+      "reason": "Ported: Pi shell tool results keep the command's own exit code, and a non-zero exit is reported as a semantic failure separate from a transport error. Upstream change: fix(pi): preserve shell command exit codes (#17834)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
         "afc90b20382bc63045665a054a3159710e1862fc",
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
-      "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/PiToolOutput.test.ts:1"
-      ]
+      "evidence": ["apps/server/src/provider/pi/PiToolOutput.test.ts:4"]
     },
     {
       "upstreamSha": "62e4ae400555e62a42d5cb401d744ba6dd0b401b",
@@ -15347,9 +15337,9 @@
     {
       "upstreamSha": "6e9c5a851c92c52e2f4a8a80c655e60db133f9ac",
       "subject": "fix(pi): expire and cancel extension approvals (#17840)",
-      "reason": "Planned: partial implementation and focused evidence exist for one-shot, generation-fenced approvals with native expiry and cancellation; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): expire and cancel extension approvals (#17840).",
+      "reason": "Ported: Pi extension approvals expire on Pi's deadline, are cancelled when the turn ends, and accept one answer from the current session only. Upstream change: fix(pi): expire and cancel extension approvals (#17840)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -15357,8 +15347,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/PiUiRequests.test.ts:1"
+        "apps/server/src/provider/pi/PiUiRequests.test.ts:43",
+        "apps/server/src/provider/pi/PiUiRequests.test.ts:11"
       ]
     },
     {
@@ -17093,9 +17083,9 @@
     {
       "upstreamSha": "7a2b1c72beed4f560aebb41aa7b26e0792eeb938",
       "subject": "fix(server): reconcile Pi native session rewinds (#13839)",
-      "reason": "Planned: partial implementation and focused evidence exist for same-session native rewind reconciliation, exact persisted message ownership and durable retirement across restart; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(server): reconcile Pi native session rewinds (#13839).",
+      "reason": "Ported: a rewind made inside Pi's own session is reconciled against F5's turns, retiring the rewound turns durably across restarts. Prompts stay blocked until the projection confirms it, and a native session switch still blocks. Upstream change: fix(server): reconcile Pi native session rewinds (#13839)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -17105,12 +17095,10 @@
         "e68a0637224080f195ef16d766454ad554a1a7f3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/Layers/PiAdapter.test.ts:1",
-        "apps/server/src/orchestration/rewind.test.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:433",
         "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:2226",
-        "apps/server/src/provider/ProviderNativeHistory.test.ts:1",
-        "packages/shared/src/nativeHistoryReconciliation.test.ts:1"
+        "apps/server/src/orchestration/rewind.test.ts:351",
+        "packages/shared/src/nativeHistoryReconciliation.test.ts:47"
       ]
     },
     {
@@ -17588,9 +17576,9 @@
     {
       "upstreamSha": "7e8071f1f1566220fb52cbfaaf97a2bc4e93a193",
       "subject": "fix(pi): preserve native abort outcomes (#17853)",
-      "reason": "Planned: partial implementation and focused evidence exist for native abort, failed prompt acknowledgement and owned settlement outcomes; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve native abort outcomes (#17853).",
+      "reason": "Ported: a native Pi abort settles the turn as cancelled, a failed prompt acknowledgement settles it as failed, and an abort F5 did not start is not reported as success. Upstream change: fix(pi): preserve native abort outcomes (#17853)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -17598,9 +17586,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/PiTurnState.test.ts:1",
-        "apps/server/src/provider/Layers/PiAdapter.test.ts:1"
+        "apps/server/src/provider/pi/PiTurnState.test.ts:75",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:12"
       ]
     },
     {
@@ -21364,15 +21351,17 @@
     {
       "upstreamSha": "9a9fd2e3ed613275b0c1fdf356def2230480c47e",
       "subject": "fix(pi): queue turn-start prompts when native work is running (#18639)",
-      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): queue turn-start prompts when native work is running (#18639).",
+      "reason": "Ported: prompts ask Pi to steer, so a prompt sent while native extension work is already running, before its wake reaches F5, is queued by Pi instead of rejected. The fixture's streaming case fails before the fix. A wake F5 has already seen still waits for queue admission. Upstream change: fix(pi): queue turn-start prompts when native work is running (#18639)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
-      "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
+      "f5Shas": [
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3",
+        "e4676a3610d4b1b24e0603e2075b3aec262b27de"
+      ],
       "evidence": [
-        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
-        "apps/server/src/provider/Drivers/PiDriver.ts:1",
-        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:12",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:493"
       ]
     },
     {
@@ -21433,10 +21422,9 @@
     {
       "upstreamSha": "9b0df1358f9f9c3277bcb33777c2435b88ee75c4",
       "subject": "refactor(provider-pi): move Pi into its own provider package (#17302)",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: refactor(provider-pi): move Pi into its own provider package (#17302).",
+      "reason": "Not applicable: upstream moves Pi into its own provider package. F5 keeps the Pi driver with the other providers in the server app, so there is no behavior to port. Upstream change: refactor(provider-pi): move Pi into its own provider package (#17302)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15l"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9b150f791b8d3c8b284c3c701d2c1ef8aa14df45",
@@ -26177,9 +26165,9 @@
     {
       "upstreamSha": "bfec2387b8102975c84690f99be0f5f834fd0cbe",
       "subject": "fix(pi): preserve provider identity in discovered models (#16661)",
-      "reason": "Planned: partial implementation and focused evidence exist for provider-qualified model identity across discovery, UI selection and native read-back; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve provider identity in discovered models (#16661).",
+      "reason": "Ported: Pi models keep their provider-qualified identity through discovery, the model picker and Pi's read-back, so two providers' models with the same name stay distinct. Upstream change: fix(pi): preserve provider identity in discovered models (#16661)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -26187,9 +26175,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/discovery.test.ts:1",
-        "apps/web/src/components/chat/ProviderInstanceModelPicker.browser.tsx:1"
+        "apps/server/src/provider/pi/discovery.test.ts:6",
+        "apps/web/src/components/chat/ProviderInstanceModelPicker.browser.tsx:59"
       ]
     },
     {
@@ -27792,15 +27779,14 @@
     {
       "upstreamSha": "cb46c62504aca99295a4a8879644625a20685b7f",
       "subject": "test(provider-pi): cover continuation offers through the driver (#17407)",
-      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: test(provider-pi): cover continuation offers through the driver (#17407).",
+      "reason": "Equivalent: upstream adds driver-level tests for continuation offers. F5 covers the offer, admission and adoption through the adapter and the continuation worker. Upstream change: test(provider-pi): cover continuation offers through the driver (#17407)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "15l",
       "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
       "evidence": [
-        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
-        "apps/server/src/provider/Drivers/PiDriver.ts:1",
-        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:493",
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:91"
       ]
     },
     {
@@ -30406,9 +30392,9 @@
     {
       "upstreamSha": "de72286ee5777319fde054e7a82023916ce6f481",
       "subject": "fix(server): Pi discovers optional T3 tools on demand (#17220)",
-      "reason": "Planned: partial implementation and focused evidence exist for optional tool discovery and completion-gateway schema availability; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi discovers optional T3 tools on demand (#17220).",
+      "reason": "Ported: optional F5 tools are discoverable on demand without a confirmation, and a discovered tool is still gated by the session's approval policy. Upstream change: fix(server): Pi discovers optional T3 tools on demand (#17220)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -30416,8 +30402,8 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:141",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:349"
       ]
     },
     {
@@ -31205,16 +31191,16 @@
     {
       "upstreamSha": "e408cac0d7d903ccfcecfb906d4e48292294ab55",
       "subject": "docs(pi): update installation and remote login guidance (#17836)",
-      "reason": "Planned: partial implementation and focused evidence exist for explicit-instance Pi installation, terminal login and remote authorization documentation; full 15l delivery and required release gates remain deferred. Upstream change: docs(pi): update installation and remote login guidance (#17836).",
+      "reason": "Ported: the Pi guide covers installing Pi 0.80.5 or newer, logging in from a terminal, and finishing authorization on a headless server by pasting the redirect URL or code. Upstream change: docs(pi): update installation and remote login guidance (#17836)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
         "afc90b20382bc63045665a054a3159710e1862fc",
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
-      "evidence": ["docs/reviews/upstream-october-review-response.md:941", "docs/providers/pi.md:1"]
+      "evidence": ["docs/providers/pi.md:3", "docs/providers/pi.md:10"]
     },
     {
       "upstreamSha": "e41755cf8a9b07a12fefee5134cadacb514d4ad9",
@@ -31835,9 +31821,9 @@
     {
       "upstreamSha": "e8f5850b824572bab76bf810696f875eb648eff9",
       "subject": "fix(server): Pi editor dialogs prefill the answer composer (#17206)",
-      "reason": "Planned: partial implementation and focused evidence exist for editor prefills through persisted activity parsing, both question panels and explicit empty answers; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi editor dialogs prefill the answer composer (#17206).",
+      "reason": "Ported: a Pi editor dialog's prefilled text appears in the answer composer and stays editable. An explicitly cleared answer is sent as empty, and the original composer draft returns afterwards. Upstream change: fix(server): Pi editor dialogs prefill the answer composer (#17206)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
@@ -31845,10 +31831,9 @@
         "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
-        "docs/reviews/upstream-october-review-response.md:941",
-        "apps/web/src/components/ChatView.browser.tsx:1",
-        "apps/web/src/components/chat/AsyncUserInputPanel.browser.tsx:1",
-        "apps/server/src/provider/pi/PiUiRequests.test.ts:1"
+        "apps/server/src/provider/pi/PiUiRequests.test.ts:78",
+        "apps/web/src/components/chat/AsyncUserInputPanel.browser.tsx:62",
+        "apps/web/src/components/ChatView.browser.tsx:2846"
       ]
     },
     {
@@ -34341,15 +34326,15 @@
     {
       "upstreamSha": "f999eb2a8e7d8db74d4f4ab7dd66f86163e1a226",
       "subject": "fix(server): Pi extension wakes get an owned continuation turn (#17214)",
-      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi extension wakes get an owned continuation turn (#17214).",
+      "reason": "Ported: native work started by a Pi extension is admitted through the turn queue as its own continuation turn, without sending another prompt. A declined wake stops the child and is never replayed. Upstream change: fix(server): Pi extension wakes get an owned continuation turn (#17214)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15l",
       "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
       "evidence": [
-        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
-        "apps/server/src/provider/Drivers/PiDriver.ts:1",
-        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:493",
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:91",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:603"
       ]
     },
     {
