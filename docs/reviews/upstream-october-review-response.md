@@ -2404,3 +2404,67 @@ have. A probe showed that F5's existing `db.connection.wait_ms` annotation
 lands on the caller's span, not on the `sql.execute` or `sql.transaction` span,
 because those spans are not current while the connection is acquired. The
 wait-time metric itself is correct.
+
+## 15c overlay: the 26 September settlement records
+
+The 26 September records that a user decision moved into 15c are now
+reconciled against F5's settlement implementation: 3 ported, 19 equivalent
+and 4 still deferred. The plan keeps them as `planned:15c` overrides, so the
+outcome lives only in the ledger. The plan test now accepts `equivalent` as
+well as `ported` when a reapplied override keeps its proof, which matches what
+`applyPortPlan` already does.
+
+Ported, with the proof recorded on 2026-10-19:
+[t3code#9934](https://github.com/pingdotgg/t3code/pull/9934) (actual merge
+and close times, never updated times),
+[t3code#10424](https://github.com/pingdotgg/t3code/pull/10424) (no reads
+while both automatic policies are off) and
+[t3code#8600](https://github.com/pingdotgg/t3code/pull/8600) (server-side
+settlement with a saved-branch lookup that needs no status scan).
+
+Equivalent: the server behaviors map to existing settlement tests. These are
+settling as soon as branch status sees a merge
+([t3code#9528](https://github.com/pingdotgg/t3code/pull/9528),
+[t3code#12161](https://github.com/pingdotgg/t3code/pull/12161)), using the
+last activity as the settled time
+([t3code#9254](https://github.com/pingdotgg/t3code/pull/9254)), sharing
+branch reads ([t3code#9459](https://github.com/pingdotgg/t3code/pull/9459)),
+settling inactivity before any host contact
+([t3code#10103](https://github.com/pingdotgg/t3code/pull/10103)), keeping
+threads with PRs unless the user opts out
+([t3code#9610](https://github.com/pingdotgg/t3code/pull/9610)) and using a
+merge only once ([t3code#7454](https://github.com/pingdotgg/t3code/pull/7454)).
+Automatic settlement is opt-in, with server settings that default off
+([t3code#8321](https://github.com/pingdotgg/t3code/pull/8321),
+[t3code#8596](https://github.com/pingdotgg/t3code/pull/8596),
+[t3code#9147](https://github.com/pingdotgg/t3code/pull/9147)). Un-settling
+moves a thread back to the top
+([t3code#8231](https://github.com/pingdotgg/t3code/pull/8231)). In the
+client, settled rows are muted until hover or focus
+([t3code#11101](https://github.com/pingdotgg/t3code/pull/11101),
+[t3code#10023](https://github.com/pingdotgg/t3code/pull/10023)), show the
+project icon ([t3code#9366](https://github.com/pingdotgg/t3code/pull/9366))
+and label the Unsettle action
+([t3code#7796](https://github.com/pingdotgg/t3code/pull/7796)). The settled
+shelf starts collapsed
+([t3code#9314](https://github.com/pingdotgg/t3code/pull/9314)), opening a
+project never picks a settled thread
+([t3code#11804](https://github.com/pingdotgg/t3code/pull/11804)), and
+assistant messages are never folded
+([t3code#7723](https://github.com/pingdotgg/t3code/pull/7723)). The
+`thread.toggleSettled` command exists without a default binding
+([t3code#8089](https://github.com/pingdotgg/t3code/pull/8089)), as pinning
+does.
+
+Still deferred, because F5 chose differently:
+
+- [t3code#5379](https://github.com/pingdotgg/t3code/pull/5379) and
+  [t3code#7969](https://github.com/pingdotgg/t3code/pull/7969): settling a
+  snoozed or pinned thread clears that state upstream. F5 refuses and says
+  which state to clear first.
+- [t3code#10400](https://github.com/pingdotgg/t3code/pull/10400): upstream
+  allows settling with an unanswered question. F5 refuses until it is
+  answered.
+- [t3code#9033](https://github.com/pingdotgg/t3code/pull/9033) aligns a
+  composer un-settle banner that F5 does not have; un-settling is in the
+  thread header.

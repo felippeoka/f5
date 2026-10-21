@@ -597,17 +597,14 @@
     {
       "upstreamSha": "050690d1bc048c1f94096c17a1c9231c3ad61a83",
       "subject": "fix(server): settle threads using actual pull request terminal timestamps (#9934)",
-      "reason": "Planned: implementation and focused evidence exist for actual terminal timestamps without an updatedAt fallback, exact-head direct detail admission and post-read account/policy checks. Delivery remains deferred pending individual final settlement reconciliation and the required full gate.",
+      "reason": "Ported: settlement reads a PR's actual merge or close time and never falls back to its updated time; a host without terminal timestamps keeps the thread active. Branch proof needs an exact head match, and account and repository policy are rechecked after the read. Upstream change: fix(server): settle threads using actual pull request terminal timestamps (#9934)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15c",
       "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
       "evidence": [
-        "apps/server/src/git/branchPullRequestLookup.test.ts:1",
-        "apps/server/src/git/Layers/GitManager.extended.ts:620",
-        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:1",
-        "apps/server/src/prHub/forgeModel.test.ts:1"
+        "apps/server/src/prHub/forgeModel.ts:137",
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:668"
       ]
     },
     {
@@ -639,10 +636,12 @@
     {
       "upstreamSha": "0527ddf06defc88169c245a0fe53635d41d66469",
       "subject": "fix: quiet settled threads and simplify PR badges (#11101)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: settled sidebar rows are muted until hovered or focused. F5's PR badge shows one PR per thread, so upstream's linked-PR count change has no counterpart. Upstream change: fix: quiet settled threads and simplify PR badges (#11101)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/web/src/components/sidebar/SidebarThreadRow.tsx:168"]
     },
     {
       "upstreamSha": "052c7ae53e46c705d5fd5dfa995275bc3100744e",
@@ -1612,10 +1611,15 @@
     {
       "upstreamSha": "0bbecfabf189349b16ad2d7e6558a95a98a3b196",
       "subject": "fix: make thread auto-settling opt-in (#8321)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: every automatic settlement setting is off by default and opt-in, per server and per project. Upstream change: fix: make thread auto-settling opt-in (#8321)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": [
+        "packages/contracts/src/settings.ts:434",
+        "packages/contracts/src/settings.test.ts:172"
+      ]
     },
     {
       "upstreamSha": "0bc59bbae391ee45ab3a7cfb2dc703c8b27e5772",
@@ -2795,10 +2799,12 @@
     {
       "upstreamSha": "143341b0bc4e3e81066ab2cd86ddd199574bfd83",
       "subject": "feat(web): settle and restore threads with a keyboard shortcut (#8089)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: the thread.toggleSettled command settles or un-settles the active thread and reports a refused settle with the server's reason. Like pinning, it has no default key binding; users bind it in keybindings. Upstream change: feat(web): settle and restore threads with a keyboard shortcut (#8089)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/web/src/components/ChatView.tsx:4233"]
     },
     {
       "upstreamSha": "14337401bc801d6239dd10e34997b4481081cf1d",
@@ -3660,10 +3666,18 @@
     {
       "upstreamSha": "19ee856ec099dddb94e28a3f933ec7c2575ed5a2",
       "subject": "fix(server): propagate linked pr changes and settle threads immediately (#12161)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: newly linked PRs are tracked and their reads shared, and a branch settles as soon as branch status sees the merge, without waiting for a sweep. Upstream change: fix(server): propagate linked pr changes and settle threads immediately (#12161)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": [
+        "8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca",
+        "3eeaa604d15c11f4ddb8b83abe963b59ba0bfdc7"
+      ],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:585",
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:686"
+      ]
     },
     {
       "upstreamSha": "1a003e383ac6b10258b8100c2617d938c4f06c69",
@@ -5652,10 +5666,12 @@
     {
       "upstreamSha": "2971ec3209d7ef1b00d7ded70fe6342816b1539f",
       "subject": "fix(server): preserve automatic settlement timestamps (#9254)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: automatic settlement records the thread's last activity as its settled time. Upstream change: fix(server): preserve automatic settlement timestamps (#9254)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:265"]
     },
     {
       "upstreamSha": "298f8c95cd7c20ea7943a431f22e836fa637457b",
@@ -6056,10 +6072,12 @@
     {
       "upstreamSha": "2b96220f00de09b61327c8e881b7f509f8cc5a79",
       "subject": "fix(server): settle branch threads immediately on pull request merge (#9528)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: a branch thread settles as soon as branch status sees its PR merge, without waiting for a sweep. Upstream change: fix(server): settle branch threads immediately on pull request merge (#9528)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["3eeaa604d15c11f4ddb8b83abe963b59ba0bfdc7"],
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:686"]
     },
     {
       "upstreamSha": "2bb92ba474f311644137dcb1b6eac604c504bbee",
@@ -6422,10 +6440,12 @@
     {
       "upstreamSha": "2d8378b4404888f0d5458e8fc9c83b1032e21290",
       "subject": "fix(web): avoid reopening settled threads when adding projects (#11804)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: opening a project picks its most recent visible thread, and settled threads are not visible threads, so adding or opening a project never reopens a settled one. Upstream change: fix(web): avoid reopening settled threads when adding projects (#11804)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/web/src/lib/threadOrdering.ts:95"]
     },
     {
       "upstreamSha": "2d8f9a8f55d2195ac820c91f0f1e8f66a055f841",
@@ -7006,10 +7026,12 @@
     {
       "upstreamSha": "31eeb443305a4e11c8b20a7c8ff2b3f5e841eb0f",
       "subject": "fix(sidebar): collapse settled and snoozed shelves by default (#9314)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: each project's settled shelf starts collapsed. Snoozed threads have their own section rather than a per-project shelf. Upstream change: fix(sidebar): collapse settled and snoozed shelves by default (#9314)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/web/src/components/sidebar/SidebarProjectItem.tsx:249"]
     },
     {
       "upstreamSha": "31f9d832f4f019ff565beafbd6bb18451fa7039d",
@@ -7784,10 +7806,15 @@
     {
       "upstreamSha": "38154388d7b0274aefd3f29c38db3b2659c46c29",
       "subject": "fix: restore automatic thread settling defaults (#8596)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: upstream later made automatic settlement opt-in (t3code#8321), and F5 matches that final state with server settings that default off. Upstream change: fix: restore automatic thread settling defaults (#8596)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": [
+        "packages/contracts/src/settings.ts:434",
+        "packages/contracts/src/settings.test.ts:172"
+      ]
     },
     {
       "upstreamSha": "3836890e4484406813997259efc69065b25ce698",
@@ -8323,10 +8350,12 @@
     {
       "upstreamSha": "3b86ef941c218a000a2ea9920480f469b726f437",
       "subject": "fix(app): un-settled threads return to the top of the list (#8231)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: un-settling stamps the thread's last interaction, so it returns to the top of the activity-sorted list. Upstream change: fix(app): un-settled threads return to the top of the list (#8231)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/server/src/orchestration/projector.ts:875"]
     },
     {
       "upstreamSha": "3b8e7bbbe0c49b00630f0c89e931056df679a650",
@@ -14984,10 +15013,12 @@
     {
       "upstreamSha": "6c693baecf75454cac96d1ae3f78afc73f2cbe53",
       "subject": "fix(clients): keep opening responses visible after turns settle (#7723)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: F5 collapses only runs of work entries from earlier turns; assistant messages are never folded, so an opening response always stays visible. Upstream change: fix(clients): keep opening responses visible after turns settle (#7723)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["6f5ecc39faaa0e413b7f4a3e455459c2464e59e8"],
+      "evidence": ["apps/web/src/components/chat/MessagesTimeline.tsx:4181"]
     },
     {
       "upstreamSha": "6c69534a5800a95e1640b0571580561ef71ec461",
@@ -16043,10 +16074,12 @@
     {
       "upstreamSha": "72d94087b460e8d3d76572ed59fe935b80eb41a1",
       "subject": "fix(web): restore settled PR colors on hover (#10023)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: a settled row mutes its contents only while it is neither hovered nor focused, so PR status colors return on hover. Upstream change: fix(web): restore settled PR colors on hover (#10023)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/web/src/components/sidebar/SidebarThreadRow.tsx:168"]
     },
     {
       "upstreamSha": "72dac237304e5c7dddc55ca880e39c374ee66e3c",
@@ -19773,10 +19806,12 @@
     {
       "upstreamSha": "8efd4e95fcb08478c9c6e8eee384bfca559f62cc",
       "subject": "fix(settings): sync auto-settle and other shared preferences across environments (#9147)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: automatic settlement preferences are server settings shared by every client of the one environment F5 connects to, so there is nothing to keep in sync across environments. Upstream change: fix(settings): sync auto-settle and other shared preferences across environments (#9147)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["packages/contracts/src/settings.ts:434"]
     },
     {
       "upstreamSha": "8f1ef8b9eb72ac6cd8510364608e01dc7febf9c1",
@@ -21445,10 +21480,12 @@
     {
       "upstreamSha": "9b5d416872591d215c4a16d6f87798c8486522d8",
       "subject": "fix(web): give sidebar un-settle button a tooltip (#7796)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: the settled row's Unsettle action has a tooltip and an accessible label. Upstream change: fix(web): give sidebar un-settle button a tooltip (#7796)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["e05e37b3376d85ff630a32d18ec7544af076acc0"],
+      "evidence": ["apps/web/src/components/sidebar/SidebarThreadRow.tsx:463"]
     },
     {
       "upstreamSha": "9b62eae950e380752a94e797105832e19dfed20d",
@@ -27179,10 +27216,12 @@
     {
       "upstreamSha": "c78f05a45e1c2b274d8b0ab2b4d2d88b4767c968",
       "subject": "fix(server): reuse pr state when settling threads (#9459)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: threads on the same project branch share one branch and detail read per sweep. Upstream change: fix(server): reuse pr state when settling threads (#9459)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:779"]
     },
     {
       "upstreamSha": "c7b14a8666dc44ee426f8d139e0493af9fe4b6db",
@@ -27338,10 +27377,12 @@
     {
       "upstreamSha": "c89e3e12a41e13e09e0103d08a41d0688a99fb49",
       "subject": "fix(web): settled sidebar rows use the project fallback icon (#9366)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: settled rows show the project's icon, with the project fallback icon when it has none. Upstream change: fix(web): settled sidebar rows use the project fallback icon (#9366)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/web/src/components/sidebar/SidebarThreadRow.tsx:218"]
     },
     {
       "upstreamSha": "c8a04bd59b7e1a18124468f1592b4c925839a9de",
@@ -28854,17 +28895,14 @@
     {
       "upstreamSha": "d3d4ea42ee569f20d8a79562974355f659dc46d9",
       "subject": "fix(server): skip disabled settlement lookups (#10424)",
-      "reason": "Planned: implementation and focused evidence exist for disabled settlement skips branch and PR reads, local inactivity precedes remote reads and policy is rechecked after waits. Delivery remains deferred pending individual final settlement reconciliation and the required full gate.",
+      "reason": "Ported: with merge settlement and inactivity settlement both off, the sweep makes no branch or PR reads, and a policy disabled during a remote wait keeps the thread active. Upstream change: fix(server): skip disabled settlement lookups (#10424)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15c",
       "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
       "evidence": [
-        "apps/server/src/git/branchPullRequestLookup.test.ts:1",
-        "apps/server/src/git/Layers/GitManager.extended.ts:620",
-        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:1",
-        "apps/server/src/prHub/forgeModel.test.ts:1"
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.ts:417",
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:724"
       ]
     },
     {
@@ -29058,10 +29096,12 @@
     {
       "upstreamSha": "d536b0580d044967dc644498d8c5a6e96464f767",
       "subject": "fix(server): settle inactive threads with open PRs (#9610)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: inactivity settlement keeps threads with linked PRs by default and settles them when the user turns that policy off. Upstream change: fix(server): settle inactive threads with open PRs (#9610)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/server/src/orchestration/threadSettlement.test.ts:154"]
     },
     {
       "upstreamSha": "d5465aebf2746b8d5f327be3b2424d9412a29075",
@@ -33181,10 +33221,12 @@
     {
       "upstreamSha": "f21b47e52d988839a4e488d9fa98344891a69b7f",
       "subject": "fix(threads): a merged PR settles its thread only once (#7454)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: a merge already used for settlement is not reused after a persisted wake, while a new terminal PR still settles. Upstream change: fix(threads): a merged PR settles its thread only once (#7454)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/server/src/orchestration/threadSettlement.test.ts:135"]
     },
     {
       "upstreamSha": "f21d5e444e9a6b5876253ca8618a4dc8d4f2146c",
@@ -33389,17 +33431,14 @@
     {
       "upstreamSha": "f32f9a2f41342bf8a1a109d6ebe9b70044c5311b",
       "subject": "fix(server): settle threads server-side (#8600)",
-      "reason": "Planned: implementation and focused evidence exist for saved-branch PR lookup without a status scan, exact local/tracking-head proof, newer-open blocking, coalescing and bounded fair sweeps. Delivery remains deferred pending individual final settlement reconciliation and the required full gate.",
+      "reason": "Ported: settlement runs on the server and looks up a saved branch's PR without a worktree status scan, HEAD dependency or index refresh. Upstream change: fix(server): settle threads server-side (#8600)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15c",
       "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
       "evidence": [
-        "apps/server/src/git/branchPullRequestLookup.test.ts:1",
-        "apps/server/src/git/Layers/GitManager.extended.ts:620",
-        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:1",
-        "apps/server/src/prHub/forgeModel.test.ts:1"
+        "apps/server/src/git/branchPullRequestLookup.test.ts:55",
+        "apps/server/src/git/Layers/GitManager.extended.ts:620"
       ]
     },
     {
@@ -33864,10 +33903,12 @@
     {
       "upstreamSha": "f66cfe2219e3f255f573f6430f9c989c58ed517d",
       "subject": "fix(server): settle inactive threads without a PR lookup (#10103)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Equivalent: inactivity settlement runs before any PR host contact, even when merge settlement is enabled. Upstream change: fix(server): settle inactive threads without a PR lookup (#10103)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "disposition": "equivalent",
+      "plannedWorkstream": "15c",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": ["apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:645"]
     },
     {
       "upstreamSha": "f68e24fb419c985269cd0acb841e203af1419c43",

@@ -79,7 +79,8 @@ describe("October 2026 classification artifact", () => {
         reason: "Reclassified 2026-10 by user decision",
       });
       const entry = reapplied.entries.find((entry) => entry.upstreamSha === override.upstreamSha)!;
-      if (entry.disposition !== "ported")
+      // Reapplying keeps delivered proof, so only undelivered overrides return to 15c.
+      if (!["ported", "equivalent"].includes(entry.disposition))
         expect(entry).toMatchObject({ disposition: "deferred", plannedWorkstream: "15c" });
     }
   });
