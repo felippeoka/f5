@@ -17,10 +17,12 @@ import { UserInputQuestionStep } from "./UserInputQuestionStep";
 export function AsyncUserInputPanel({
   threadId,
   input,
+  cwd,
   variant = "standalone",
 }: {
   threadId: ThreadId;
   input: PendingUserInput;
+  cwd?: string | undefined;
   variant?: ComposerPanelVariant;
 }) {
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
@@ -174,6 +176,7 @@ export function AsyncUserInputPanel({
       {activeQuestion ? (
         <UserInputQuestionStep
           question={activeQuestion}
+          cwd={cwd}
           questionIndex={activeIndex}
           questionCount={questions.length}
           selectedOptionLabels={answers[activeQuestion.id] ?? []}

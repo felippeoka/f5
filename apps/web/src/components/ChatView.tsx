@@ -7833,6 +7833,7 @@ export default memo(function ChatView({
                             key={input.requestId}
                             threadId={activeThread.id}
                             input={input}
+                            cwd={gitCwd ?? undefined}
                           />
                         ))}
                       {activeThread

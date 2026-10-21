@@ -324,6 +324,7 @@ export function ChatComposer({
             <div className="rounded-t-[calc(var(--radius-xl)-1px)] border-b border-border bg-muted/40">
               <ComposerPendingUserInputPanel
                 pendingUserInputs={pendingUserInputs}
+                cwd={activeThread?.worktreePath ?? activeProject?.cwd}
                 respondingRequestIds={respondingRequestIds}
                 answers={pendingInteraction.activePendingDraftAnswers}
                 questionIndex={pendingInteraction.activePendingQuestionIndex}
