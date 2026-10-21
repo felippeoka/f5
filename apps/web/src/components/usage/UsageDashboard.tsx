@@ -3,6 +3,7 @@ import {
   type ProjectId,
   type ProviderKind,
   type UsageAccounts,
+  type UsageMetrics,
   type UsageRange,
   type UsageSummary,
 } from "@t3tools/contracts";
@@ -47,6 +48,7 @@ import {
   recordCountDisplay,
   tokenDelta,
   tokenFieldDisplay,
+  usageMetricValue,
 } from "./format";
 import { ProjectsThreadsCard } from "./ProjectsThreadsCard";
 import { UsagePriceEditor, type UsagePriceDraft } from "./UsagePriceEditor";
@@ -64,6 +66,18 @@ const CHART_LABELS: Record<UsageMetric, string> = {
   cost: "Cost chart",
   turns: "Recorded turns chart",
 };
+
+/** Ranks provider and model rows by the selected metric, then by tokens. */
+function sortByMetric<Entry extends { readonly metrics: UsageMetrics }>(
+  entries: ReadonlyArray<Entry>,
+  metric: UsageMetric,
+): Array<Entry> {
+  return [...entries].sort(
+    (left, right) =>
+      usageMetricValue(right.metrics, metric) - usageMetricValue(left.metrics, metric) ||
+      right.metrics.totalTokens - left.metrics.totalTokens,
+  );
+}
 
 // Each refresh rebuilds the summary server-side (several SQLite passes), so
 // streaming turns refresh at most every 5 seconds.
@@ -449,7 +463,7 @@ export function UsageDashboardView(props: {
         <ProjectsThreadsCard
           scope={summary.projectScope}
           metric={chartMetric}
-          totalTokens={summary.metrics.totalTokens}
+          totalMetrics={summary.metrics}
           projectName={projectName}
           onSelectProject={(projectId) => props.onProjectChange?.(projectId)}
         />
@@ -477,7 +491,7 @@ export function UsageDashboardView(props: {
                 </tr>
               </thead>
               <tbody>
-                {summary.byProvider.map((entry) => {
+                {sortByMetric(summary.byProvider, chartMetric).map((entry) => {
                   const tokens = tokenFieldDisplay(entry.metrics, "totalTokens");
                   const entryRecords = recordCountDisplay(entry.metrics);
                   return (

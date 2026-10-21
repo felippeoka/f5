@@ -125,8 +125,23 @@ export function totalCost(metrics: UsageMetrics): number {
   return (metrics.providerReportedCostUsd ?? 0) + (metrics.estimatedCostUsd ?? 0);
 }
 
+/** No provider-reported cost and no priced turn: the cost is unknown, not zero. */
+export function isCostUnknown(metrics: UsageMetrics): boolean {
+  return metrics.providerReportedCostUsd === null && !metrics.pricedTurnCount;
+}
+
+/** The value a row ranks and shares by for the selected chart metric. */
+export function usageMetricValue(
+  metrics: UsageMetrics,
+  metric: "tokens" | "cost" | "turns",
+): number {
+  if (metric === "cost") return totalCost(metrics);
+  if (metric === "turns") return recordCountDisplay(metrics).count;
+  return metrics.totalTokens;
+}
+
 export function costLabel(metrics: UsageMetrics): string {
-  if (metrics.providerReportedCostUsd === null && !metrics.pricedTurnCount) return "Unpriced";
+  if (isCostUnknown(metrics)) return "Unpriced";
   const estimates = metrics.estimatedCostUsd !== undefined && metrics.estimatedCostUsd !== null;
   return `${formatUsd(totalCost(metrics))}${estimates ? " (includes estimates)" : ""}${
     metrics.unpricedTurnCount > 0 ? " + unpriced" : ""

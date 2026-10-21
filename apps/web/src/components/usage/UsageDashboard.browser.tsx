@@ -497,6 +497,78 @@ describe("UsageDashboardView", () => {
     }
   });
 
+  it("ranks and shares rows by the selected metric", async () => {
+    const value = scoped();
+    const unknownCost = metrics({
+      totalTokens: 0,
+      providerReportedCostUsd: null,
+      pricedTurnCount: 0,
+    });
+    const ranked: UsageSummary = {
+      ...value,
+      byProvider: [
+        ...value.byProvider,
+        {
+          provider: "claudeAgent",
+          model: "claude-opus",
+          metrics: metrics({ totalTokens: 100, providerReportedCostUsd: 2 }),
+        },
+      ],
+      projectScope: {
+        ...value.projectScope!,
+        byProject: [
+          {
+            projectId: projectA,
+            title: "Alpha",
+            deleted: false,
+            metrics: metrics({ totalTokens: 900, providerReportedCostUsd: 0.1 }),
+          },
+          {
+            projectId: projectB,
+            title: "Beta",
+            deleted: false,
+            metrics: metrics({ totalTokens: 300, providerReportedCostUsd: 0.3 }),
+          },
+          { projectId: null, title: null, deleted: false, metrics: unknownCost },
+        ],
+      },
+    };
+    const view = (metric: "tokens" | "cost") => (
+      <UsageDashboardView summary={ranked} range="7d" fetching={false} metric={metric} />
+    );
+    const tables = () => [...document.querySelectorAll("table")];
+    const projectRows = () =>
+      [...tables()[0]!.querySelectorAll("tbody tr")].map((row) =>
+        [...row.querySelectorAll("td")].map((cell) => cell.textContent),
+      );
+    const models = () =>
+      [...tables()[1]!.querySelectorAll("tbody tr td:nth-child(2)")].map(
+        (cell) => cell.textContent,
+      );
+    const screen = await renderWithRouter(view("tokens"));
+    try {
+      await expect.element(page.getByText("Projects and threads")).toBeVisible();
+      expect(projectRows().map((row) => [row[0], row.at(-1)])).toEqual([
+        ["Alpha", "75%"],
+        ["Beta", "25%"],
+        ["Unattributed historical cost", "0%"],
+      ]);
+      expect(models()).toEqual(["gpt-5.6", "claude-opus", "cursor-agent"]);
+
+      await screen.rerender(view("cost"));
+      await expect.poll(() => projectRows()[0]?.[0]).toBe("Beta");
+      // An unknown cost has no cost share.
+      expect(projectRows().map((row) => [row[0], row.at(-1)])).toEqual([
+        ["Beta", "75%"],
+        ["Alpha", "25%"],
+        ["Unattributed historical cost", ""],
+      ]);
+      expect(models()).toEqual(["claude-opus", "gpt-5.6", "cursor-agent"]);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("hides the share column when there are no tokens", async () => {
     const value = scoped();
     const screen = await renderWithRouter(
