@@ -144,6 +144,14 @@ export class PreviewRuntime {
     if (!guest || guest.isDestroyed()) return false;
     try {
       if (!guest.debugger.isAttached()) guest.debugger.attach("1.3");
+      // Electron gives `<webview>` guests a transparent base, and Chromium paints its
+      // dark canvas for dark-scheme pages only over an opaque one. Without this, pages
+      // with no background of their own (text/plain, such as .md files) render white
+      // text on white. White matches the webview's backing, so light pages look the
+      // same. Every registration applies the scheme, so this also covers webview swaps.
+      await guest.debugger.sendCommand("Emulation.setDefaultBackgroundColorOverride", {
+        color: { r: 255, g: 255, b: 255, a: 1 },
+      });
       await guest.debugger.sendCommand("Emulation.setEmulatedMedia", {
         features: [
           {
