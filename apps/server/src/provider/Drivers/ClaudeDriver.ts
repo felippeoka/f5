@@ -219,8 +219,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
+      // Instance-level probes are not tied to a project, so they run in the
+      // server's state dir. The server cwd is $HOME in packaged desktop builds,
+      // and `claude` wrappers that scope themselves to their cwd refuse to run
+      // there.
       const probes = yield* makeClaudeInstanceProbes(effectiveConfig, processEnv, {
-        cwd: serverCwd,
+        cwd: serverConfig.stateDir,
       });
       const accountUsage = yield* makeAccountUsageCapability(
         {
@@ -259,6 +263,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         effectiveConfig,
         () => probes.capabilities,
         processEnv,
+        serverConfig.stateDir,
       ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
