@@ -49,14 +49,22 @@ git pull --ff-only
 bun run start:desktop
 ```
 
-Pulling source changes does not update `node_modules`. Before building, `build:desktop`
-(and therefore `start:desktop`) and the `dev*` scripts compare `bun.lock` with the
-lockfile the current installation came from, and check that every declared dependency
-is present. If either is out of date they run `bun install --frozen-lockfile` first.
-If the install fails, for example because local `package.json` edits no longer match
-`bun.lock`, the build stops with bun's error. In CI the check reports missing packages
-without installing. `bun run check:dependencies` runs the same presence check without
-installing.
+Pulling source changes does not update `node_modules`. Every `bun install` records
+which `bun.lock` it installed from. Before building, `build:desktop` (and therefore
+`start:desktop`) and the `dev*` scripts compare that record with the current `bun.lock`
+and check that every declared dependency is present. If either is out of date they run
+`bun install --frozen-lockfile` first. Installs run with `--ignore-scripts` aren't
+recorded, so the next build reinstalls once.
+
+If the install fails, for example offline or because local `package.json` edits no
+longer match `bun.lock`, the scripts print bun's error. They continue with a warning
+when every dependency is still present, and stop when packages are missing. In CI the
+check reports missing packages without installing. `bun run check:dependencies` runs
+the same presence check without installing.
+
+After pulling, start one `dev*` or desktop script and let it finish installing before
+starting another; two installs running at once can leave `node_modules` half-linked.
+If that happens, run `bun install --frozen-lockfile` again.
 
 ## Windows build tools
 
