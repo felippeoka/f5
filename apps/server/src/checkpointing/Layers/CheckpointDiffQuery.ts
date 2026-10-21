@@ -148,7 +148,8 @@ const make = Effect.gen(function* () {
         fromCheckpointRef,
         toCheckpointRef,
         fallbackFromToHead: false,
-        ...(input.options ? { options: input.options } : {}),
+        // Match the turn's file summary: files a pull, merge or rebase brought in stay out.
+        options: { ...input.options, excludeGitImports: true },
       });
 
       const turnDiff: OrchestrationGetTurnDiffResultType = {

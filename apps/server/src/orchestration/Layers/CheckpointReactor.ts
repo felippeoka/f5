@@ -355,6 +355,7 @@ const make = Effect.gen(function* () {
             fromCheckpointRef,
             toCheckpointRef: targetCheckpointRef,
             fallbackFromToHead: false,
+            options: { excludeGitImports: true },
           })
         : Effect.succeed("")
     ).pipe(

@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CheckpointRef } from "@t3tools/contracts";
@@ -11,7 +12,10 @@ import { describe, expect, it } from "vitest";
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitService, type ExecuteGitInput } from "../../git/Services/GitService.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
-import { CheckpointStoreLiveWithGitService } from "./CheckpointStore.ts";
+import {
+  CheckpointStoreLiveWithGitService,
+  CheckpointStoreLiveWithoutCredentials,
+} from "./CheckpointStore.ts";
 
 function makeLayer(calls: ExecuteGitInput[], refOutput = "") {
   return CheckpointStoreLiveWithGitService.pipe(
@@ -277,6 +281,89 @@ describe("CheckpointStoreLive", () => {
     expect(diffCall?.args).toContain("--ignore-all-space");
     expect(diffCall?.args).not.toContain("--ignore-blank-lines");
     expect(diffCall?.args).not.toContain("--ignore-space-change");
+  });
+
+  describe("excluding files Git brought in", () => {
+    // Fixture commits predate the captures, as commits a pull brings in do.
+    const pastDate = "2020-01-01T00:00:00Z";
+    const run = (cwd: string, ...args: string[]) =>
+      execFileSync("git", args, {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, GIT_AUTHOR_DATE: pastDate, GIT_COMMITTER_DATE: pastDate },
+      });
+    const changedFiles = (diff: string) =>
+      [...diff.matchAll(/^diff --git a\/(\S+) b\//gm)].map((match) => match[1]);
+
+    async function scenario(turn: (cwd: string) => void) {
+      const cwd = mkdtempSync(path.join(os.tmpdir(), "f5-checkpoint-imports-"));
+      try {
+        run(cwd, "init", "-q", "-b", "main");
+        run(cwd, "config", "user.email", "test@example.com");
+        run(cwd, "config", "user.name", "Test");
+        writeFileSync(path.join(cwd, "mine.txt"), "one\n");
+        run(cwd, "add", ".");
+        run(cwd, "commit", "-q", "-m", "base");
+        run(cwd, "checkout", "-q", "-b", "upstream");
+        writeFileSync(path.join(cwd, "upstream.txt"), "from upstream\n");
+        run(cwd, "add", ".");
+        run(cwd, "commit", "-q", "-m", "upstream work");
+        run(cwd, "checkout", "-q", "main");
+
+        const from = CheckpointRef.makeUnsafe("refs/t3/checkpoints/imports/0");
+        const to = CheckpointRef.makeUnsafe("refs/t3/checkpoints/imports/1");
+        return await Effect.runPromise(
+          Effect.gen(function* () {
+            const store = yield* CheckpointStore;
+            yield* store.captureCheckpoint({ cwd, checkpointRef: from });
+            turn(cwd);
+            yield* store.captureCheckpoint({ cwd, checkpointRef: to });
+            const diff = (excludeGitImports: boolean) =>
+              store.diffCheckpoints({
+                cwd,
+                fromCheckpointRef: from,
+                toCheckpointRef: to,
+                options: { excludeGitImports },
+              });
+            return { filtered: yield* diff(true), full: yield* diff(false) };
+          }).pipe(
+            Effect.provide(
+              CheckpointStoreLiveWithoutCredentials.pipe(Layer.provideMerge(NodeServices.layer)),
+            ),
+          ),
+        );
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    }
+
+    it("leaves out files a pull brought in and keeps the turn's own edits", async () => {
+      const { filtered, full } = await scenario((cwd) => {
+        writeFileSync(path.join(cwd, "mine.txt"), "two\n");
+        run(cwd, "merge", "-q", "--ff-only", "upstream");
+      });
+      expect(changedFiles(full)).toEqual(["mine.txt", "upstream.txt"]);
+      expect(changedFiles(filtered)).toEqual(["mine.txt"]);
+      expect(filtered).toContain("+two");
+    });
+
+    it("keeps an imported file the turn also edited", async () => {
+      const { filtered } = await scenario((cwd) => {
+        run(cwd, "merge", "-q", "--ff-only", "upstream");
+        writeFileSync(path.join(cwd, "upstream.txt"), "edited by the turn\n");
+      });
+      expect(changedFiles(filtered)).toEqual(["upstream.txt"]);
+    });
+
+    it("keeps every file when HEAD did not move", async () => {
+      const { filtered, full } = await scenario((cwd) => {
+        writeFileSync(path.join(cwd, "mine.txt"), "two\n");
+        writeFileSync(path.join(cwd, "new.txt"), "new\n");
+      });
+      expect(filtered).toBe(full);
+      expect(changedFiles(filtered)).toEqual(["mine.txt", "new.txt"]);
+    });
   });
 
   it("omits whitespace flags by default", async () => {

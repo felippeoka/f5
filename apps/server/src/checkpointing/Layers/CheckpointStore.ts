@@ -20,6 +20,10 @@ import { GitServiceLive } from "../../git/Layers/GitService.ts";
 import { GitService, type ExecuteGitInput } from "../../git/Services/GitService.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
 import { CheckpointRef } from "@t3tools/contracts";
+import { batchLiteralPathspecs, isGitImport, parseNumstatPaths } from "../Diffs.ts";
+
+// Path lists are small next to patches; a bound keeps a pathological history from hanging diffs.
+const AUTHORED_PATHS_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
 function isSafeCheckpointRef(ref: string): boolean {
   if (!ref.startsWith("refs/") || /\s/.test(ref)) return false;
@@ -137,7 +141,10 @@ const makeCheckpointStore = Effect.gen(function* () {
               GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
             };
 
-            const headExists = yield* hasHeadCommit(input.cwd);
+            // HEAD at capture becomes the checkpoint commit's parent, so a later diff can
+            // tell files a pull, merge or rebase brought in from the turn's own edits.
+            const capturedHead = yield* resolveHeadCommit(input.cwd);
+            const headExists = capturedHead !== null;
             const sparseResult = yield* executeCapture({
               operation,
               cwd: input.cwd,
@@ -363,10 +370,16 @@ const makeCheckpointStore = Effect.gen(function* () {
             }
 
             const message = `t3 checkpoint ref=${input.checkpointRef}`;
+            // If HEAD moved while staging, the parent would not describe this snapshot.
+            // Keep the snapshot parentless; its diffs then show every changed file.
+            const parent =
+              capturedHead !== null && (yield* resolveHeadCommit(input.cwd)) === capturedHead
+                ? ["-p", capturedHead]
+                : [];
             const commitTreeResult = yield* executeCapture({
               operation,
               cwd: input.cwd,
-              args: [...durableWrite, "commit-tree", treeOid, "-m", message],
+              args: [...durableWrite, "commit-tree", treeOid, ...parent, "-m", message],
               env: commitEnv,
             });
             const commitOid = commitTreeResult.stdout.trim();
@@ -499,28 +512,133 @@ const makeCheckpointStore = Effect.gen(function* () {
         });
       }
 
-      const diffArgs = [
-        "diff",
-        "--patch",
-        "--find-renames",
-        "--relative",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-        "--minimal",
-        "--no-color",
-      ];
-      if (input.options?.ignoreWhitespace === true) {
-        diffArgs.push("--ignore-all-space");
-      }
-      diffArgs.push(fromCommitOid, toCommitOid, "--");
+      const whitespace = input.options?.ignoreWhitespace === true ? ["--ignore-all-space"] : [];
+      const patch = (pathspecs: ReadonlyArray<string>) =>
+        git
+          .execute({
+            operation,
+            cwd: input.cwd,
+            args: [
+              "diff",
+              "--patch",
+              "--find-renames",
+              "--relative",
+              "--src-prefix=a/",
+              "--dst-prefix=b/",
+              "--minimal",
+              "--no-color",
+              ...whitespace,
+              fromCommitOid,
+              toCommitOid,
+              "--",
+              ...pathspecs,
+            ],
+          })
+          .pipe(Effect.map((result) => result.stdout));
 
-      const result = yield* git.execute({
+      if (input.options?.excludeGitImports !== true) return yield* patch([]);
+      // Filtering is best effort: when it cannot run, the complete diff still loads.
+      const retained = yield* authoredDiffPaths({
+        cwd: input.cwd,
+        fromCommitOid,
+        toCommitOid,
+        whitespace,
+      }).pipe(Effect.orElseSucceed(() => null));
+      if (retained === null) return yield* patch([]);
+      // Select paths before building the patch, so imported bulk cannot exhaust its output.
+      const patches = yield* Effect.forEach(
+        batchLiteralPathspecs(retained),
+        (pathspecs) => patch(pathspecs),
+        { concurrency: 4 },
+      );
+      return patches.join("");
+    });
+
+  /**
+   * The changed files between two checkpoints that the turn authored, or null when every
+   * changed file belongs to the turn (HEAD did not move, or a checkpoint has no parent).
+   * A path is authored when it differs from HEAD at either checkpoint, or a commit made
+   * after the first checkpoint, or a commit that left HEAD, touched it. Remerge diffs list
+   * a merge's paths only where the result differs from Git's automatic merge, so conflict
+   * fixes stay and clean upstream changes drop out.
+   */
+  const authoredDiffPaths = (input: {
+    readonly cwd: string;
+    readonly fromCommitOid: string;
+    readonly toCommitOid: string;
+    readonly whitespace: ReadonlyArray<string>;
+  }) =>
+    Effect.gen(function* () {
+      const operation = "CheckpointStore.authoredDiffPaths";
+      const heads = yield* git.execute({
         operation,
         cwd: input.cwd,
-        args: diffArgs,
+        args: [
+          "log",
+          "--no-walk=unsorted",
+          "--format=%P %ct",
+          input.fromCommitOid,
+          input.toCommitOid,
+        ],
       });
+      // Each line is "<parent> <committer time>"; the parent is HEAD at capture.
+      const [fromLine = "", toLine = ""] = heads.stdout.trimEnd().split("\n");
+      const [startHead = "", capturedAt = ""] = fromLine.split(" ");
+      const [endHead = ""] = toLine.split(" ");
+      if (startHead === "" || endHead === "" || startHead === endHead) return null;
 
-      return result.stdout;
+      const listPaths = (args: ReadonlyArray<string>) =>
+        git
+          .execute({
+            operation,
+            cwd: input.cwd,
+            args: [...args, "--relative", "--name-only", "-z", "--no-renames", "--no-ext-diff"],
+            maxOutputBytes: AUTHORED_PATHS_MAX_OUTPUT_BYTES,
+          })
+          .pipe(Effect.map((result) => result.stdout.split("\0")));
+      const [authoredLists, changed] = yield* Effect.all(
+        [
+          Effect.all(
+            [
+              listPaths(["diff", startHead, input.fromCommitOid]),
+              listPaths(["diff", endHead, input.toCommitOid]),
+              listPaths(["log", "--format=", "--diff-merges=remerge", `${endHead}..${startHead}`]),
+              listPaths([
+                "log",
+                "--format=",
+                "--diff-merges=remerge",
+                `--since=@${capturedAt}`,
+                `${startHead}..${endHead}`,
+              ]),
+            ],
+            { concurrency: "unbounded" },
+          ),
+          git.execute({
+            operation,
+            cwd: input.cwd,
+            args: [
+              "diff",
+              "--numstat",
+              "-z",
+              "--find-renames",
+              "--relative",
+              ...input.whitespace,
+              input.fromCommitOid,
+              input.toCommitOid,
+              "--",
+            ],
+            maxOutputBytes: AUTHORED_PATHS_MAX_OUTPUT_BYTES,
+          }),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const authored = new Set(authoredLists.flat().filter((path) => path.length > 0));
+      const files = parseNumstatPaths(changed.stdout);
+      const retained = files.filter((file) => !isGitImport(file, authored));
+      if (retained.length === files.length) return null;
+      return retained.map((file) =>
+        file.previousPath === undefined ? [file.path] : [file.previousPath, file.path],
+      );
     });
 
   const deleteCheckpointRefs: CheckpointStoreShape["deleteCheckpointRefs"] = (input) =>
