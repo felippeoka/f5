@@ -4,6 +4,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeOtlpTraceSink, otlpMetricsLayer, otlpResource } from "../OtlpExport.ts";
 import { makeTraceSink } from "../TraceSink.ts";
 import { Effect, FileSystem, Layer, Option, Path, Tracer } from "effect";
+import { version as serverPackageVersion } from "../../../package.json" with { type: "json" };
 
 import { ServerConfig } from "../../config.ts";
 import { makeLocalFileTracer } from "../LocalFileTracer.ts";
@@ -26,11 +27,7 @@ export const ObservabilityLive = Layer.unwrap(
       saved?._tag === "Failure"
         ? resolveOtlpConfiguration({}, { OTEL_SDK_DISABLED: "true" })
         : resolveOtlpConfiguration(saved?.success.observability, process.env);
-    const resource = otlpResource(
-      process.env.npm_package_version ?? "0.1.0",
-      config.profile?.id,
-      remote.attributes,
-    );
+    const resource = otlpResource(serverPackageVersion, config.profile?.id, remote.attributes);
     if (!config.observabilityEnabled && !remote.traces.url && !remote.metrics.url)
       return Layer.empty;
 

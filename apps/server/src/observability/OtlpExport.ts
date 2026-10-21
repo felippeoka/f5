@@ -27,17 +27,19 @@ const kinds: Readonly<Record<string, number>> = {
 const serializationLayer = (config: OtlpSignalConfiguration) =>
   config.protocol === "http/json" ? layerJson : layerProtobuf;
 
+/** `host.name` keeps servers apart on a shared collector; one set in OTEL_RESOURCE_ATTRIBUTES wins. */
 export function otlpResource(
   version: string,
   profileId: string | undefined,
   attributes: Readonly<Record<string, string>>,
+  hostName: string = hostname(),
 ) {
   return {
     serviceName: attributes["service.name"] || "f5-server",
     serviceVersion: version,
     attributes: {
       ...attributes,
-      "host.name": hostname(),
+      "host.name": attributes["host.name"] || hostName,
       ...(profileId ? { "f5.profile.id": profileId } : {}),
     },
   };

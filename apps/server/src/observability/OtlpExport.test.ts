@@ -20,6 +20,19 @@ const record: TraceRecord = {
   links: [],
   exit: { _tag: "Success" },
 };
+describe("otlpResource", () => {
+  it("names the host and build, unless OTEL_RESOURCE_ATTRIBUTES already names the host", () => {
+    const resource = (attributes: Record<string, string>) =>
+      otlpResource("1.2.3", "profile", attributes, "box-1");
+    expect(resource({})).toMatchObject({
+      serviceName: "f5-server",
+      serviceVersion: "1.2.3",
+      attributes: { "host.name": "box-1", "f5.profile.id": "profile" },
+    });
+    expect(resource({ "host.name": "from-env" }).attributes["host.name"]).toBe("from-env");
+    expect(resource({ "host.name": "" }).attributes["host.name"]).toBe("box-1");
+  });
+});
 describe("bounded OTLP traces", () => {
   it.each(["http/json", "http/protobuf"])(
     "sends %s to a fake collector with resource metadata",
