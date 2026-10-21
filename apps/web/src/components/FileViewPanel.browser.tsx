@@ -22,6 +22,7 @@ vi.mock("../nativeApi", () => ({
 }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => vi.fn(),
+  useRouter: () => null,
   useParams: ({ select }: { select: (v: unknown) => unknown }) => select({ threadId: "thread-1" }),
   useSearch: ({ select }: { select: (v: unknown) => unknown }) => select(route),
 }));
