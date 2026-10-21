@@ -1823,10 +1823,15 @@
     {
       "upstreamSha": "0cf482b08bca0249ec94fbcbd0eb04fff28d9b3d",
       "subject": "fix(web): make composer suggestions usable with screen readers (#10154)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): make composer suggestions usable with screen readers (#10154).",
+      "reason": "Ported: the composer editor is labelled Message, announces a listbox, and points aria-activedescendant at the highlighted suggestion while the list is on screen. Each list has a per-composer id and a label, options have stable ids and aria-selected, and an empty or loading list is announced in a status line. Upstream change: fix(web): make composer suggestions usable with screen readers (#10154)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["5cb55289806b35a27fc3dff6ac76a1936353686c"],
+      "evidence": [
+        "apps/web/src/components/ChatView.browser.tsx:2740",
+        "apps/web/src/components/chat/ComposerCommandMenu.test.ts:5"
+      ]
     },
     {
       "upstreamSha": "0cfa113be597af3a1b2fe905a58a5b583f8089b8",
@@ -1934,10 +1939,10 @@
     {
       "upstreamSha": "0e1431f61c8c549310b9f04c9d7068e6e1ec773b",
       "subject": "fix(web): the chat view and composer no longer keep old renders alive (#19869)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): the chat view and composer no longer keep old renders alive (#19869).",
+      "reason": "Moved to Phase 2 (measured performance): upstream restructures ChatView and ChatComposer handlers so V8's shared closure scopes stop retaining old renders. F5's ChatView is built differently; porting needs a heap-snapshot measurement to confirm the retention in F5 and to pick the closures that cause it. Upstream change: fix(web): the chat view and composer no longer keep old renders alive (#19869)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "plannedWorkstream": "2"
     },
     {
       "upstreamSha": "0e1570bde5b64458449a45989f1b56d6fd651883",
@@ -4065,18 +4070,24 @@
     {
       "upstreamSha": "1d00edb23ad6bfade33beba927947d09f1beeca4",
       "subject": "perf(web): markdown replies no longer re-render on reconnects and config pushes (#20852)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): markdown replies no longer re-render on reconnects and config pushes (#20852).",
+      "reason": "Equivalent: upstream stops markdown replies from re-rendering on reconnects and server config pushes by narrowing its config and connection subscriptions. F5's chat markdown subscribes to neither, so those pushes do not reach it. Upstream change: perf(web): markdown replies no longer re-render on reconnects and config pushes (#20852)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/components/ChatMarkdown.tsx:495"]
     },
     {
       "upstreamSha": "1d013c7ca1edc843bd3b5e23fd6573aeeaf9b11d",
       "subject": "fix(markdown): preserve descriptive file-link labels (#15509)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(markdown): preserve descriptive file-link labels (#15509).",
+      "reason": "Ported: a file link whose text is prose keeps that text in front of the file chip; text that only names the destination (filename, path suffix, or matching line and column) is still replaced by the chip. The mobile part does not apply. Upstream change: fix(markdown): preserve descriptive file-link labels (#15509)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["c6c31dd094a9ca9a9e329962bcae9b181ebd9f17"],
+      "evidence": [
+        "apps/web/src/components/ChatMarkdown.test.tsx:165",
+        "apps/web/src/markdown-links.test.ts:134"
+      ]
     },
     {
       "upstreamSha": "1d1bf50405ccca8fdb8b57879d9def379e27a550",
@@ -5469,10 +5480,11 @@
     {
       "upstreamSha": "2731929610ecb64617ff5e066980302da328f658",
       "subject": "fix(web): group composer undo the way the Lexical composer did (#14674)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): group composer undo the way the Lexical composer did (#14674).",
+      "reason": "Equivalent: upstream makes its Tiptap composer group undo steps the way its Lexical composer did. F5's composer is still Lexical with HistoryPlugin, which is that behavior. Upstream change: fix(web): group composer undo the way the Lexical composer did (#14674)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/components/ComposerPromptEditor.tsx:1356"]
     },
     {
       "upstreamSha": "2759ef05bb1cccc55fb2ac747bf8769de8d745e1",
@@ -5739,10 +5751,9 @@
     {
       "upstreamSha": "29980a31409234b676f97bd477c4e46fdb61a929",
       "subject": "fix(web): add room for thread timeline markers (#17372)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): add room for thread timeline markers (#17372).",
+      "reason": "Not applicable: upstream widens its ChatCanvas lane padding to make room for timeline markers. F5 has no chat canvas; its conversation minimap sits on the timeline's right edge and its turn rail measures the gutter it has. Upstream change: fix(web): add room for thread timeline markers (#17372)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "29a23fdf1481485593d7d90e195b7c8bf2a705a8",
@@ -5763,10 +5774,9 @@
     {
       "upstreamSha": "29abbf9b424b122c52bb20dccffac68bee367c09",
       "subject": "fix(web): collapsed composer bar stops flipping its labels while you scroll (#13555)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): collapsed composer bar stops flipping its labels while you scroll (#13555).",
+      "reason": "Not applicable: upstream fixes how its branch toolbar measures labels when it collapses them to icons. F5's BranchToolbar does not collapse labels to icons. Upstream change: fix(web): collapsed composer bar stops flipping its labels while you scroll (#13555)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "29b1abc45eabe13a930dda58f845fea86dafeec1",
@@ -6957,10 +6967,9 @@
     {
       "upstreamSha": "3143335fc3a568cbbb5174764961889272135cb9",
       "subject": "fix(web): cancelling a new citation no longer leaves a stray space (#16828)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): cancelling a new citation no longer leaves a stray space (#16828).",
+      "reason": "Not applicable: upstream's assistant citation notes (commenting on a quoted passage from the composer) have no F5 counterpart; F5 quotes an assistant passage as a Markdown blockquote. Upstream removes a stray space when a new citation is cancelled. Upstream change: fix(web): cancelling a new citation no longer leaves a stray space (#16828)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "315b27385d7eb36a56b410fa8b624fc2ed246278",
@@ -7169,10 +7178,12 @@
     {
       "upstreamSha": "32b77f4fa370a5195ad16ab709405b1038c49fcd",
       "subject": "fix(web): dismiss hovered timeline tooltips on scroll (#15455)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): dismiss hovered timeline tooltips on scroll (#15455).",
+      "reason": "Ported: the timeline is a TooltipScrollDismissArea that closes the hovered tooltip on scroll unless its trigger has focus, tracked in a ref so scrolling never rerenders. The new test fails without the dismissal. Upstream's pull request preview change does not apply: F5 renders that preview inline under its link. Upstream change: fix(web): dismiss hovered timeline tooltips on scroll (#15455)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["7a75ebef1581a43f0faf944cb742fe0cc172105b"],
+      "evidence": ["apps/web/src/components/ui/tooltip.browser.tsx:28"]
     },
     {
       "upstreamSha": "32c6012dabdbd0eb178b25ea4225d889ec8f6475",
@@ -8808,10 +8819,9 @@
     {
       "upstreamSha": "3e94afa7c26734f525a7d8a9cdb47896e8618cf8",
       "subject": "fix(web): composer banner actions stay inline whenever they fit (#17640)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): composer banner actions stay inline whenever they fit (#17640).",
+      "reason": "Not applicable: upstream's composer banner stack (ComposerBanner and ComposerBannerStack) has no F5 counterpart; F5 shows composer notices as separate panels above the editor. Upstream keeps banner actions inline when they fit. Upstream change: fix(web): composer banner actions stay inline whenever they fit (#17640)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3efdcc5296f1754e0f3bf7fee5fc2ada510e0438",
@@ -8842,10 +8852,9 @@
     {
       "upstreamSha": "3f60d4d380cb29606614077cb54a709011e0901c",
       "subject": "perf(web): the assistant citation target hook compiles with the React Compiler (#20614)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the assistant citation target hook compiles with the React Compiler (#20614).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the assistant citation target hook compiles with the React Compiler (#20614)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3f62e6fa65c2a2a91a367be4ee95da1b50007bde",
@@ -9616,10 +9625,9 @@
     {
       "upstreamSha": "44b49650170a76e6171642d6f8de946cf1d1c821",
       "subject": "fix(web): reduce the gap above the draft composer (#15196)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): reduce the gap above the draft composer (#15196).",
+      "reason": "Not applicable: upstream reduces the padding around its composer shoulder tab. F5's composer has no shoulder tab. Upstream change: fix(web): reduce the gap above the draft composer (#15196)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "44bd4c9cafa61a415f76fbb261f321a158660577",
@@ -10185,10 +10193,9 @@
     {
       "upstreamSha": "48b71f0eb323d08c8fcadfe54adf34becb2984da",
       "subject": "fix(web): collapsed composer reserves room for wide send actions (#17016)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): collapsed composer reserves room for wide send actions (#17016).",
+      "reason": "Not applicable: upstream's resting composer floats its send actions over the prompt row and replaces fixed insets with a measured one. F5's collapsed composer shrinks the editor to one line and keeps the footer as its own row below it, so no action overlaps the text. Upstream change: fix(web): collapsed composer reserves room for wide send actions (#17016)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "48ba76bc26337f23d1f0991bbac51f996a3333dc",
@@ -10307,10 +10314,9 @@
     {
       "upstreamSha": "4980ba282eb313b3be87a6b7df28f3b42dcb4ce9",
       "subject": "fix(web): queued messages no longer split the composer notice stack (#16400)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): queued messages no longer split the composer notice stack (#16400).",
+      "reason": "Not applicable: upstream's composer banner stack (ComposerBanner and ComposerBannerStack) has no F5 counterpart; F5 shows composer notices as separate panels above the editor. Upstream keeps queued messages from splitting the banner stack. Upstream change: fix(web): queued messages no longer split the composer notice stack (#16400)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "498ab9c399d5e8c3097a286be14d03238e071ac1",
@@ -10660,10 +10666,9 @@
     {
       "upstreamSha": "4c22df263f0376184355395e60639dcf71cfce6d",
       "subject": "perf(web): the composer path search hook compiles without manual memoization (#20595)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the composer path search hook compiles without manual memoization (#20595).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the composer path search hook compiles without manual memoization (#20595)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4c51b4c9b6a85d96a22e0df41d5cfd2d8fc9901d",
@@ -11978,10 +11983,9 @@
     {
       "upstreamSha": "55dfc5fc4d1af8a508f8834ab6207f045787cb76",
       "subject": "fix(composer): read dropped threads across environments (#15210)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(composer): read dropped threads across environments (#15210).",
+      "reason": "Not applicable: upstream reads a thread dropped into the composer from another environment through its orchestration-v2 transcript endpoint. F5 has neither thread drops into the composer nor multiple environments. Upstream change: fix(composer): read dropped threads across environments (#15210)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "55ec55b1fb2e65f2736ff8420ae0373210c1911e",
@@ -12456,10 +12460,14 @@
     {
       "upstreamSha": "5886bd8f19c8d4b01d7a0b36ad62a9d35f02552d",
       "subject": "fix(web): preserve bare anchor placeholders in markdown (#16637)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): preserve bare anchor placeholders in markdown (#16637).",
+      "reason": "Equivalent: upstream stops a bare <A> placeholder from opening an HTML link over later blocks under rehype-raw. F5's chat markdown has no rehype-raw and renders HTML as literal text, so the placeholder stays text and later blocks keep their structure; the new test pins that. Upstream change: fix(web): preserve bare anchor placeholders in markdown (#16637)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "equivalent",
+      "f5Shas": ["36b0f1edc941c2abf2833a13c31676d6a1ddb686"],
+      "evidence": [
+        "apps/web/src/components/ChatMarkdown.tsx:719",
+        "apps/web/src/components/ChatMarkdown.test.tsx:179"
+      ]
     },
     {
       "upstreamSha": "588d32e22b10932404856d9bdd9f2f39c7e38070",
@@ -12789,10 +12797,9 @@
     {
       "upstreamSha": "5b613de175dd2567ae806907440ef83f6cd7c2a4",
       "subject": "fix(web): wrap full status text in composer hover details (#16158)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): wrap full status text in composer hover details (#16158).",
+      "reason": "Not applicable: upstream's composer banner stack (ComposerBanner and ComposerBannerStack) has no F5 counterpart; F5 shows composer notices as separate panels above the editor. Upstream wraps full status text in banner hover details. Upstream change: fix(web): wrap full status text in composer hover details (#16158)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5b68b2c8e1e971e4ee6956157a1698646ef52a55",
@@ -14148,10 +14155,9 @@
     {
       "upstreamSha": "6586a01f41bd692f02d565d38f97b52a8067317e",
       "subject": "fix(web): composer context strip pads both edges evenly (#17562)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): composer context strip pads both edges evenly (#17562).",
+      "reason": "Not applicable: upstream's ComposerSurface glass shell and its model strip have no F5 counterpart. Upstream evens the padding of its context strip. Upstream change: fix(web): composer context strip pads both edges evenly (#17562)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "659986ce384d29123269820ccb8340ab4d824cdd",
@@ -14924,10 +14930,9 @@
     {
       "upstreamSha": "6b563bb758156c3dfe8d4b03c86ca12a995fac03",
       "subject": "perf(web): the composer banner stack compiles with the React Compiler (#20582)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the composer banner stack compiles with the React Compiler (#20582).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the composer banner stack compiles with the React Compiler (#20582)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6b73b3defe1dfb365de3b7bbb97ca56a26b50a43",
@@ -15065,10 +15070,15 @@
     {
       "upstreamSha": "6c8fed35dded9ff71c5b46807125457acbb76be6",
       "subject": "fix(markdown): keep Windows paths intact in link and image destinations (#12615)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(markdown): keep Windows paths intact in link and image destinations (#12615).",
+      "reason": "Ported: Windows path link destinations keep their backslashes instead of CommonMark reading \\. as an escape. F5 also lacked upstream's URL transform (t3code#1867), so C:, UNC and file:// links rendered with an empty href; local file destinations are now kept and everything else is sanitized as before. The mobile part does not apply. Upstream change: fix(markdown): keep Windows paths intact in link and image destinations (#12615)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["36b0f1edc941c2abf2833a13c31676d6a1ddb686"],
+      "evidence": [
+        "apps/web/src/components/ChatMarkdown.test.tsx:194",
+        "apps/web/src/components/ChatMarkdown.test.tsx:214"
+      ]
     },
     {
       "upstreamSha": "6cc7f7006e24283072cc3e0b3ed8ced80c6d71a5",
@@ -16433,10 +16443,9 @@
     {
       "upstreamSha": "74dfbb697235b0db87355d3f8575dc2ba45dddf7",
       "subject": "fix(web): composer banner titles truncate beside their icon instead of wrapping (#17699)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): composer banner titles truncate beside their icon instead of wrapping (#17699).",
+      "reason": "Not applicable: upstream's composer banner stack (ComposerBanner and ComposerBannerStack) has no F5 counterpart; F5 shows composer notices as separate panels above the editor. Upstream truncates banner titles beside their icon. Upstream change: fix(web): composer banner titles truncate beside their icon instead of wrapping (#17699)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "74ee5153e05eb183dabec413ff9025d83d2058e4",
@@ -16744,10 +16753,9 @@
     {
       "upstreamSha": "777cd68c6aa0b816f39d1e0dc79ad34590635755",
       "subject": "perf(web): the composer editor compiles with the React Compiler (#20450)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the composer editor compiles with the React Compiler (#20450).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the composer editor compiles with the React Compiler (#20450)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "777f5bb2e11fe30e7fdcb5741b0b1d9bb20924d6",
@@ -18370,10 +18378,14 @@
     {
       "upstreamSha": "83fbbc18f8718b0254e696f02b8e381386fd6c7b",
       "subject": "fix(web): timeline keeps live-following after returning from Settings (#17348)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): timeline keeps live-following after returning from Settings (#17348).",
+      "reason": "Equivalent: upstream records live-follow intent so a following thread keeps following after Settings. F5 saves the anchor from live DOM geometry when the timeline unmounts, and LegendList's maintainScrollAtEnd keeps a following thread at the end while it streams, so the saved anchor is at the end. F5 has no held paint-only timeline or anchored end space, the other two cases upstream fixes. Upstream change: fix(web): timeline keeps live-following after returning from Settings (#17348)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "equivalent",
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"],
+      "evidence": [
+        "apps/web/src/components/chat/MessagesTimeline.tsx:796",
+        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:557"
+      ]
     },
     {
       "upstreamSha": "83ffe0a8e0a1b7e45af82cb604eb3568f37baa5d",
@@ -20033,10 +20045,9 @@
     {
       "upstreamSha": "9030a60eafde905100a052f86beeb8be7642b5a9",
       "subject": "fix(web): composer chip rings no longer clip at the editor edge (#13301)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): composer chip rings no longer clip at the editor edge (#13301).",
+      "reason": "Not applicable: upstream keeps its Tiptap composer's chip focus rings from clipping at the editor edge. F5's Lexical chips draw a border inside their own box, so the editor clip cannot cut them. Upstream change: fix(web): composer chip rings no longer clip at the editor edge (#13301)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9051ed9c3923b7b5fb88d99fe9267380d69baa51",
@@ -20167,10 +20178,12 @@
     {
       "upstreamSha": "916ec94f93da686303f878d506a760efd13506c1",
       "subject": "fix(web): show the agent's question on user-input timeline rows (#12900)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): show the agent's question on user-input timeline rows (#12900).",
+      "reason": "Ported: an answered user-input row leads with the request's question text instead of User input submitted and shows the submitted answers as its detail; value-free provider receipts keep their summaries. Upstream change: fix(web): show the agent's question on user-input timeline rows (#12900)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["ea33a1f2189ddab4f8dff1adc1bde9c4935d6cde"],
+      "evidence": ["apps/web/src/session-logic.test.ts:1053"]
     },
     {
       "upstreamSha": "91a03e074751e9dc732d0dddcd7b3a291caba34f",
@@ -20811,10 +20824,9 @@
     {
       "upstreamSha": "95e6d928a3ae59d3328c1a24b1d8102d5a9ed378",
       "subject": "perf(web): the composer state hooks compile without manual memoization (#20566)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the composer state hooks compile without manual memoization (#20566).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the composer state hooks compile without manual memoization (#20566)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "95edeb753b070bad191e10afe15918c969135225",
@@ -22130,10 +22142,9 @@
     {
       "upstreamSha": "9fb4ddb2d1ccad4452b15c2934170da275cb8bc6",
       "subject": "fix(web): an unsaved citation comment survives a question or approval (#19350)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): an unsaved citation comment survives a question or approval (#19350).",
+      "reason": "Not applicable: upstream's assistant citation notes (commenting on a quoted passage from the composer) have no F5 counterpart; F5 quotes an assistant passage as a Markdown blockquote. Upstream keeps an unsaved citation comment across a question or approval. Upstream change: fix(web): an unsaved citation comment survives a question or approval (#19350)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9fba2093e50f208c52d9041c70a793296e311477",
@@ -22215,10 +22226,15 @@
     {
       "upstreamSha": "a01c48f86245f2a779f9af84042f3b09fbdeb91f",
       "subject": "fix(composer): allow slash skill search within messages (#19107)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(composer): allow slash skill search within messages (#19107).",
+      "reason": "Ported: a slash token after other text searches skills. Mode and model commands are not offered there, and the menu opens only when a skill matches, so a typed path does not open it. An indented slash on its own line still opens the full command list. Upstream change: fix(composer): allow slash skill search within messages (#19107)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["a708b1a11a35e9873d8713979eb6222be4b31a00"],
+      "evidence": [
+        "apps/web/src/composer-logic.test.ts:17",
+        "apps/web/src/components/ChatView.browser.tsx:5589"
+      ]
     },
     {
       "upstreamSha": "a041981276b4c789fed8132e3b8a320749bf25e8",
@@ -22420,10 +22436,14 @@
     {
       "upstreamSha": "a1830915ecf70e3ad4fbe8efb15ae9f18517eb54",
       "subject": "fix: composer picks up new project skills without a server restart (#16750)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix: composer picks up new project skills without a server restart (#16750).",
+      "reason": "Equivalent: F5 watches each project's skill directories and republishes the project's skills when they change, so the composer sees new project skills without a restart. Upstream's fix adds a TTL to its per-workspace provider scan cache, which F5 does not have. Upstream change: fix: composer picks up new project skills without a server restart (#16750)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "equivalent",
+      "f5Shas": ["21d3dbffcb90c51fc4913d9879805244d245cc8b"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProjectSkillSyncService.ts:81",
+        "apps/server/src/orchestration/Layers/ProjectSkillSyncService.test.ts:145"
+      ]
     },
     {
       "upstreamSha": "a19f01fc19d209d9962c4bb66372ed9e03e320a9",
@@ -22801,10 +22821,9 @@
     {
       "upstreamSha": "a4f6078bebcb3283e53e1cea247257136ce82cc8",
       "subject": "fix(web): return focus to the composer after saving a citation note (#13450)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): return focus to the composer after saving a citation note (#13450).",
+      "reason": "Not applicable: upstream's assistant citation notes (commenting on a quoted passage from the composer) have no F5 counterpart; F5 quotes an assistant passage as a Markdown blockquote. Upstream returns focus to the composer after a citation note is saved. Upstream change: fix(web): return focus to the composer after saving a citation note (#13450)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a4f6caf8cf43f33aa623ae03df6d6078546bbba2",
@@ -23058,10 +23077,9 @@
     {
       "upstreamSha": "a70ee2a7a0abbb14d738510f2d114fab121c899a",
       "subject": "fix(web): Resume continues on the model picked in the composer (#17867)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): Resume continues on the model picked in the composer (#17867).",
+      "reason": "Not applicable: upstream's Resume continues an interrupted run (manualContinuationOfRunId) on the composer's model. F5 has no run continuation. Upstream change: fix(web): Resume continues on the model picked in the composer (#17867)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a7223f3969428170cc13bd7859aa59098b2f94b1",
@@ -23509,10 +23527,9 @@
     {
       "upstreamSha": "aacefcd7e92a784c179b3ca2473a7608f783784e",
       "subject": "fix(web): timeline divider focus ring stays inside the pill (#17702)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): timeline divider focus ring stays inside the pill (#17702).",
+      "reason": "Not applicable: upstream insets the focus ring of its TimelineSystemDivider pill. F5's timeline has no clickable system divider. Upstream change: fix(web): timeline divider focus ring stays inside the pill (#17702)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "aad732901e4b7d485574eaef5a9c1fb388c4291a",
@@ -23547,10 +23564,11 @@
     {
       "upstreamSha": "aaf83eedd50f487adf95141c22cee03c814959bf",
       "subject": "fix(web): center the empty-thread placeholder above the composer (#18331)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): center the empty-thread placeholder above the composer (#18331).",
+      "reason": "Equivalent: F5's empty-thread placeholder already pads its container by the composer dock height, so it centers in the space above the composer. Upstream change: fix(web): center the empty-thread placeholder above the composer (#18331)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "equivalent",
+      "f5Shas": ["e05e37b3376d85ff630a32d18ec7544af076acc0"],
+      "evidence": ["apps/web/src/components/chat/MessagesTimeline.tsx:1191"]
     },
     {
       "upstreamSha": "ab0933a41ae3a69632ea68809700a040bde26c22",
@@ -25031,10 +25049,9 @@
     {
       "upstreamSha": "b6dde72755aa115df56425099bc6a9a7cbcf6846",
       "subject": "perf(web): the citation chip compiles without manual memoization (#20643)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the citation chip compiles without manual memoization (#20643).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the citation chip compiles without manual memoization (#20643)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b6e1b39335ffd34583c94f5b1e5e2c80520729fe",
@@ -27105,10 +27122,9 @@
     {
       "upstreamSha": "c5d7309152f2c93f7334afe54f99c41372e15d10",
       "subject": "feat(mobile): replace custom Markdown rendering with Enriched (#16979)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(mobile): replace custom Markdown rendering with Enriched (#16979).",
+      "reason": "Not applicable: upstream replaces Markdown rendering in its mobile app. F5 has no mobile app. Upstream change: feat(mobile): replace custom Markdown rendering with Enriched (#16979)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c5ff51ec1fff1a9f0447b0336d645ab0f089db62",
@@ -27467,10 +27483,12 @@
     {
       "upstreamSha": "c8a6768f079f9448228668c40ffe2262bda202a6",
       "subject": "fix(server): HTML and Markdown attachments no longer fail OpenCode turns (#19319)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): HTML and Markdown attachments no longer fail OpenCode turns (#19319).",
+      "reason": "Ported: OpenCode receives only text/plain, PDF and image attachments as native file parts; HTML, Markdown and CSV, which model APIs reject as raw file parts, reach the agent as paths in the attachment context. Upstream change: fix(server): HTML and Markdown attachments no longer fail OpenCode turns (#19319)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["8d020693c1da9b0c27c50574e8f8260c3591117a"],
+      "evidence": ["apps/server/src/provider/opencodeRuntime.test.ts:81"]
     },
     {
       "upstreamSha": "c8aba2587d56edbf3b7872987719a12b42031f48",
@@ -27702,10 +27720,9 @@
     {
       "upstreamSha": "ca728ec4b3358209761468e8cda4d6b6a72e7286",
       "subject": "fix(web): composer keeps its border while resting and expanding (#18333)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): composer keeps its border while resting and expanding (#18333).",
+      "reason": "Not applicable: upstream's ComposerSurface glass shell and its model strip have no F5 counterpart. Upstream keeps the surface border while resting and expanding. Upstream change: fix(web): composer keeps its border while resting and expanding (#18333)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ca72e381c64f25d771236eecf70219f68e5f365b",
@@ -28006,10 +28023,9 @@
     {
       "upstreamSha": "cc62349c37fa486000b89c7ecc975c1bf66ec8a4",
       "subject": "fix(web): keep branch restore action inline in narrow composers (#14811)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): keep branch restore action inline in narrow composers (#14811).",
+      "reason": "Not applicable: upstream's composer banner stack (ComposerBanner and ComposerBannerStack) has no F5 counterpart; F5 shows composer notices as separate panels above the editor. Upstream keeps its branch restore banner action inline. Upstream change: fix(web): keep branch restore action inline in narrow composers (#14811)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cc839c42b1adfddd059142bb6d7151719080c4ea",
@@ -28570,10 +28586,9 @@
     {
       "upstreamSha": "d0dc45885c1441da5bd46dcf13124d94ed728b0a",
       "subject": "fix(web): type in front of bold that starts a composer line (#13217)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): type in front of bold that starts a composer line (#13217).",
+      "reason": "Not applicable: upstream fixes typing in front of bold at the start of a line in its Tiptap rich text composer. F5's Lexical composer styles Markdown without changing the text, so there is no bold mark to type in front of. Upstream change: fix(web): type in front of bold that starts a composer line (#13217)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d0f855bfa91b1d961a17a02ec3e383f9671caba1",
@@ -29022,10 +29037,9 @@
     {
       "upstreamSha": "d4314e8e1627e2ea46ddea20de9e9deda40b1dcc",
       "subject": "refactor(web): the composer builds model options without a \"use memo\" hook (#20780)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the composer builds model options without a \"use memo\" hook (#20780).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: refactor(web): the composer builds model options without a \"use memo\" hook (#20780)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d43210050b97d57d7a4e76df30624b89108102d9",
@@ -29374,10 +29388,12 @@
     {
       "upstreamSha": "d6f3af77192adfb2304769096eeec59d3464aa21",
       "subject": "fix(web): omit underlines on markdown image links (#17728)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): omit underlines on markdown image links (#17728).",
+      "reason": "Ported: links without text (a badge or screenshot) carry data-markdown-image-link and render without the link underline. Upstream change: fix(web): omit underlines on markdown image links (#17728)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "ported",
+      "plannedWorkstream": "10",
+      "f5Shas": ["5906f4108778c1eaea2c45b076c6f2d8b75e8f39"],
+      "evidence": ["apps/web/src/components/ChatMarkdown.test.tsx:226"]
     },
     {
       "upstreamSha": "d6f47ff9725f0902b526f854519cb7e92dcee52f",
@@ -29691,10 +29707,9 @@
     {
       "upstreamSha": "d913b61603a3dce6d2765f9cfab83cfc84b45ccd",
       "subject": "perf(web): the React Compiler compiles MessagesTimeline (#20402)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the React Compiler compiles MessagesTimeline (#20402).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the React Compiler compiles MessagesTimeline (#20402)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d9157773977d2f91992b5fba5a9d2c59ab3e5887",
@@ -30800,18 +30815,16 @@
     {
       "upstreamSha": "e08c31e1a1fd5e89e2d4130b9ad18b44d15f92cd",
       "subject": "fix(web): timeline divider pill shows a pointer, visible hover and focus ring (#15188)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): timeline divider pill shows a pointer, visible hover and focus ring (#15188).",
+      "reason": "Not applicable: upstream styles the clickable pill of its TimelineSystemDivider. F5's timeline has no clickable system divider. Upstream change: fix(web): timeline divider pill shows a pointer, visible hover and focus ring (#15188)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e093789dd2340d8a41ee7ac12341fb011f9ff86c",
       "subject": "fix(web): subagent lists in the composer banner no longer start lines with a comma (#19170)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): subagent lists in the composer banner no longer start lines with a comma (#19170).",
+      "reason": "Not applicable: upstream's composer banner stack (ComposerBanner and ComposerBannerStack) has no F5 counterpart; F5 shows composer notices as separate panels above the editor. Upstream keeps commas from starting lines in its subagent handoff banner and V2 lifecycle rows. Upstream change: fix(web): subagent lists in the composer banner no longer start lines with a comma (#19170)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e09b88b6a51bb7e4309498f01c2f36bf5ada43f4",
@@ -31939,10 +31952,9 @@
     {
       "upstreamSha": "e925fe754e8e4707626d94f74d25f6eb6735a30e",
       "subject": "perf(web): ChatComposer compiles with no manual memoization (#20397)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): ChatComposer compiles with no manual memoization (#20397).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): ChatComposer compiles with no manual memoization (#20397)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e9298af6f5200fc7e63e0ad7213fe44a4151f36c",
@@ -33646,10 +33658,9 @@
     {
       "upstreamSha": "f43206d35f056ce0955382d761f1fdc4d2b8bcb1",
       "subject": "perf(web): the composer draft store compiles without manual memoization (#20713)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the composer draft store compiles without manual memoization (#20713).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the composer draft store compiles without manual memoization (#20713)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f43f6ddde06047d8d53da0abb355b41d703562ce",
@@ -34454,10 +34465,9 @@
     {
       "upstreamSha": "f9baf517e0df8557b77f7782b193152967ea029c",
       "subject": "refactor(web): chat composer keeps its caching without \"use memo\" (#20834)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): chat composer keeps its caching without \"use memo\" (#20834).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: refactor(web): chat composer keeps its caching without \"use memo\" (#20834)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f9d1c65d475807f70d29deff71b16a922a61c4c0",
@@ -34740,10 +34750,9 @@
     {
       "upstreamSha": "fcda161afb902f73dc39a7512c461bb519872bfe",
       "subject": "perf(web): chat markdown compiles with the React Compiler (#20715)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): chat markdown compiles with the React Compiler (#20715).",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): chat markdown compiles with the React Compiler (#20715)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "10"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "fce8508456e7f9218eebb02ecd764f9b3a47df6b",

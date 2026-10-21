@@ -2797,3 +2797,74 @@ and compile cache pass, as do the tooltip unit test, the new chat link browser
 test and the ChatMarkdown unit suite. The desktop and web typechecks pass.
 Electron cannot launch in this environment, so the tooltip and preview
 changes were not checked in a running desktop window.
+
+## September set 10 triage log: chat and composer follow-ups
+
+All 49 "verify this follow-up" records carried by set 10 (the 15o carrier) are
+classified: 8 ported, 6 equivalent, 34 not applicable and 1 moved to Phase 2.
+The "Phase 10 implementation" records stay as they are, held by the open
+performance release gates.
+
+New ports:
+
+- [t3code#10154](https://github.com/pingdotgg/t3code/pull/10154): composer
+  suggestions work with screen readers. The editor is labelled, announces a
+  listbox and points `aria-activedescendant` at the highlighted option, and an
+  empty or loading list is announced.
+- [t3code#15509](https://github.com/pingdotgg/t3code/pull/15509): a file link
+  whose text is prose keeps that text in front of the file chip.
+- [t3code#12615](https://github.com/pingdotgg/t3code/pull/12615): Windows path
+  link destinations keep their backslashes. F5 also lacked upstream's local-path
+  URL transform ([t3code#1867](https://github.com/pingdotgg/t3code/pull/1867)),
+  so `C:\`, UNC and `file://` links rendered with an empty href and never became
+  chips; local file destinations are now kept and other schemes are sanitized as
+  before.
+- [t3code#17728](https://github.com/pingdotgg/t3code/pull/17728): image-only
+  links lose the link underline.
+- [t3code#15455](https://github.com/pingdotgg/t3code/pull/15455): a hovered
+  timeline tooltip closes when the timeline scrolls, unless its trigger has
+  focus.
+- [t3code#12900](https://github.com/pingdotgg/t3code/pull/12900): an answered
+  user-input row leads with the agent's question and shows the answers.
+- [t3code#19107](https://github.com/pingdotgg/t3code/pull/19107): a slash after
+  other text searches skills. Unlike upstream, the menu opens there only when a
+  skill matches and offers no mode or model commands, so typing a path such as
+  `/Users/me` mid-message shows no menu.
+- [t3code#19319](https://github.com/pingdotgg/t3code/pull/19319): OpenCode gets
+  only plain text, PDF and image attachments as native file parts, so HTML and
+  Markdown attachments no longer fail the turn.
+
+Equivalent: chat markdown renders HTML as text, so a bare `<A>` placeholder
+cannot open a link
+([t3code#16637](https://github.com/pingdotgg/t3code/pull/16637), now pinned by a
+test). The timeline saves its position from live geometry and stays at the end
+while following
+([t3code#17348](https://github.com/pingdotgg/t3code/pull/17348)). The
+empty-thread placeholder already clears the composer
+([t3code#18331](https://github.com/pingdotgg/t3code/pull/18331)). Project skill
+directories are watched
+([t3code#16750](https://github.com/pingdotgg/t3code/pull/16750)). Chat markdown
+does not subscribe to server config or the connection
+([t3code#20852](https://github.com/pingdotgg/t3code/pull/20852)). The Lexical
+composer already groups undo
+([t3code#14674](https://github.com/pingdotgg/t3code/pull/14674)).
+
+Moved to Phase 2:
+[t3code#19869](https://github.com/pingdotgg/t3code/pull/19869) restructures
+upstream's ChatView handlers so shared closure scopes stop retaining old
+renders. F5's ChatView is built differently, so the port needs a heap-snapshot
+measurement first.
+
+Not applicable: 12 React Compiler adoptions (maintenance), and fixes to
+upstream-only parts: the composer banner stack (6), the composer surface (2),
+the Tiptap composer (2), citation notes (3), the timeline system divider (2),
+the chat canvas, the branch toolbar's label collapse, the composer shoulder tab,
+the resting composer's floating actions, run continuation, cross-environment
+thread drops, and the mobile app.
+
+Validation: the new and touched unit suites (ChatMarkdown, markdown links,
+composer logic, session logic, the suggestion id helper, OpenCode runtime,
+adapter and text generation) pass, as do the full ChatView (135) and
+MessagesTimeline (73) browser suites and the new tooltip browser test. The
+tooltip and Windows-path tests fail with their fix removed. The
+web and server typechecks and lint pass.
