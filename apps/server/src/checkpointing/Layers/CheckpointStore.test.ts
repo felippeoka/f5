@@ -15,6 +15,7 @@ import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
   CheckpointStoreLiveWithGitService,
   CheckpointStoreLiveWithoutCredentials,
+  copiedIndexTimestampSeconds,
 } from "./CheckpointStore.ts";
 
 function makeLayer(calls: ExecuteGitInput[], refOutput = "") {
@@ -35,6 +36,13 @@ function makeLayer(calls: ExecuteGitInput[], refOutput = "") {
     Layer.provideMerge(NodeServices.layer),
   );
 }
+
+describe("copiedIndexTimestampSeconds", () => {
+  it("keeps the index's own second, even when it falls exactly on the second", () => {
+    expect(copiedIndexTimestampSeconds(new Date(1_700_000_000_000))).toBe(1_700_000_000);
+    expect(copiedIndexTimestampSeconds(new Date(1_700_000_000_999))).toBe(1_700_000_000);
+  });
+});
 
 describe("CheckpointStoreLive", () => {
   it("resolves thousands of exact checkpoint refs with one bounded Git listing", async () => {

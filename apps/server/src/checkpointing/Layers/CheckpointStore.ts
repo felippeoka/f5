@@ -25,6 +25,16 @@ import { batchLiteralPathspecs, isGitImport, parseNumstatPaths } from "../Diffs.
 // Path lists are small next to patches; a bound keeps a pathological history from hanging diffs.
 const AUTHORED_PATHS_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
+/**
+ * The whole-second timestamp a copied index keeps, so files edited in its own second stay racy
+ * for Git. Node already truncates the index mtime to milliseconds, so flooring is enough;
+ * subtracting another millisecond would also make every file from the preceding second racy
+ * and reread.
+ */
+export function copiedIndexTimestampSeconds(mtime: Date): number {
+  return Math.floor(mtime.getTime() / 1000);
+}
+
 function isSafeCheckpointRef(ref: string): boolean {
   if (!ref.startsWith("refs/") || /\s/.test(ref)) return false;
   for (const character of ref) {
@@ -162,7 +172,7 @@ const makeCheckpointStore = Effect.gen(function* () {
                 const sourcePath = source.stdout.trim();
                 const metadata = yield* fs.stat(sourcePath);
                 if (metadata.mtime === undefined) return false;
-                const timestamp = Math.floor((metadata.mtime.getTime() - 1) / 1000);
+                const timestamp = copiedIndexTimestampSeconds(metadata.mtime);
                 if (timestamp <= 0) return false;
                 yield* fs.copyFile(sourcePath, tempIndexPath);
                 yield* executeCapture({
