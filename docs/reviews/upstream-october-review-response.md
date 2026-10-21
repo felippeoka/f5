@@ -1957,3 +1957,57 @@ refactors are deferred with the earlier compiler-allowlist records. Seven are
 not applicable. Their subsystems are upstream-only: the thread-launch tool,
 branch naming settings, orchestration v2, the worktree setup script (two
 records), the previous-worktree option, and mobile.
+
+## 15v and 15g triage log: secrets and GitHub HTTP transport
+
+[t3code#20446](https://github.com/pingdotgg/t3code/pull/20446), the last open
+15v record, is equivalent. f5 redacts secrets before settings reach a client
+and masks password fields in preview snapshots. It never logs a pairing URL.
+
+All 18 open 15g records are classified. The HTTP transport from the earlier
+15g work covers six of them: the gh-for-token transport and the PR, repository
+and media call sites
+([t3code#16319](https://github.com/pingdotgg/t3code/pull/16319),
+[t3code#16320](https://github.com/pingdotgg/t3code/pull/16320),
+[t3code#16321](https://github.com/pingdotgg/t3code/pull/16321)), batched
+branch lookups
+([t3code#16760](https://github.com/pingdotgg/t3code/pull/16760),
+[t3code#14673](https://github.com/pingdotgg/t3code/pull/14673)) and shared
+routing probes ([t3code#15853](https://github.com/pingdotgg/t3code/pull/15853)).
+The manual sync reset wait covers
+[t3code#16203](https://github.com/pingdotgg/t3code/pull/16203). Two changes
+were new in this batch:
+
+- The plan's gh parity check found that GitHub requests no longer honored
+  `HTTP(S)_PROXY`/`NO_PROXY` or the system trust store after the move off
+  gh. They now use undici's fetch with an `EnvHttpProxyAgent` that trusts
+  Node's roots, `NODE_EXTRA_CA_CERTS` included, plus the system store. A test
+  runs a request through a local proxy to a TLS origin whose root only that
+  list contains. Node 24's built-in fetch rejects an undici 8 dispatcher, so
+  tests that stub the global fetch route undici's fetch through it.
+- [t3code#13894](https://github.com/pingdotgg/t3code/pull/13894): a branch
+  pushed to a fork without `-u` now finds its fork PR. Its remote is inferred
+  from ref tips, and a tie infers nothing.
+
+Five are equivalent:
+[t3code#17063](https://github.com/pingdotgg/t3code/pull/17063) (f5's
+settlement sweep is already bounded and must re-read git state),
+[t3code#18289](https://github.com/pingdotgg/t3code/pull/18289),
+[t3code#19375](https://github.com/pingdotgg/t3code/pull/19375),
+[t3code#19162](https://github.com/pingdotgg/t3code/pull/19162) and
+[t3code#11059](https://github.com/pingdotgg/t3code/pull/11059). Five are not
+applicable. [t3code#19103](https://github.com/pingdotgg/t3code/pull/19103)
+handles GitHub App installation tokens, which f5's `GET /user` verification
+does not accept, so the plan's installation-token identity has nothing to
+apply to. The other four
+([t3code#19344](https://github.com/pingdotgg/t3code/pull/19344),
+[t3code#19374](https://github.com/pingdotgg/t3code/pull/19374),
+[t3code#16280](https://github.com/pingdotgg/t3code/pull/16280) and
+[t3code#16353](https://github.com/pingdotgg/t3code/pull/16353)) change
+upstream's `PullRequestService`, `client-runtime` atoms and repository
+identity grouping.
+
+The plan's one-release fallback is in place too. A `githubTransport` setting
+(`http` by default) can send the same captured requests through `gh api`. It is
+read per request, and Settings → Accounts → GitHub exposes it as "GitHub
+requests".

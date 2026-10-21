@@ -709,25 +709,14 @@
     },
     {
       "upstreamSha": "8653c8f09bb691e4ebdd1a2e62258f8911873ac7",
-      "classification": "planned:15v",
-      "reason": "Planned: implement and verify the explicitly approved 15v scenario. Upstream change: fix(server): keep sensitive values out of settings reads, startup logs and preview snapshots (#20446).",
+      "classification": "equivalent:apps/server/src/serverSettings.ts:102",
+      "reason": "Equivalent: upstream kept secrets out of settings reads, the startup pairing log and preview snapshots. f5 redacts OpenCode passwords, provider environment values and OTLP headers before settings reach a client, masks password and dotted fields in preview snapshots, and prints no pairing URL at startup. Upstream change: fix(server): keep sensitive values out of settings reads, startup logs and preview snapshots (#20446)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": [
-          "15v-pr-20446",
-          "settings-credential-diagnostics",
-          "startup-private-browser-target",
-          "preview-owned-cross-frame-redaction"
-        ],
-        "targetModules": [
-          "apps/server/src/serverSettings.ts",
-          "apps/server/src/serverSettingsDiagnostics.ts",
-          "apps/server/src/main.ts",
-          "apps/server/src/wsServer.ts",
-          "apps/desktop/src/preview/snapshotScript.ts",
-          "apps/desktop/src/preview/snapshotFrameSecrets.ts"
-        ]
-      }
+      "evidence": ["apps/desktop/src/preview/snapshotSecrets.ts:10"],
+      "f5Shas": [
+        "c0e97fadf4a6820ca0f670bbc2b88e8a1823d763",
+        "aaff30384947534dfdd2634ced62f0e3cc797b5c"
+      ]
     },
     {
       "upstreamSha": "aa28bde87ea42aeabbce9605e131acd60e33439c",
@@ -3979,13 +3968,9 @@
     },
     {
       "upstreamSha": "742c229957b69a0cc5a1379dff6c66b595854057",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): GitHub App tokens can merge and use other write actions (#19103).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-19103"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:github-app-installation-tokens",
+      "reason": "Not applicable: the fix grants write actions to a GitHub App installation, which GitHub reports with a null viewerPermission. f5 verifies every credential through GET /user, which installation tokens cannot call, and its tokens come from per-profile device login. Upstream change: fix(server): GitHub App tokens can merge and use other write actions (#19103)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "40a7908df54d5069c93835032c9e955b56b55f1d",
@@ -4355,13 +4340,11 @@
     },
     {
       "upstreamSha": "6c142934188fa83bcc1d9cb44b425ced82d66468",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(github): requested teams now show in pull request reviewers (#19375).",
+      "classification": "equivalent:apps/server/src/prHub/discoveryModel.ts:525",
+      "reason": "Equivalent: upstream showed requested teams among PR reviewers. f5's discovery and detail queries select Team reviewers and fall back to the team slug. Upstream change: fix(github): requested teams now show in pull request reviewers (#19375)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-19375"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "evidence": ["apps/server/src/prHub/githubPrDetails.ts:23"],
+      "f5Shas": ["3e9a5a6120322ab6ac32713918f01dfe656d30b8"]
     },
     {
       "upstreamSha": "90ca6a775843d226937b396e0af18e9664448508",
@@ -4375,13 +4358,9 @@
     },
     {
       "upstreamSha": "21af72f7a57c0dbe668f0e0bf80166c8e9873ab3",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(client-runtime): merged pull requests are no longer re-read every minute (#19374).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-19374"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:client-runtime",
+      "reason": "Not applicable: the fix stops upstream's client-runtime query atoms polling a merged PR every minute; f5 has no client-runtime package or PR detail atoms. Upstream change: perf(client-runtime): merged pull requests are no longer re-read every minute (#19374)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "519d64f6cec0a0f9ed18fbca4a3f8695cac44506",
@@ -4475,13 +4454,9 @@
     },
     {
       "upstreamSha": "06a84de3bd613b00f6a1fc61f7f71ea26534ef09",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(server): turns no longer re-read merged PRs from GitHub (#19344).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-19344"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: the fix stops upstream's PullRequestService re-reading a merged PR's detail after each turn; f5 has no per-thread PR detail service. f5's git status re-lists a branch's PRs, which stays, because a new PR can reuse a merged branch. Upstream change: perf(server): turns no longer re-read merged PRs from GitHub (#19344)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "7ee2839cb58263742301895a6be826505daa64ea",
@@ -4910,13 +4885,10 @@
     },
     {
       "upstreamSha": "5e5c52b7a70c16734e42faa072248a597e1333ee",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(source-control): keep distinct CI checks with overlapping names (#19162).",
+      "classification": "equivalent:apps/server/src/prHub/githubPrDetails.ts:295",
+      "reason": "Equivalent: upstream's check dedupe key could merge distinct checks whose workflow and check names overlap. f5 keeps every check context without a name-based dedupe, and keys required checks by name and app id. Upstream change: fix(source-control): keep distinct CI checks with overlapping names (#19162)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-19162"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "f5Shas": ["969f827932eff5f8ed7168c50b7233f1de811b10"]
     },
     {
       "upstreamSha": "573cec01664d8bfef9da53dd31d68398e5814170",
@@ -5222,13 +5194,11 @@
     },
     {
       "upstreamSha": "ae7bed6e402897b8020f10d13747dd6a3779b5ae",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(server): cached branch PR lookups no longer start git processes (#17063).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ThreadSettlementService.ts:543",
+      "reason": "Equivalent: upstream cached the git state around branch PR answers because its discovery and settlement sweep ran for every thread each minute. f5's settlement sweep runs every five minutes with at most 32 deduplicated reads, re-reads git state because a merged answer can settle a thread (upstream's freshGitState does the same before persisting), and routing probes are cached for five seconds. Upstream change: perf(server): cached branch PR lookups no longer start git processes (#17063)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-17063"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "evidence": ["apps/server/src/git/githubHttpOperations.ts:106"],
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"]
     },
     {
       "upstreamSha": "06620faf6de7dc9dc02f245c9fedc49644c2ee08",
@@ -6137,13 +6107,10 @@
     },
     {
       "upstreamSha": "f23d0084b6e023ffb1af9e332d8666affc99d542",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(github): resolve credentials once per GraphQL request (#18289).",
+      "classification": "equivalent:apps/server/src/git/githubApi.ts:459",
+      "reason": "Equivalent: upstream stopped resolving credentials twice per GraphQL request. f5 requests take the token from the captured credential context and resolve a new token only on a 401. Upstream change: perf(github): resolve credentials once per GraphQL request (#18289)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-18289"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "f5Shas": ["3166e4dc5e57987cb8a7e5b6289bb363a1dd0ed2"]
     },
     {
       "upstreamSha": "8ac6846a0b855c3aad70adbf745ff113d4eb3f1f",
@@ -8662,13 +8629,10 @@
     },
     {
       "upstreamSha": "cdd331b6c3f78bf24b039b09937b837d2d71a4e7",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): recognize authenticated GitHub Enterprise hosts (#11059).",
+      "classification": "equivalent:apps/server/src/git/Layers/GitManager.ts:727",
+      "reason": "Equivalent: upstream treated a custom host GitHub holds a credential for as GitHub Enterprise. f5 treats GH_HOST and every host with a saved GitHub account as GitHub when identifying a checkout's forge. Upstream change: fix(server): recognize authenticated GitHub Enterprise hosts (#11059)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-11059"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"]
     },
     {
       "upstreamSha": "740f591221bd9651f172237d68b7daba9d050dbd",
@@ -10459,13 +10423,9 @@
     },
     {
       "upstreamSha": "017c9a0eb53b2c100b5be2d366d2374038da9241",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): forks no longer merge into their upstream repo's project group (#16353).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-16353"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:repository-identity-resolver",
+      "reason": "Not applicable: the fix keeps forks out of their upstream repository's project group in upstream's RepositoryIdentityResolver and client project grouping; f5 does not group projects by repository identity. Upstream change: fix(server): forks no longer merge into their upstream repo's project group (#16353)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "99db70cf1a1f24deca80e40a94a6cdbbaf511da6",
@@ -10615,13 +10575,9 @@
     },
     {
       "upstreamSha": "4df84a7d03ff084ff4c6dd7aef54623984690fb7",
-      "classification": "planned:15g",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(pull-requests): PR detail reads no longer drain the GitHub quota (#16280).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15g-pr-16280"],
-        "targetModules": ["apps/server/src/prHub", "apps/server/src/git"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: the fix rate-limits upstream's PullRequestService detail reads and client-runtime refreshes; f5 has neither. Upstream change: fix(pull-requests): PR detail reads no longer drain the GitHub quota (#16280)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "758dc290e900e35958d37fec41fed4a357ad60fa",

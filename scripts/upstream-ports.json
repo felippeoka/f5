@@ -192,10 +192,9 @@
     {
       "upstreamSha": "017c9a0eb53b2c100b5be2d366d2374038da9241",
       "subject": "fix(server): forks no longer merge into their upstream repo's project group (#16353)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): forks no longer merge into their upstream repo's project group (#16353).",
+      "reason": "Not applicable: the fix keeps forks out of their upstream repository's project group in upstream's RepositoryIdentityResolver and client project grouping; f5 does not group projects by repository identity. Upstream change: fix(server): forks no longer merge into their upstream repo's project group (#16353)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "018d7f2775daabd2ef07898af29586915a0b7f67",
@@ -846,10 +845,9 @@
     {
       "upstreamSha": "06a84de3bd613b00f6a1fc61f7f71ea26534ef09",
       "subject": "perf(server): turns no longer re-read merged PRs from GitHub (#19344)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(server): turns no longer re-read merged PRs from GitHub (#19344).",
+      "reason": "Not applicable: the fix stops upstream's PullRequestService re-reading a merged PR's detail after each turn; f5 has no per-thread PR detail service. f5's git status re-lists a branch's PRs, which stays, because a new PR can reuse a merged branch. Upstream change: perf(server): turns no longer re-read merged PRs from GitHub (#19344)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "06dd9993b6292e61de8890956a3ce3c50495a6eb",
@@ -2252,10 +2250,15 @@
     {
       "upstreamSha": "10ac2f2ba495508a2a2fd469e67eda5df73f0df1",
       "subject": "fix(server): background GitHub polling uses ~74% fewer calls with batched GraphQL (#14673)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): background GitHub polling uses ~74% fewer calls with batched GraphQL (#14673).",
+      "reason": "Ported: background branch polling batches its lookups into aliased GraphQL queries per repository. Upstream change: fix(server): background GitHub polling uses ~74% fewer calls with batched GraphQL (#14673)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/server/src/git/githubHttpOperations.ts:350",
+        "apps/server/src/git/githubHttpOperations.test.ts:284"
+      ]
     },
     {
       "upstreamSha": "10bb59bf061252f5edadf96bc8139911b3fed7fd",
@@ -2928,10 +2931,22 @@
     {
       "upstreamSha": "1564aaa5d29deb2520d1211f9f35dd6150b1512e",
       "subject": "feat(server): GitHub API transport that uses gh only for the token (#16319)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: feat(server): GitHub API transport that uses gh only for the token (#16319).",
+      "reason": "Ported: captured GitHub API requests use bounded HTTP reads with gh used only for its token, a rejected token refreshes once without changing the account, and requests go through HTTP(S)_PROXY/NO_PROXY and the system trust store as gh's do. A githubTransport setting (http by default) sends the same requests through gh api for one release. Upstream change: feat(server): GitHub API transport that uses gh only for the token (#16319)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": [
+        "f46c26cd2cfc43fa846d701fd48c411656e3b7ab",
+        "138b3d2aeb3942d2edf1fba2df570750792b3087",
+        "2232b6edb42762d06ee763a2936c5d1c198c840f"
+      ],
+      "evidence": [
+        "apps/server/src/git/githubHttpTransport.ts:63",
+        "apps/server/src/git/githubHttpTransport.test.ts:197",
+        "apps/server/src/git/githubApi.test.ts:54",
+        "apps/server/src/git/Layers/GitHubCli.ts:176",
+        "apps/server/src/git/Layers/GitHubCli.test.ts:266"
+      ]
     },
     {
       "upstreamSha": "1568b3fd083e198a08bb12353820c1ef99fb3420",
@@ -3625,10 +3640,15 @@
     {
       "upstreamSha": "1a3f7ad5085606463a602bd756ca9c04d106fffe",
       "subject": "perf(prs): share concurrent github routing metadata probes (#15853)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(prs): share concurrent github routing metadata probes (#15853).",
+      "reason": "Ported: concurrent routing reads share one serialized git remote probe per checkout and host, cached for five seconds. Upstream change: perf(prs): share concurrent github routing metadata probes (#15853)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/server/src/git/githubHttpOperations.ts:106",
+        "apps/server/src/git/githubHttpOperations.test.ts:284"
+      ]
     },
     {
       "upstreamSha": "1a4a7596c2c557fcc26a5dceefc04ac6268640b4",
@@ -4523,10 +4543,9 @@
     {
       "upstreamSha": "21af72f7a57c0dbe668f0e0bf80166c8e9873ab3",
       "subject": "perf(client-runtime): merged pull requests are no longer re-read every minute (#19374)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(client-runtime): merged pull requests are no longer re-read every minute (#19374).",
+      "reason": "Not applicable: the fix stops upstream's client-runtime query atoms polling a merged PR every minute; f5 has no client-runtime package or PR detail atoms. Upstream change: perf(client-runtime): merged pull requests are no longer re-read every minute (#19374)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "21b6fb528d6b2d3b3e333b2bd4455d6cdf7d7a41",
@@ -10659,10 +10678,9 @@
     {
       "upstreamSha": "4df84a7d03ff084ff4c6dd7aef54623984690fb7",
       "subject": "fix(pull-requests): PR detail reads no longer drain the GitHub quota (#16280)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(pull-requests): PR detail reads no longer drain the GitHub quota (#16280).",
+      "reason": "Not applicable: the fix rate-limits upstream's PullRequestService detail reads and client-runtime refreshes; f5 has neither. Upstream change: fix(pull-requests): PR detail reads no longer drain the GitHub quota (#16280)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4e00471d1ab340b46742565bb6ce6462160b4d0c",
@@ -11577,10 +11595,15 @@
     {
       "upstreamSha": "54b6b667f340c03132e9fc2cb2c3d657571442a2",
       "subject": "fix(server): PR sync waits out a GitHub rate limit pause instead of failing every PR (#16203)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): PR sync waits out a GitHub rate limit pause instead of failing every PR (#16203).",
+      "reason": "Ported: an explicit PR sync waits out a rate-limit pause for read admission instead of failing every PR, releases queue capacity while waiting, and never replays mutations. Upstream change: fix(server): PR sync waits out a GitHub rate limit pause instead of failing every PR (#16203)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"],
+      "evidence": [
+        "apps/server/src/git/githubRequestScheduler.ts:287",
+        "apps/server/src/git/githubSyncWait.test.ts:38"
+      ]
     },
     {
       "upstreamSha": "54bbed660fc5dc99c6bfe335981e6d431275c91e",
@@ -12879,10 +12902,11 @@
     {
       "upstreamSha": "5e5c52b7a70c16734e42faa072248a597e1333ee",
       "subject": "fix(source-control): keep distinct CI checks with overlapping names (#19162)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(source-control): keep distinct CI checks with overlapping names (#19162).",
+      "reason": "Equivalent: upstream's check dedupe key could merge distinct checks whose workflow and check names overlap. f5 keeps every check context without a name-based dedupe, and keys required checks by name and app id. Upstream change: fix(source-control): keep distinct CI checks with overlapping names (#19162)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "equivalent",
+      "f5Shas": ["969f827932eff5f8ed7168c50b7233f1de811b10"],
+      "evidence": ["apps/server/src/prHub/githubPrDetails.ts:295"]
     },
     {
       "upstreamSha": "5e63aea2df03e8ccc5c8a56cee4c067ecbd3d703",
@@ -13717,10 +13741,12 @@
     {
       "upstreamSha": "649418f01fcb4ae5ebbc07739e0bfee8fae3aaec",
       "subject": "feat(server): source control, media and discovery use GitHub's API instead of gh (#16321)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: feat(server): source control, media and discovery use GitHub's API instead of gh (#16321).",
+      "reason": "Ported: repository metadata, teams, search and PR diff reads use the captured HTTP path instead of gh. Upstream change: feat(server): source control, media and discovery use GitHub's API instead of gh (#16321)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["apps/server/src/git/githubHttpOperations.ts:382"]
     },
     {
       "upstreamSha": "64972461c0606a4eafdd3cd08056155b6a2fea95",
@@ -14691,10 +14717,14 @@
     {
       "upstreamSha": "6c142934188fa83bcc1d9cb44b425ced82d66468",
       "subject": "fix(github): requested teams now show in pull request reviewers (#19375)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(github): requested teams now show in pull request reviewers (#19375).",
+      "reason": "Equivalent: upstream showed requested teams among PR reviewers. f5's discovery and detail queries select Team reviewers and fall back to the team slug. Upstream change: fix(github): requested teams now show in pull request reviewers (#19375)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "equivalent",
+      "f5Shas": ["3e9a5a6120322ab6ac32713918f01dfe656d30b8"],
+      "evidence": [
+        "apps/server/src/prHub/discoveryModel.ts:525",
+        "apps/server/src/prHub/githubPrDetails.ts:23"
+      ]
     },
     {
       "upstreamSha": "6c1ce06996979fcfe120ec8c8cb4f78a5c8a7365",
@@ -14796,10 +14826,15 @@
     {
       "upstreamSha": "6cf05264257093476a41f73439b1fa745427a007",
       "subject": "fix(server): detect fork PRs for branches without upstreams (#13894)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): detect fork PRs for branches without upstreams (#13894).",
+      "reason": "Ported: a branch pushed without -u infers its remote from ref tips (one exact tip, else one tip in its history; ties and failed probes infer nothing), so its fork PR is found. Upstream change: fix(server): detect fork PRs for branches without upstreams (#13894)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": ["bf297fda96e3a2f94b91ed5ac933c9b38c577b72"],
+      "evidence": [
+        "apps/server/src/git/Layers/GitManager.ts:766",
+        "apps/server/src/git/Layers/GitManager.extended.ts:867"
+      ]
     },
     {
       "upstreamSha": "6cf0c6ea55d281f65c80502ec1871b0adf472025",
@@ -15962,10 +15997,9 @@
     {
       "upstreamSha": "742c229957b69a0cc5a1379dff6c66b595854057",
       "subject": "fix(server): GitHub App tokens can merge and use other write actions (#19103)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): GitHub App tokens can merge and use other write actions (#19103).",
+      "reason": "Not applicable: the fix grants write actions to a GitHub App installation, which GitHub reports with a null viewerPermission. f5 verifies every credential through GET /user, which installation tokens cannot call, and its tokens come from per-profile device login. Upstream change: fix(server): GitHub App tokens can merge and use other write actions (#19103)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7441b36926eb111a193183f98c06aced4f4c3acf",
@@ -18294,10 +18328,17 @@
     {
       "upstreamSha": "8653c8f09bb691e4ebdd1a2e62258f8911873ac7",
       "subject": "fix(server): keep sensitive values out of settings reads, startup logs and preview snapshots (#20446)",
-      "reason": "Planned: implement and verify the explicitly approved 15v scenario. Upstream change: fix(server): keep sensitive values out of settings reads, startup logs and preview snapshots (#20446).",
+      "reason": "Equivalent: upstream kept secrets out of settings reads, the startup pairing log and preview snapshots. f5 redacts OpenCode passwords, provider environment values and OTLP headers before settings reach a client, masks password and dotted fields in preview snapshots, and prints no pairing URL at startup. Upstream change: fix(server): keep sensitive values out of settings reads, startup logs and preview snapshots (#20446)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15v"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "c0e97fadf4a6820ca0f670bbc2b88e8a1823d763",
+        "aaff30384947534dfdd2634ced62f0e3cc797b5c"
+      ],
+      "evidence": [
+        "apps/server/src/serverSettings.ts:102",
+        "apps/desktop/src/preview/snapshotSecrets.ts:10"
+      ]
     },
     {
       "upstreamSha": "8659fcf145c3372161b360b74b094b8e0ab80bec",
@@ -23384,10 +23425,12 @@
     {
       "upstreamSha": "adc3c9327abedda6a36694e2344e620fe0d62ae4",
       "subject": "feat(server): pull requests talk to GitHub's API instead of the gh CLI (#16320)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: feat(server): pull requests talk to GitHub's API instead of the gh CLI (#16320).",
+      "reason": "Ported: PR listing, viewing, creation, reviews, comments, ready state, reviewer changes and guarded merges use the captured HTTP path instead of gh pr commands. Upstream change: feat(server): pull requests talk to GitHub's API instead of the gh CLI (#16320)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["apps/server/src/git/githubHttpOperations.ts:382"]
     },
     {
       "upstreamSha": "adcd90858c3bfece59095465d2f49860ba3dcea9",
@@ -23476,10 +23519,14 @@
     {
       "upstreamSha": "ae7bed6e402897b8020f10d13747dd6a3779b5ae",
       "subject": "perf(server): cached branch PR lookups no longer start git processes (#17063)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(server): cached branch PR lookups no longer start git processes (#17063).",
+      "reason": "Equivalent: upstream cached the git state around branch PR answers because its discovery and settlement sweep ran for every thread each minute. f5's settlement sweep runs every five minutes with at most 32 deduplicated reads, re-reads git state because a merged answer can settle a thread (upstream's freshGitState does the same before persisting), and routing probes are cached for five seconds. Upstream change: perf(server): cached branch PR lookups no longer start git processes (#17063)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "equivalent",
+      "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.ts:543",
+        "apps/server/src/git/githubHttpOperations.ts:106"
+      ]
     },
     {
       "upstreamSha": "aea9ecbc482a3d2c14d1828cb5eeaaa9294d1320",
@@ -27023,10 +27070,15 @@
     {
       "upstreamSha": "c93080b0a3bf4faffb375169c5ec06adce05eb2f",
       "subject": "perf(server): background branch lookups share one GitHub query per sweep (#16760)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(server): background branch lookups share one GitHub query per sweep (#16760).",
+      "reason": "Ported: concurrent branch PR lookups batch into one GraphQL query per repository, account and priority, up to 50 branches. Upstream change: perf(server): background branch lookups share one GitHub query per sweep (#16760)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "ported",
+      "plannedWorkstream": "15g",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/server/src/git/githubHttpOperations.ts:350",
+        "apps/server/src/git/githubHttpOperations.test.ts:284"
+      ]
     },
     {
       "upstreamSha": "c9a0e8a119271765196dec38ef91395713da4213",
@@ -27570,10 +27622,11 @@
     {
       "upstreamSha": "cdd331b6c3f78bf24b039b09937b837d2d71a4e7",
       "subject": "fix(server): recognize authenticated GitHub Enterprise hosts (#11059)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: fix(server): recognize authenticated GitHub Enterprise hosts (#11059).",
+      "reason": "Equivalent: upstream treated a custom host GitHub holds a credential for as GitHub Enterprise. f5 treats GH_HOST and every host with a saved GitHub account as GitHub when identifying a checkout's forge. Upstream change: fix(server): recognize authenticated GitHub Enterprise hosts (#11059)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "equivalent",
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"],
+      "evidence": ["apps/server/src/git/Layers/GitManager.ts:727"]
     },
     {
       "upstreamSha": "cde12790d721ab2a90471750fd75d9f5bf13f57d",
@@ -32729,10 +32782,11 @@
     {
       "upstreamSha": "f23d0084b6e023ffb1af9e332d8666affc99d542",
       "subject": "perf(github): resolve credentials once per GraphQL request (#18289)",
-      "reason": "Planned: implement and verify the explicitly approved 15g scenario. Upstream change: perf(github): resolve credentials once per GraphQL request (#18289).",
+      "reason": "Equivalent: upstream stopped resolving credentials twice per GraphQL request. f5 requests take the token from the captured credential context and resolve a new token only on a 401. Upstream change: perf(github): resolve credentials once per GraphQL request (#18289)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15g"
+      "disposition": "equivalent",
+      "f5Shas": ["3166e4dc5e57987cb8a7e5b6289bb363a1dd0ed2"],
+      "evidence": ["apps/server/src/git/githubApi.ts:459"]
     },
     {
       "upstreamSha": "f241e7988d3d3347368c8aa32693a6b2391d7a61",
