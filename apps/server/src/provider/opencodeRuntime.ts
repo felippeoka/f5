@@ -77,7 +77,10 @@ export class OpenCodeRuntimeError extends Data.TaggedError(OPENCODE_RUNTIME_ERRO
 
 export function openCodeRuntimeErrorDetail(cause: unknown): string {
   if (OpenCodeRuntimeError.is(cause)) return cause.detail;
-  if (cause instanceof Error && cause.message.trim().length > 0) return cause.message.trim();
+  // Effect's TimeoutError can be constructed without a message, so `message`
+  // is not guaranteed to be a string on every Error that reaches here.
+  if (cause instanceof Error && typeof cause.message === "string" && cause.message.trim())
+    return cause.message.trim();
   if (cause && typeof cause === "object") {
     // SDK v2 throws { response, request, error? } shapes — extract what's useful
     const anyCause = cause as Record<string, unknown>;

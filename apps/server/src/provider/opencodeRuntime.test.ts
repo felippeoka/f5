@@ -13,9 +13,17 @@ import {
   buildOpenCodeWorkflowPermissionRules,
   OpenCodeRuntime,
   OpenCodeRuntimeLive,
+  openCodeRuntimeErrorDetail,
   resolveOpenCodeInvocation,
   loadOpenCodeSkills,
 } from "./opencodeRuntime.ts";
+
+it("formats an error whose message is not a string", () => {
+  const timeout = new Error("placeholder");
+  Object.defineProperty(timeout, "message", { value: undefined });
+  expect(() => openCodeRuntimeErrorDetail(timeout)).not.toThrow();
+  expect(openCodeRuntimeErrorDetail(new Error("  connection reset  "))).toBe("connection reset");
+});
 
 it("bounds a stuck CLI probe and closes its process scope", async () => {
   const started = Date.now();
