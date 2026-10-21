@@ -148,6 +148,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = readModel.snapshotSequence;
+    // Events this dispatch appended. Reconcile republishes only these: a
+    // shared state directory can contain events another server already
+    // handled, and republishing them starts a second provider turn.
+    const appendedEventIds = new Set<OrchestrationEvent["eventId"]>();
     const processingStartedAtMs = Date.now();
     const aggregateRef = commandToAggregateRef(envelope.command);
     const baseMetricAttributes = {
@@ -169,7 +173,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       readModel = nextReadModel;
 
       for (const persistedEvent of persistedEvents) {
-        yield* PubSub.publish(eventPubSub, persistedEvent);
+        if (appendedEventIds.has(persistedEvent.eventId)) {
+          yield* PubSub.publish(eventPubSub, persistedEvent);
+        }
       }
     });
 
@@ -554,6 +560,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
+                appendedEventIds.add(savedEvent.eventId);
                 nextReadModel = yield* projectEvent(nextReadModel, savedEvent);
                 yield* projectionPipeline.projectEvent(savedEvent);
                 if (savedEvent.type === "thread.archived" || savedEvent.type === "thread.deleted") {

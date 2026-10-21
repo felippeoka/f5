@@ -28,7 +28,17 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Deferred, Effect, Layer, ManagedRuntime, Metric, Queue, Stream, Tracer } from "effect";
+import {
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Metric,
+  Queue,
+  Stream,
+  Tracer,
+} from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
 
@@ -1861,6 +1871,18 @@ describe("OrchestrationEngine", () => {
       }),
     );
 
+    // The recovery-* events stand in for events another server appended to a
+    // shared state directory; reconcile must not republish them.
+    const publishedEventIds: string[] = [];
+    const subscription = runtime.runFork(
+      Stream.runForEach(engine.streamDomainEvents, (event) =>
+        Effect.sync(() => {
+          publishedEventIds.push(event.eventId);
+        }),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
     await expect(
       runtime.runPromise(
         engine.dispatch({
@@ -1871,6 +1893,10 @@ describe("OrchestrationEngine", () => {
         }),
       ),
     ).rejects.toThrow("projection failed");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await runtime.runPromise(Fiber.interrupt(subscription));
+    expect(publishedEventIds).toHaveLength(1);
+    expect(publishedEventIds.some((id) => id.startsWith("recovery-"))).toBe(false);
 
     const readModelAfterFailure = await runtime.runPromise(engine.getReadModel());
     const updatedThread = readModelAfterFailure.threads.find(
