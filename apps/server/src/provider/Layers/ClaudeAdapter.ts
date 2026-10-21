@@ -4943,9 +4943,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           return;
         }
 
-        const hint =
-          context.turnState?.authenticationFailureMessage ??
-          [...(context.rejectedUsageLimits?.values() ?? [])][0]?.message;
+        // The CLI also labels a 403 authentication_failed. Logging in again
+        // can't grant a permission, so show the CLI's own text instead.
+        const permissionDenied = message.subtype === "success" && message.api_error_status === 403;
+        const hint = permissionDenied
+          ? message.result.trim() || undefined
+          : (context.turnState?.authenticationFailureMessage ??
+            [...(context.rejectedUsageLimits?.values() ?? [])][0]?.message);
         const status = turnStatusFromResult(message);
         const originalError = resultUserFacingError(message);
         const errorMessage =

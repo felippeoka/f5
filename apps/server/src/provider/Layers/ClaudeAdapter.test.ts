@@ -6750,6 +6750,53 @@ describe("ClaudeAdapterLive", () => {
     });
   }
 
+  it.effect("shows Claude's own text for a 403 instead of asking to log in again", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "hello", attachments: [] });
+      harness.query.emit({
+        type: "assistant",
+        error: "authentication_failed",
+        uuid: "forbidden-error",
+        session_id: "forbidden-session",
+        parent_tool_use_id: null,
+        message: { id: "forbidden-error", role: "assistant", content: [], usage: {} },
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        api_error_status: 403,
+        result: "API Error: 403 Your organization does not allow this model.",
+        session_id: "forbidden-session",
+        uuid: "forbidden-result",
+        usage: {},
+        modelUsage: {},
+      } as unknown as SDKMessage);
+      const events = Array.from(
+        yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+        ),
+      );
+      const completed = events.find((event) => event.type === "turn.completed");
+      assert.equal(completed?.type === "turn.completed" && completed.payload.state, "failed");
+      const errorMessage =
+        completed?.type === "turn.completed" ? (completed.payload.errorMessage ?? "") : "";
+      assert.match(errorMessage, /organization does not allow this model/);
+      assert.notMatch(errorMessage, /\/login/);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   for (const originalError of [undefined, "usage limit reached"] as const) {
     it.effect(
       `requires positive usage evidence outside a turn (${originalError ?? "no error text"})`,
