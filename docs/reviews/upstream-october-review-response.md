@@ -2080,3 +2080,26 @@ durable PR watches already cover them. Ten are equivalent:
 [t3code#17635](https://github.com/pingdotgg/t3code/pull/17635) shortens a
 client-runtime background-work title that f5 does not show, so it is not
 applicable.
+
+## 15i triage log: guided reviews
+
+All 8 open 15i records are classified, and none needed new code. Seven are
+equivalent to the guided reviews f5 already ships: the Guide tab and its
+server
+([t3code#18124](https://github.com/pingdotgg/t3code/pull/18124)), the guide
+read and write tools
+([t3code#18143](https://github.com/pingdotgg/t3code/pull/18143)), the guide
+model setting ([t3code#18488](https://github.com/pingdotgg/t3code/pull/18488))
+and head commits from Bitbucket, GitLab and Forgejo
+([t3code#18402](https://github.com/pingdotgg/t3code/pull/18402),
+[t3code#18608](https://github.com/pingdotgg/t3code/pull/18608),
+[t3code#18463](https://github.com/pingdotgg/t3code/pull/18463)).
+[t3code#18900](https://github.com/pingdotgg/t3code/pull/18900) fixed
+upstream's checkout of a Bitbucket head given as a short hash. f5 builds
+guides from the forge's diff API without a checkout, so it has no such fetch.
+
+The plan asked for generation in an isolated checkout. f5 reads files and the
+diff through the forge API instead, which needs no checkout, and its tests
+cover the same run rules: coalescing, head changes, credential changes and
+restarts. [t3code#18267](https://github.com/pingdotgg/t3code/pull/18267) is
+the mobile guide and not applicable.

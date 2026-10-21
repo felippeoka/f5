@@ -5144,13 +5144,11 @@
     },
     {
       "upstreamSha": "bbd98a5f873eaed5f5efbfbacc6913ee87804443",
-      "classification": "planned:15i",
-      "reason": "Planned: implement and verify the explicitly approved 15i scenario. Upstream change: fix(server): review guides find Bitbucket heads reported by short hash (#18900).",
+      "classification": "equivalent:apps/server/src/prHub/Layers/PrHubReviewGuideService.ts:104",
+      "reason": "Equivalent: upstream's guide checkout had to fetch a Bitbucket head reported by a 12-character hash. f5 builds guides from the forge's file and diff APIs without a local checkout, and keys staleness on the head the same forge reports, so a short hash needs no resolution. Upstream change: fix(server): review guides find Bitbucket heads reported by short hash (#18900)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18900"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "evidence": ["apps/server/src/prHub/Layers/PrHubReviewGuideService.test.ts:190"],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "6abccc1f5e4890374327c837098f09f8d7b5179a",
@@ -5288,13 +5286,14 @@
     },
     {
       "upstreamSha": "8110edfddd3fb4d7fd2e0c9d29256c3a1b9da5c8",
-      "classification": "planned:15i",
-      "reason": "Planned: implement and verify the explicitly approved 15i scenario. Upstream change: fix(bitbucket): preserve PR head commits for review guides (#18402).",
+      "classification": "equivalent:apps/server/src/sourceControl/ForgeSourceControlProvider.ts:406",
+      "reason": "Equivalent: Bitbucket PR details keep source.commit.hash as the head commit, short or full, and report none when it is absent. Upstream change: fix(bitbucket): preserve PR head commits for review guides (#18402)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18402"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "evidence": ["apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:39"],
+      "f5Shas": [
+        "320de0a4a15e2f21fd7cbe49cccb70d58cefa504",
+        "42d9a5862ed8c86c61bb4f953cfa616303301162"
+      ]
     },
     {
       "upstreamSha": "017955206a47b08c7caaf10b75785d38456942e7",
@@ -5330,13 +5329,14 @@
     },
     {
       "upstreamSha": "a3c4e9e9360d65225fb726ebfe460427a6874741",
-      "classification": "planned:15i",
-      "reason": "Planned: implement and verify the explicitly approved 15i scenario. Upstream change: fix(gitlab): merge request details report their head commit (#18608).",
+      "classification": "equivalent:apps/server/src/sourceControl/ForgeSourceControlProvider.ts:406",
+      "reason": "Equivalent: GitLab merge request details report sha as the head commit, never the merge commit, and blank values report none. Upstream change: fix(gitlab): merge request details report their head commit (#18608)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18608"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "evidence": ["apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:39"],
+      "f5Shas": [
+        "320de0a4a15e2f21fd7cbe49cccb70d58cefa504",
+        "42d9a5862ed8c86c61bb4f953cfa616303301162"
+      ]
     },
     {
       "upstreamSha": "511d20c6f20c2ed6ff787aba068d7d673e2949b9",
@@ -5410,13 +5410,14 @@
     },
     {
       "upstreamSha": "b3871d5156f6c4160ea2afd96f65e34bf15ef91d",
-      "classification": "planned:15i",
-      "reason": "Planned: implement and verify the explicitly approved 15i scenario. Upstream change: fix(server): Forgejo pull requests report their head commit (#18463).",
+      "classification": "equivalent:apps/server/src/sourceControl/ForgeSourceControlProvider.ts:406",
+      "reason": "Equivalent: Forgejo pull request details report head.sha as the head commit. Upstream change: fix(server): Forgejo pull requests report their head commit (#18463)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18463"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "evidence": ["apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:39"],
+      "f5Shas": [
+        "320de0a4a15e2f21fd7cbe49cccb70d58cefa504",
+        "42d9a5862ed8c86c61bb4f953cfa616303301162"
+      ]
     },
     {
       "upstreamSha": "5d59e7107f5db834e1746e9b1f66f6bdeb404496",
@@ -5524,13 +5525,11 @@
     },
     {
       "upstreamSha": "e688034b5f5505f92fcf1d78ba853c9c0107f9f1",
-      "classification": "planned:15i",
-      "reason": "Planned: implement and verify the explicitly approved 15i scenario. Upstream change: feat(web): model options for source control writer and review guide models (#18488).",
+      "classification": "equivalent:apps/web/src/components/settings/ReviewGuideSettings.tsx:16",
+      "reason": "Equivalent: Git settings have a review guide model picker that falls back to the git writing model and stores a nullable override. Upstream change: feat(web): model options for source control writer and review guide models (#18488)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18488"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "evidence": ["apps/web/src/components/settings/ReviewGuideSettings.browser.tsx:40"],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "2e24ec44dbf3047ab248487ec1d05836e94775e4",
@@ -5975,13 +5974,9 @@
     },
     {
       "upstreamSha": "bed923986fbcbe8279f23b9367efde1596bde1f9",
-      "classification": "planned:15i",
-      "reason": "Planned: reconcile the approved 15i feature and its follow-ups. Upstream change: feat(mobile): guided reviews for pull requests (#18267).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18267"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: guided reviews for the mobile app, with the web tour moved into client-runtime so mobile could share it. Upstream change: feat(mobile): guided reviews for pull requests (#18267)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5495cc4445915c3bf4aa92bb57213f1c7cc220ef",
@@ -6160,23 +6155,22 @@
     },
     {
       "upstreamSha": "18656a3402459d9d145bb3fa5767723531b27ac7",
-      "classification": "planned:15i",
-      "reason": "Planned: implement and verify the explicitly approved 15i scenario. Upstream change: feat(mcp): agents can write and read pull request review guides (#18143).",
+      "classification": "equivalent:apps/server/src/mcp/threadMcpTools.ts:122",
+      "reason": "Equivalent: thread tools include pull_request_review_guide_write, which starts or joins a guide run for one PR, and pull_request_review_guide_read, which returns the guide, its run state and the current head so a stale guide shows. Neither submits a review, and an archived thread cannot start a guide. Upstream's write accepts several PRs per call. Upstream change: feat(mcp): agents can write and read pull request review guides (#18143)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18143"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "evidence": ["apps/server/src/mcp/threadMcpTools.test.ts:110"],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "1f6df6bf1f50ab5b8e3253716773da2571f8243e",
-      "classification": "planned:15i",
-      "reason": "Planned: reconcile the approved 15i feature and its follow-ups. Upstream change: feat(pull-requests): guided reviews, a beta tour of a pull request (#18124).",
+      "classification": "equivalent:apps/web/src/components/prHub/PrReviewGuideTab.tsx:11",
+      "reason": "Equivalent: the PR detail Guide tab shows an ordered tour of stops with validated excerpts, notes and questions, and hides excerpts once the head changes. The server generates guides with the configured model, coalesces runs per PR, refuses publication after a head or credential change and drops running jobs on restart. Upstream change: feat(pull-requests): guided reviews, a beta tour of a pull request (#18124)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15i-pr-18124"],
-        "targetModules": ["apps/server/src/prHub", "packages/contracts/src/prHub.ts"]
-      }
+      "evidence": [
+        "apps/server/src/prHub/Layers/PrHubReviewGuideService.test.ts:171",
+        "apps/web/src/components/prHub/PrReviewGuideTab.browser.tsx:94"
+      ],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "8d199b4f7b918079161d5f43e0146c099301be08",
