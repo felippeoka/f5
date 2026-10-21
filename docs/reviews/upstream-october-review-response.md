@@ -2502,3 +2502,28 @@ the linked-PR drop case in `ChatView.browser.tsx` passes. The combined browser
 run passed 37 of 38 cases. The one failure was an uncited case, "returns focus
 from a composer option menu on Escape", which timed out; its file passes all 10
 cases when run alone.
+
+## 15k triage log: per-project providers and custom ACP agents
+
+All 9 open 15k records are classified: 2 ported, 5 not applicable, 1 declined
+and 1 deferred.
+
+Ported, with existing implementations whose cited tests pass:
+[t3code#17879](https://github.com/pingdotgg/t3code/pull/17879) turns
+providers on or off per project, and
+[t3code#16021](https://github.com/pingdotgg/t3code/pull/16021) adds custom
+local ACP agents.
+
+Not applicable: five records change upstream's ACP Registry provider, which
+F5 lists as coming soon and does not implement. They cover its test fixtures,
+search list, package move and service-convention refactor.
+
+Declined: [t3code#14915](https://github.com/pingdotgg/t3code/pull/14915)
+drops Pi's Early Access badge. F5's Pi driver is new in this catch-up, so it
+keeps the badge with Cursor, Grok and Muse Code.
+
+Deferred: [t3code#16816](https://github.com/pingdotgg/t3code/pull/16816)
+shares model favorites, hidden models and order across clients. F5 keeps them
+in each client's local settings, so this means moving them into server settings
+and migrating existing values. Upstream's change is about a thousand lines, so
+it is feature work for its own block.

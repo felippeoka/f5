@@ -236,16 +236,9 @@
     },
     {
       "upstreamSha": "1994d6396fda6ce6edff03c57b0757edf5e03b28",
-      "classification": "planned:15k",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: perf(web): typing in the ACP registry search no longer re-renders every result row (#20817).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15k-pr-20817"],
-        "targetModules": [
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
-          "packages/contracts/src/settings.ts"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:acp-registry",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream speeds up the registry search list. Upstream change: perf(web): typing in the ACP registry search no longer re-renders every result row (#20817)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "da0792efb1974df29b0949abb0b7e6479210a9c1",
@@ -5967,17 +5960,9 @@
     },
     {
       "upstreamSha": "f8458952710cc70894bdeb5853d700524a1c7c49",
-      "classification": "planned:15k",
-      "reason": "Planned: moves model favorites, visibility and order from per-client storage into server settings so every client shares them, which is the 15k \"consistent favorites, visibility and order\" item; it is a settings-model change, not a performance fix. Upstream change: fix: sync model favorites and visibility across clients (#16816)",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15k-pr-16816"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: model favorites, hidden models and model order live in each client's local settings in F5 (apps/web/src/appSettings.ts:541). Sharing them means moving all three into server settings and migrating existing per-client values, around a thousand lines upstream. That is feature work for its own block, like 15m. Upstream change: fix: sync model favorites and visibility across clients (#16816)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "bb9b9aae57ce5614c9c26d540ca51c805cdbf09b",
@@ -7802,16 +7787,9 @@
     },
     {
       "upstreamSha": "f853d514cab475e73468f7cb7bab1aae48dbe549",
-      "classification": "planned:15k",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: refactor(provider-acp): ACP, ACP Registry and Grok follow the Effect service conventions (#17544).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15k-pr-17544"],
-        "targetModules": [
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
-          "packages/contracts/src/settings.ts"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream refactors its ACP, ACP Registry and Grok packages to its Effect service conventions. F5 has no ACP Registry, and its ACP and Grok code is structured differently, so there is no behavior to port. Upstream change: refactor(provider-acp): ACP, ACP Registry and Grok follow the Effect service conventions (#17544)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "31b04e2ee929660d80d5931ed53fd17bf1d33ce6",
@@ -7907,16 +7885,9 @@
     },
     {
       "upstreamSha": "43f8a8de17a7ac1baa7a3cf36d681856de2d8add",
-      "classification": "planned:15k",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: refactor(provider-acp-registry): move the ACP Registry into its own package (#17405).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15k-pr-17405"],
-        "targetModules": [
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
-          "packages/contracts/src/settings.ts"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:acp-registry",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream moves the registry into its own package. Upstream change: refactor(provider-acp-registry): move the ACP Registry into its own package (#17405)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "cb46c62504aca99295a4a8879644625a20685b7f",
@@ -11104,29 +11075,15 @@
     },
     {
       "upstreamSha": "f870c419fc21f7ee23c122e60fb94adb8bf73a40",
-      "classification": "planned:15k",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: test(server): the ACP registry's fake uv is a fixture file, not a generated string (#15484).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15k-pr-15484"],
-        "targetModules": [
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
-          "packages/contracts/src/settings.ts"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:acp-registry",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream changes a registry test fixture. Upstream change: test(server): the ACP registry's fake uv is a fixture file, not a generated string (#15484)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1508552a16edebe29cab4820c54c16b75c142408",
-      "classification": "planned:15k",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: test(server): the ACP registry's fake npm is a fixture file, not a generated string (#15483).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15k-pr-15483"],
-        "targetModules": [
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
-          "packages/contracts/src/settings.ts"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:acp-registry",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream changes a registry test fixture. Upstream change: test(server): the ACP registry's fake npm is a fixture file, not a generated string (#15483)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "070127cbb7b4a0a44bab760f59b51829ec349528",
@@ -11830,16 +11787,9 @@
     },
     {
       "upstreamSha": "a7b3ce8c0896d123a7c3f02c586ff8193841cc09",
-      "classification": "planned:15k",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: fix(settings): Pi and ACP Registry no longer show an Early Access badge (#14915).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15k-pr-14915"],
-        "targetModules": [
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
-          "packages/contracts/src/settings.ts"
-        ]
-      }
+      "classification": "declined",
+      "reason": "Declined: upstream drops the Early Access badge from Pi and ACP Registry. F5's Pi driver is new in this catch-up, so it keeps the badge alongside Cursor, Grok and Muse Code, and F5 does not offer ACP Registry. Upstream change: fix(settings): Pi and ACP Registry no longer show an Early Access badge (#14915)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ca7df394ed8151fa77f856beefa90bc60a785d60",

@@ -2913,10 +2913,9 @@
     {
       "upstreamSha": "1508552a16edebe29cab4820c54c16b75c142408",
       "subject": "test(server): the ACP registry's fake npm is a fixture file, not a generated string (#15483)",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: test(server): the ACP registry's fake npm is a fixture file, not a generated string (#15483).",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream changes a registry test fixture. Upstream change: test(server): the ACP registry's fake npm is a fixture file, not a generated string (#15483)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "151324b2c0bf0ace789820b8ea4ec8ceb55753d9",
@@ -3589,10 +3588,9 @@
     {
       "upstreamSha": "1994d6396fda6ce6edff03c57b0757edf5e03b28",
       "subject": "perf(web): typing in the ACP registry search no longer re-renders every result row (#20817)",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: perf(web): typing in the ACP registry search no longer re-renders every result row (#20817).",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream speeds up the registry search list. Upstream change: perf(web): typing in the ACP registry search no longer re-renders every result row (#20817)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "19a67ef5211996a737d9f9fe608ab2c80f8a6714",
@@ -9509,10 +9507,9 @@
     {
       "upstreamSha": "43f8a8de17a7ac1baa7a3cf36d681856de2d8add",
       "subject": "refactor(provider-acp-registry): move the ACP Registry into its own package (#17405)",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: refactor(provider-acp-registry): move the ACP Registry into its own package (#17405).",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream moves the registry into its own package. Upstream change: refactor(provider-acp-registry): move the ACP Registry into its own package (#17405)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4408bf5a4fb0c97373d57abfdf6f541e315b1e67",
@@ -19165,15 +19162,16 @@
     {
       "upstreamSha": "8ac6846a0b855c3aad70adbf745ff113d4eb3f1f",
       "subject": "feat(settings): providers can be turned on or off per project (#17879)",
-      "reason": "Planned: implementation and focused scenario evidence exist for bidirectional project provider policy, scoped admission/bridge/draft selection and project text generation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(settings): providers can be turned on or off per project (#17879).",
+      "reason": "Ported: providers can be turned on or off per project, including enabling a globally disabled instance for one project. The policy applies to selection, new-thread defaults, turn and text-generation admission and Agent Bridge lists, and the project page saves or clears it. Upstream change: feat(settings): providers can be turned on or off per project (#17879)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15k",
       "evidence": [
-        "packages/shared/src/serverSettings.test.ts:1",
-        "apps/server/src/provider/Layers/ProviderService.test.ts:1",
-        "apps/server/src/git/Layers/TextGenerationLive.test.ts:1",
-        "apps/web/src/components/settings/SettingsRouteState.browser.tsx:1"
+        "packages/shared/src/serverSettings.test.ts:304",
+        "apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.test.ts:14",
+        "apps/server/src/agentBridge/threadTools.test.ts:312",
+        "apps/web/src/hooks/useHandleNewThread.test.ts:291",
+        "apps/web/src/components/settings/SettingsRouteState.browser.tsx:243"
       ],
       "f5Shas": ["7d3a3b9430a0dfec596656192e8659dfb0e1ff47"]
     },
@@ -21661,18 +21659,17 @@
     {
       "upstreamSha": "9d029a1df25126745dd70ac561ff25d3f8fbac42",
       "subject": "feat(acp): support local provider commands (#16021)",
-      "reason": "Planned: implementation and focused scenario evidence exist for custom local ACP commands with typed argv/environment, initialization-only ten-second probes, isolated session model catalogs and metadata generation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(acp): support local provider commands (#16021).",
+      "reason": "Ported: custom local ACP agents run a configured command with typed arguments and environment, initialize only during health checks with a ten-second deadline, never launch while disabled, and publish the session's own model choices. Upstream change: feat(acp): support local provider commands (#16021)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15k",
       "f5Shas": ["abaaa91e91ede67408a36b163776e2553f57cc90"],
       "evidence": [
-        "apps/server/src/provider/acp/CustomAcpSupport.test.ts:1",
-        "apps/server/src/provider/Drivers/AcpDriver.test.ts:1",
-        "apps/web/src/components/settings/AddProviderInstanceDialog.browser.tsx:1",
-        "apps/web/src/components/settings/ProviderInstanceCard.browser.tsx:1",
-        "apps/web/src/components/settings/providerConfigFields.test.ts:1",
-        "docs/providers/acp.md:1"
+        "apps/server/src/provider/acp/CustomAcpSupport.test.ts:165",
+        "apps/server/src/provider/acp/CustomAcpSupport.test.ts:159",
+        "apps/server/src/provider/Drivers/AcpDriver.test.ts:12",
+        "apps/web/src/components/settings/providerConfigFields.test.ts:8",
+        "apps/web/src/components/settings/AddProviderInstanceDialog.browser.tsx:21"
       ]
     },
     {
@@ -23111,10 +23108,9 @@
     {
       "upstreamSha": "a7b3ce8c0896d123a7c3f02c586ff8193841cc09",
       "subject": "fix(settings): Pi and ACP Registry no longer show an Early Access badge (#14915)",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: fix(settings): Pi and ACP Registry no longer show an Early Access badge (#14915).",
+      "reason": "Declined: upstream drops the Early Access badge from Pi and ACP Registry. F5's Pi driver is new in this catch-up, so it keeps the badge alongside Cursor, Grok and Muse Code, and F5 does not offer ACP Registry. Upstream change: fix(settings): Pi and ACP Registry no longer show an Early Access badge (#14915)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "disposition": "declined"
     },
     {
       "upstreamSha": "a7c5ad5db167b3a172ccb26408b0638c99b2a459",
@@ -34118,10 +34114,9 @@
     {
       "upstreamSha": "f8458952710cc70894bdeb5853d700524a1c7c49",
       "subject": "fix: sync model favorites and visibility across clients (#16816)",
-      "reason": "Planned: moves model favorites, visibility and order from per-client storage into server settings so every client shares them, which is the 15k \"consistent favorites, visibility and order\" item; it is a settings-model change, not a performance fix. Upstream change: fix: sync model favorites and visibility across clients (#16816)",
+      "reason": "Deferred: model favorites, hidden models and model order live in each client's local settings in F5 (apps/web/src/appSettings.ts:541). Sharing them means moving all three into server settings and migrating existing per-client values, around a thousand lines upstream. That is feature work for its own block, like 15m. Upstream change: fix: sync model favorites and visibility across clients (#16816)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "f8500f11271622ed82df7f6c1d7f73eddb4f43e6",
@@ -34133,10 +34128,9 @@
     {
       "upstreamSha": "f853d514cab475e73468f7cb7bab1aae48dbe549",
       "subject": "refactor(provider-acp): ACP, ACP Registry and Grok follow the Effect service conventions (#17544)",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: refactor(provider-acp): ACP, ACP Registry and Grok follow the Effect service conventions (#17544).",
+      "reason": "Not applicable: upstream refactors its ACP, ACP Registry and Grok packages to its Effect service conventions. F5 has no ACP Registry, and its ACP and Grok code is structured differently, so there is no behavior to port. Upstream change: refactor(provider-acp): ACP, ACP Registry and Grok follow the Effect service conventions (#17544)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f86c5e8c8700b76250ed1073700a5b9db47e2d57",
@@ -34154,10 +34148,9 @@
     {
       "upstreamSha": "f870c419fc21f7ee23c122e60fb94adb8bf73a40",
       "subject": "test(server): the ACP registry's fake uv is a fixture file, not a generated string (#15484)",
-      "reason": "Planned: reconcile the approved 15k feature and its follow-ups. Upstream change: test(server): the ACP registry's fake uv is a fixture file, not a generated string (#15484).",
+      "reason": "Not applicable: F5 has no ACP Registry provider; the Add provider dialog lists it as coming soon and the server has no registry driver. Upstream changes a registry test fixture. Upstream change: test(server): the ACP registry's fake uv is a fixture file, not a generated string (#15484)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f87dd14dafdeecd962f7da24da79324842983e00",
