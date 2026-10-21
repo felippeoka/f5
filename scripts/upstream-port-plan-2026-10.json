@@ -81,13 +81,9 @@
     },
     {
       "upstreamSha": "d56c479345312605bda6ce479b58aa97cd2acd11",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): opening chat and usage dialogs no longer re-renders the whole page (#20859).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20859"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-page-layout",
+      "reason": "Not applicable: upstream fixes the layout of its own Usage page (UsagePage, provider chart and pooled limits). F5's Usage dashboard is its own design, with charts stacked by token and cost type and one card per account. Upstream change: perf(web): opening chat and usage dialogs no longer re-renders the whole page (#20859)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f96aebeb4bbdaf2b3d05177bd115dad4b8b41a8b",
@@ -277,13 +273,9 @@
     },
     {
       "upstreamSha": "8c67f77af6b4ca8a34a48f0ea87c684f99e8fa83",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the usage page keeps its caching without \"use memo\" (#20807).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20807"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: refactor(web): the usage page keeps its caching without \"use memo\" (#20807)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f9baf517e0df8557b77f7782b193152967ea029c",
@@ -365,13 +357,9 @@
     },
     {
       "upstreamSha": "b30f0df44acf8e41bc45e75451057138db1635bd",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the usage chart keeps its caching without \"use memo\" (#20792).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20792"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: refactor(web): the usage chart keeps its caching without \"use memo\" (#20792)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b987b5785f614171a11af69cfd2b9643ff1fe952",
@@ -1820,23 +1808,15 @@
     },
     {
       "upstreamSha": "39bcf7c69c6b061a1f8e7a6e3dd3314560ee288e",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the usage model dialog compiles without manual memoization (#20694).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20694"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the usage model dialog compiles without manual memoization (#20694)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b190a2fec24aa7b8bc5b4c1e41e946e2ddf8a561",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the usage provider chart compiles without manual memoization (#20695).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20695"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the usage provider chart compiles without manual memoization (#20695)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b103346ba6a3a599c85a8c108f9aa4875c1f4d16",
@@ -1972,13 +1952,9 @@
     },
     {
       "upstreamSha": "0241bbfc22cdde08d482a97eb6ef079f20749bf6",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the usage state hook compiles without manual memoization (#20718).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20718"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the usage state hook compiles without manual memoization (#20718)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f1dccf2d1b59609f59d2458bdf0b153e0c430bb0",
@@ -2237,13 +2213,9 @@
     },
     {
       "upstreamSha": "ebe997981ba59f0187581243a8c928f999a54369",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): usage provider settings compile with the React Compiler (#20499).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20499"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): usage provider settings compile with the React Compiler (#20499)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5c43d16ec7afbbd86a37165b5395dc9921391feb",
@@ -2397,13 +2369,9 @@
     },
     {
       "upstreamSha": "6ced12af1522b2fb5e45e80413eb5cf478a37d95",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the usage page compiles with the React Compiler (#20480).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20480"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: React Compiler adoption for an upstream component (compiler allowlist plus removal of manual memoization), which the plan classifies as maintenance. f5 compiles only annotated components and keeps its own memoization; there is no behavior to port. Upstream change: perf(web): the usage page compiles with the React Compiler (#20480)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "426706cbcec497054c688ecc4e45e6d1bbc2a8c2",
@@ -2763,13 +2731,9 @@
     },
     {
       "upstreamSha": "65de56ef902be5f908a21fc786406541e11257fa",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): move the /usage-limits panel state out of ChatView (#20296).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-20296"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream moves its /usage-limits panel state out of ChatView, a refactor of its own component with no behavior change. Upstream change: refactor(web): move the /usage-limits panel state out of ChatView (#20296)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f7916ad07cc1461fd15e41a70ae045188ae0b6ca",
@@ -3799,13 +3763,9 @@
     },
     {
       "upstreamSha": "52ffe0cae6e5e03c95037152ef4548f40daf5c2e",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): cold usage scans no longer stall the server (#19446).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-19446"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: fix(usage): cold usage scans no longer stall the server (#19446)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f4df79477709185c490627a3fd43af96674ae778",
@@ -4572,13 +4532,9 @@
     },
     {
       "upstreamSha": "6002c5c68c637de2cd2557bd6c40e46c153e39b1",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): usage hubs with a host-less URL no longer vanish from Limits (#11368).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-11368"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-limit-sources",
+      "reason": "Not applicable: upstream labels usage limit sources by their URL host. F5 labels accounts by provider instance name, so a host-less URL cannot blank a label. Upstream change: fix(server): usage hubs with a host-less URL no longer vanish from Limits (#11368)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "11fd54fcbbfb39f824bb4c908d428c20d801267c",
@@ -4654,13 +4610,9 @@
     },
     {
       "upstreamSha": "91e93a25ae054c63d51b89ef4ae8ef766403a5d9",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): show one Antigravity account once, not once per machine (#19207).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-19207"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:multi-environment",
+      "reason": "Not applicable: F5 runs a single environment and keeps each account separate, never merging by email or display name (docs/user/usage-limits.md:74). Upstream change: fix(usage): show one Antigravity account once, not once per machine (#19207)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "85272eeeae53c5baa1cba1a36d84bbec81a3a0b5",
@@ -5419,13 +5371,9 @@
     },
     {
       "upstreamSha": "7f02b849584332368a5489631d3286409eed90a8",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(usage): the first usage scan skips decoding transcript lines that carry no usage (#17255).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17255"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: perf(usage): the first usage scan skips decoding transcript lines that carry no usage (#17255)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "499a53c307ec6a0fbff5c83efde355729bd7d343",
@@ -5807,13 +5755,11 @@
     },
     {
       "upstreamSha": "2625327090115a630d97ff61257758c577589de7",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): say resets momentarily in the final minute (#17869).",
+      "classification": "equivalent:apps/web/src/lib/usageLimits.ts:20",
+      "reason": "Equivalent: upstream says Resets momentarily in a window's final minute. F5's reset countdown already shows a stable in <1m for that minute. Upstream change: fix(usage): say resets momentarily in the final minute (#17869)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17869"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "evidence": ["apps/web/src/lib/usageLimits.test.ts:26"],
+      "f5Shas": ["dcc2d3889240db9134081ad7cdf19683f36143ab"]
     },
     {
       "upstreamSha": "ed0f7b908b2e7b3a22e6fd82a73794c2fe6ee06e",
@@ -5996,13 +5942,9 @@
     },
     {
       "upstreamSha": "b4542c5418e727db5c5b578e3dc2b39e915fd0bc",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): the Usage page sends a signed-out browser to pairing (#17938).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17938"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:remote-pairing",
+      "reason": "Not applicable: upstream sends a signed-out browser on the Usage route to pairing. F5 has no pairing flow; Usage sits under the chat layout's gate. Upstream change: fix(web): the Usage page sends a signed-out browser to pairing (#17938)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2e194f8071643fe74d3f9a1466d8c98975adac49",
@@ -6188,23 +6130,15 @@
     },
     {
       "upstreamSha": "9ec472c7d9345a0c9528183d918f5fbc7f73be75",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(usage): OpenCode legacy walk stats entries before checking for symlinks (#17638).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17638"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: perf(usage): OpenCode legacy walk stats entries before checking for symlinks (#17638)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "febe1b2420c850aa17c12539a5a479c0438506f8",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(usage): usage scans skip OpenCode legacy messages older than the window (#17254).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17254"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: perf(usage): usage scans skip OpenCode legacy messages older than the window (#17254)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4258c8f14ddf6affe67c4e1d5d85ec834e6c4346",
@@ -6261,13 +6195,9 @@
     },
     {
       "upstreamSha": "75c439f4ecc5431f4b1ae95ddd620245ff57bb27",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): bound OpenCode history reads to prevent backend OOM (#17961).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17961"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: fix(usage): bound OpenCode history reads to prevent backend OOM (#17961)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c727d1219f4ef10ad2a41f0e67df80ca51924673",
@@ -6933,13 +6863,11 @@
     },
     {
       "upstreamSha": "0be20c86c2962b7b581dfc79df9ab34b4fbdab14",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): keep one email in two workspaces as two accounts (#17711).",
+      "classification": "equivalent:docs/user/usage-limits.md:74",
+      "reason": "Equivalent: upstream stops merging one email used in two workspaces into one account. F5 never merges accounts by email or display name; an account's identity comes from its binary, home and credential settings. Upstream change: fix(usage): keep one email in two workspaces as two accounts (#17711)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17711"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "evidence": ["apps/server/src/usage/providerLimits.test.ts:6"],
+      "f5Shas": ["e63ad2f7d310f4016d2a0be74d8661fcc309fb32"]
     },
     {
       "upstreamSha": "c899a0c06ab2b0ec8fe8d6a497bb345ac72a5e5e",
@@ -7111,13 +7039,9 @@
     },
     {
       "upstreamSha": "c116dacb8315e4a731b25c8b93c55ef9d01e9ed3",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): improve usage scanning indicator alignment (#15498).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-15498"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: fix(web): improve usage scanning indicator alignment (#15498)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d50a2a6fc5ad387892bd20b0323bf07c405d9eea",
@@ -7323,13 +7247,9 @@
     },
     {
       "upstreamSha": "b87b13d41426418c4f42c6477ce62cfe2a43fbae",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): report incomplete transcript usage scans (#15661).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-15661"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: fix(server): report incomplete transcript usage scans (#15661)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b744bded016b15b9b5ade552a3e28270ac20176f",
@@ -7479,53 +7399,33 @@
     },
     {
       "upstreamSha": "b1ec4b36876e7f3ad03a1e9e921286ec7d58fe95",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(usage): usage readers use Effect FileSystem and SqlClient (#17615).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17615"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: refactor(usage): usage readers use Effect FileSystem and SqlClient (#17615)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9a0766b0238f2c044a965dcba32c6cb7ea0b63cd",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(usage): Antigravity usage is a reader on its driver (#17579).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17579"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: refactor(usage): Antigravity usage is a reader on its driver (#17579)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5a9c664b3ec8214cc5847d561efa130ba213eb38",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(usage): Cursor account usage comes from provider-cursor (#17578).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17578"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: refactor(usage): Cursor account usage comes from provider-cursor (#17578)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "23957c704b43c25a253baf2644829e88cf45917f",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(usage): OpenCode usage comes from provider-opencode (#17577).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17577"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: refactor(usage): OpenCode usage comes from provider-opencode (#17577)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e5dca2332fed450c6f1b3c7472666fbe80531c5a",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(usage): transcript readers come from their drivers (#17576).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17576"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: refactor(usage): transcript readers come from their drivers (#17576)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "507361bc7301982279b9f115bbae8f22268ce9d6",
@@ -8322,13 +8222,9 @@
     },
     {
       "upstreamSha": "85975585579188be20f46d96b4972ce46c33f4bc",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(usage): the Usage page shows numbers in under a second and dims only what is still loading (#17147).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17147"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: perf(usage): the Usage page shows numbers in under a second and dims only what is still loading (#17147)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0ce6b9deb0c3f6b4dd9df7ed809f7acb9d237ae0",
@@ -8342,13 +8238,9 @@
     },
     {
       "upstreamSha": "9381533771ef50d58304f79fac2b74ebd8932be7",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): Cursor account history loads about 4x faster (#17140).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17140"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: fix(usage): Cursor account history loads about 4x faster (#17140)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "13c5328dd02ab0f5863f7d46455efc8dc243d4ce",
@@ -8394,13 +8286,9 @@
     },
     {
       "upstreamSha": "4d1f24ba4123279708e169fcb196f78da8f11351",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): repeat usage scans no longer decode unchanged Antigravity databases (#17139).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-17139"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: fix(usage): repeat usage scans no longer decode unchanged Antigravity databases (#17139)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2ea7684d563fe0ebbe9144dbfd6b0eade7eaf49a",
@@ -8542,13 +8430,9 @@
     },
     {
       "upstreamSha": "85a41391e9625d760f5bb2294834c38f42bbf5b8",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): Usage breadcrumb stays centered on small viewports (#15552).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-15552"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-page-layout",
+      "reason": "Not applicable: upstream fixes the layout of its own Usage page (UsagePage, provider chart and pooled limits). F5's Usage dashboard is its own design, with charts stacked by token and cost type and one card per account. Upstream change: fix(web): Usage breadcrumb stays centered on small viewports (#15552)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "647d8affa78c848c2a55c3e00ed14af9a9eca58e",
@@ -9100,13 +8984,9 @@
     },
     {
       "upstreamSha": "57b2418d4fbab56290ff4cb861dcd0a7d0f5ef63",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(auth): separate diagnostics and usage permissions (#9790).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-9790"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:scoped-auth",
+      "reason": "Not applicable: upstream splits diagnostics and usage RPCs into their own auth scope. F5 has no scoped RPC authorization. Upstream change: feat(auth): separate diagnostics and usage permissions (#9790)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "7175edcff4f250b583ebed8877e27e36dc48411e",
@@ -11219,13 +11099,9 @@
     },
     {
       "upstreamSha": "71dbaf1f94b580491d033f2e347a9b1c507fd793",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(usage): cut warm usage scans from seconds to milliseconds on large histories (#15149).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-15149"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: perf(usage): cut warm usage scans from seconds to milliseconds on large histories (#15149)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "39efcd855833a1486ff7662e2efcedeeee6be0cc",
@@ -11347,13 +11223,9 @@
     },
     {
       "upstreamSha": "56914128c1ff9dcf6585c380b7b25845d6ca5f98",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): Codex Fast and Ultrafast now cost what they bill (#15101).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-15101"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-rate-table",
+      "reason": "Not applicable: upstream corrects its built-in model rate table (usagePricing). F5 has no rate table: cost is the provider-reported cost, or a price the user sets per provider and model under Usage prices. Upstream change: fix(usage): Codex Fast and Ultrafast now cost what they bill (#15101)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6108ef3d3d0ef2a598088a1bb64980580e935830",
@@ -12203,13 +12075,9 @@
     },
     {
       "upstreamSha": "adfc9240eab7c5db376a87591b497d8144289257",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): preserve usage in oversized transcript records (#13650).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13650"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-history-scan",
+      "reason": "Not applicable: upstream's Activity view comes from scanning provider history (Claude and Codex transcripts, OpenCode, Cursor and Antigravity readers, and their scan cache). F5's Activity counts only turns F5 ran, recorded as usage facts in SQLite, and reads no provider history (docs/user/usage-limits.md:32). Upstream change: fix(server): preserve usage in oversized transcript records (#13650)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "38f3c62304bfe79ea6c9f75a17afb732b555f48d",
@@ -12260,13 +12128,9 @@
     },
     {
       "upstreamSha": "d15210cd3da79f9a1a495a6309d912d76362a046",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): prevent usage summary shift for unpriced records (#13991).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13991"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-page-layout",
+      "reason": "Not applicable: upstream fixes the layout of its own Usage page (UsagePage, provider chart and pooled limits). F5's Usage dashboard is its own design, with charts stacked by token and cost type and one card per account. Upstream change: fix(web): prevent usage summary shift for unpriced records (#13991)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "94f92a7a386a26c98892b24fabdd0ea9fa804ce3",
@@ -12320,13 +12184,10 @@
     },
     {
       "upstreamSha": "679c34c096193446ceed62e633387d91fe2cfff8",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(clients): hide duplicate Cursor Keychain prompts (#13870).",
+      "classification": "equivalent:apps/server/src/usage/providerLimits.ts:246",
+      "reason": "Equivalent: upstream stops duplicate macOS Keychain prompts when it reads Cursor credentials. F5 never reads the Keychain for Cursor: without a token or file-based login on macOS it reports the account as unavailable. Upstream change: fix(clients): hide duplicate Cursor Keychain prompts (#13870)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13870"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "f5Shas": ["d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22"]
     },
     {
       "upstreamSha": "ea7d46ac107e6a3461b81065ebc86dfd5483095f",
@@ -12348,33 +12209,22 @@
     },
     {
       "upstreamSha": "3dae78f33b1e3c7534feb51ca41a407ab2536b83",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): identify client version mismatches (#8208).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-8208"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:cross-version-clients",
+      "reason": "Not applicable: upstream names client and server version mismatches across environments in usage totals. F5's web client always matches its server. Upstream change: fix(usage): identify client version mismatches (#8208)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d6802b4acfbb6bfb669e0fa225539920622f7670",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): omit Cursor warning when no login is saved (#13820).",
+      "classification": "equivalent:apps/server/src/usage/providerLimits.ts:265",
+      "reason": "Equivalent: upstream stops warning about Cursor when no login is saved. F5 reports a missing Cursor token as an unavailable section, not a setup error. Upstream change: fix(usage): omit Cursor warning when no login is saved (#13820)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13820"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "f5Shas": ["d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22"]
     },
     {
       "upstreamSha": "10bb59bf061252f5edadf96bc8139911b3fed7fd",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): tolerate newer provider variants (#10076).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-10076"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:cross-version-clients",
+      "reason": "Not applicable: upstream lets older clients skip unknown usage variants from newer servers. F5's web client is served by the server it talks to, so both always share one contract version. Upstream change: fix(usage): tolerate newer provider variants (#10076)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "393d595984f66df08504e1659997e12ad551bce9",
@@ -12604,13 +12454,10 @@
     },
     {
       "upstreamSha": "94c42162b443072ca59a0733c02ee54229a61fef",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): hide the Cursor keychain prompt when Cursor isn't set up (#13714).",
+      "classification": "equivalent:apps/server/src/usage/providerLimits.ts:246",
+      "reason": "Equivalent: upstream hides its Cursor Keychain prompt when Cursor is not set up. F5 never reads the Keychain for Cursor, so there is no prompt to hide. Upstream change: fix(usage): hide the Cursor keychain prompt when Cursor isn't set up (#13714)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13714"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "f5Shas": ["d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22"]
     },
     {
       "upstreamSha": "999161ef844a7a38c8a6d08195c1240759169832",
@@ -12771,13 +12618,9 @@
     },
     {
       "upstreamSha": "aade3a69a8536be98d2fe9b0fb9193289b70e90b",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): price Cursor cache savings by base model (#13731).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13731"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-rate-table",
+      "reason": "Not applicable: upstream corrects its built-in model rate table (usagePricing). F5 has no rate table: cost is the provider-reported cost, or a price the user sets per provider and model under Usage prices. Upstream change: fix(usage): price Cursor cache savings by base model (#13731)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "525af2d1ad4b6de847ea658c37a081fd7afe8ef6",
@@ -12879,13 +12722,9 @@
     },
     {
       "upstreamSha": "e3e7cc3fc2e02966efe4efc45216dadcd046bfbb",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(usage): price Claude fast-mode requests at the fast rate (#13599).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13599"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:usage-rate-table",
+      "reason": "Not applicable: upstream corrects its built-in model rate table (usagePricing). F5 has no rate table: cost is the provider-reported cost, or a price the user sets per provider and model under Usage prices. Upstream change: fix(usage): price Claude fast-mode requests at the fast rate (#13599)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "86054b6df2c5e38b6e27b980eae2716bfe1da202",
@@ -13043,13 +12882,9 @@
     },
     {
       "upstreamSha": "91e53e501c9e7eb03f0ea4a5b72221d08eff9c5c",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): report the Grok account email so usage limits merge across environments (#12588).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-12588"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:multi-environment",
+      "reason": "Not applicable: F5 runs a single environment and keeps each account separate, never merging by email or display name (docs/user/usage-limits.md:74). Upstream change: fix(server): report the Grok account email so usage limits merge across environments (#12588)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0cab7d5ab978a8adaee6827f81693249d0dfeee5",
@@ -13089,13 +12924,9 @@
     },
     {
       "upstreamSha": "59abcd67ac2c54bd63a422e92fa2e31b2c667b6d",
-      "classification": "planned:11a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(mobile): make Android subscription usage widgets scrollable (#13474).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["11a-pr-13474"],
-        "targetModules": ["apps/server/src/usage"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream makes its Android usage widgets scrollable. F5 has no mobile app. Upstream change: fix(mobile): make Android subscription usage widgets scrollable (#13474)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "72447f23d9d9102f647f95f548aadf92edd5b400",

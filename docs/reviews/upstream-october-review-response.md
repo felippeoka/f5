@@ -2868,3 +2868,67 @@ adapter and text generation) pass, as do the full ChatView (135) and
 MessagesTimeline (73) browser suites and the new tooltip browser test. The
 tooltip and Windows-path tests fail with their fix removed. The
 web and server typechecks and lint pass.
+
+## September set 11a triage log: Usage
+
+All 68 open set 11a records (the 15q carrier) are classified: 46 October
+follow-ups and the 22 September members that were waiting on a targeted
+comparison. The result is 3 ported, 12 equivalent, 2 declined and 51 not
+applicable. The 22 September members change only in the ledger and keep their
+`11a` id; the September plan stays the original review.
+
+New ports:
+
+- [t3code#11922](https://github.com/pingdotgg/t3code/pull/11922): the macOS app
+  declares `NSLocalNetworkUsageDescription`, so macOS 15 can explain its prompt
+  before F5's terminals and agents reach local network hosts.
+- [t3code#12799](https://github.com/pingdotgg/t3code/pull/12799): a Grok
+  account with nothing metered yet shows a 0% meter instead of claiming its CLI
+  cannot report limits.
+- [t3code#6670](https://github.com/pingdotgg/t3code/pull/6670): an unknown
+  system time zone buckets usage in UTC instead of failing the summary.
+
+Most of the set does not apply because F5's Usage is a different design. Its
+Activity counts only turns F5 ran, from SQLite facts, so the 20 fixes to
+upstream's provider history scanners and their cache have nothing to act on.
+F5 has no model rate table (5 fixes), and its dashboard is its own layout (6).
+It runs one environment and never merges accounts by email (3), redeems reset
+credits only through the Codex app server (2), and has no scoped RPC auth,
+pairing route, cross-version clients, URL-labelled limit sources, Claude
+context-usage query or mobile app. Eight are React Compiler or refactor
+maintenance.
+
+Equivalent and cited: F5 never reads the macOS Keychain for Cursor
+([t3code#13870](https://github.com/pingdotgg/t3code/pull/13870),
+[t3code#13714](https://github.com/pingdotgg/t3code/pull/13714)) and reports a
+missing Cursor login as unavailable
+([t3code#13820](https://github.com/pingdotgg/t3code/pull/13820)). Its countdown
+already says "in <1m" in the final minute
+([t3code#17869](https://github.com/pingdotgg/t3code/pull/17869)). Accounts keep
+separate identities
+([t3code#17711](https://github.com/pingdotgg/t3code/pull/17711)), and a hub
+yields only its configured account
+([t3code#9584](https://github.com/pingdotgg/t3code/pull/9584)). Usage requests
+are outside the slow-RPC allowlist
+([t3code#9358](https://github.com/pingdotgg/t3code/pull/9358)), and providers
+refresh only on request
+([t3code#11811](https://github.com/pingdotgg/t3code/pull/11811)). Limits re-read
+stale accounts when opened
+([t3code#11928](https://github.com/pingdotgg/t3code/pull/11928)). The provider
+table lists only providers with usage
+([t3code#7563](https://github.com/pingdotgg/t3code/pull/7563)). Account labels
+never carry an email
+([t3code#10668](https://github.com/pingdotgg/t3code/pull/10668)). Claude's
+capabilities are published before its optional usage read
+([t3code#9784](https://github.com/pingdotgg/t3code/pull/9784)).
+
+Declined: opening Usage on Limits by default
+([t3code#11261](https://github.com/pingdotgg/t3code/pull/11261)), because F5
+keeps Activity as the first-visit tab and then remembers the last one, and
+pooling limits across accounts
+([t3code#10300](https://github.com/pingdotgg/t3code/pull/10300)), because F5
+shows each account separately by design.
+
+Validation: the provider limits, usage format and desktop Info.plist unit tests
+pass, as do the 41 Usage dashboard browser tests and the server and web
+typechecks.
