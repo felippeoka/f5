@@ -845,6 +845,7 @@ export const CompactRuntimeConfiguredActivityPayload = Schema.Struct({
   claudeCodeVersion: Schema.optional(TrimmedNonEmptyString),
   sessionId: Schema.optional(TrimmedNonEmptyString),
   fastModeState: Schema.optional(TrimmedNonEmptyString),
+  fastModeDisabledReason: Schema.optional(TrimmedNonEmptyString),
   effort: Schema.optional(TrimmedNonEmptyString),
   reasoning: Schema.optional(TrimmedNonEmptyString),
   contextWindow: Schema.optional(TrimmedNonEmptyString),

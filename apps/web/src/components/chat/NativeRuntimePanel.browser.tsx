@@ -226,6 +226,33 @@ describe("NativeRuntimePanel", () => {
     }
   });
 
+  it("links a refused fast mode to the settings that fix it", async () => {
+    const config = {
+      model: "claude-opus-5-5",
+      fast_mode_state: "off",
+      fast_mode_disabled_reason: "extra_usage_disabled",
+      runtimeInfo: {
+        requested: { fastMode: "on" },
+        effective: { fastMode: "off" },
+        fallback: "fastMode: on → off (usage credits not enabled)",
+      },
+    };
+    const screen = await render(
+      <NativeRuntimePanel {...fixture({ runtime: readRuntimeConfiguredPayload({ config }) })} />,
+    );
+    try {
+      await page.getByRole("button", { name: "Runtime details" }).click();
+      await expect
+        .element(page.getByRole("link", { name: "Open Claude usage settings" }))
+        .toHaveAttribute("href", "https://claude.ai/settings/usage");
+      await expect
+        .element(page.getByRole("link", { name: "Fast mode requirements" }))
+        .toHaveAttribute("href", "https://code.claude.com/docs/en/fast-mode#requirements");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("shows a newer reroute as effective without relabeling it as the original request", async () => {
     const config = {
       ...warnings()[0]!,

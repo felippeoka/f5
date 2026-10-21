@@ -1474,6 +1474,11 @@ export function runtimeEventToActivities(
         typeof config.fast_mode_state === "string" && config.fast_mode_state.trim().length > 0
           ? config.fast_mode_state.trim()
           : undefined;
+      const fastModeDisabledReason =
+        typeof config.fast_mode_disabled_reason === "string" &&
+        config.fast_mode_disabled_reason.trim().length > 0
+          ? config.fast_mode_disabled_reason.trim()
+          : undefined;
       const effort =
         typeof config.effort === "string" && config.effort.trim().length > 0
           ? config.effort.trim()
@@ -1513,6 +1518,7 @@ export function runtimeEventToActivities(
               ...(claudeCodeVersion ? { claudeCodeVersion } : {}),
               ...(sessionId ? { sessionId } : {}),
               ...(fastModeState ? { fastModeState } : {}),
+              ...(fastModeDisabledReason ? { fastModeDisabledReason } : {}),
               ...(effort ? { effort } : {}),
               ...(reasoning ? { reasoning } : {}),
               ...(contextWindow ? { contextWindow } : {}),

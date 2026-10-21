@@ -16,6 +16,11 @@ import type {
 import { readMcpStatusActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
 import { SlidersHorizontalIcon } from "lucide-react";
 import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
+import {
+  describeFastModeDisabledReason,
+  fastModeDisabledReasonHelp,
+} from "@t3tools/shared/runtimeInfo";
+import { OpenLinkAnchor } from "../OpenLinkAnchor";
 import { useEffect, useState } from "react";
 import type {
   NativeOperationRecord,
@@ -153,6 +158,10 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   const normalized = info?.runtimeInfo;
   const effective = normalized?.effective;
   const requested = normalized?.requested;
+  const fastModeHelp =
+    requested?.fastMode === "on" && info?.fastModeDisabledReason
+      ? fastModeDisabledReasonHelp(info.fastModeDisabledReason)
+      : undefined;
   const signInProvider = supportsMcpSignIn(props.provider, props.sessionStatus)
     ? props.provider
     : null;
@@ -221,6 +230,12 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                   <dd>{effective?.fastMode ?? info?.fastModeState}</dd>
                 </>
               )}
+              {info?.fastModeDisabledReason && (
+                <>
+                  <dt>Fast mode unavailable</dt>
+                  <dd>{describeFastModeDisabledReason(info.fastModeDisabledReason)}</dd>
+                </>
+              )}
               {props.outcome && (
                 <>
                   <dt>Latest turn</dt>
@@ -229,6 +244,24 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
               )}
             </dl>
             {normalized?.fallback && <p>{normalized.fallback}</p>}
+            {fastModeHelp && (
+              <section aria-label="Fast mode help" className="space-y-1">
+                <p className="text-muted-foreground">{fastModeHelp.text}</p>
+                <p className="flex flex-wrap gap-x-4">
+                  {fastModeHelp.links.map((link) => (
+                    <OpenLinkAnchor
+                      key={link.url}
+                      className="underline"
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {link.label}
+                    </OpenLinkAnchor>
+                  ))}
+                </p>
+              </section>
+            )}
             {signInServers.length > 0 && signInProvider && props.projectId && (
               <section aria-label="MCP sign-in" className="space-y-2">
                 <h3 className="font-medium">MCP servers that need sign-in</h3>

@@ -875,6 +875,9 @@ function compactRuntimeConfiguredPayload(
     ...(payload.claudeCodeVersion ? { claudeCodeVersion: payload.claudeCodeVersion } : {}),
     ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
     ...(payload.fastModeState ? { fastModeState: payload.fastModeState } : {}),
+    ...(payload.fastModeDisabledReason
+      ? { fastModeDisabledReason: payload.fastModeDisabledReason }
+      : {}),
     ...(payload.effort ? { effort: payload.effort } : {}),
     ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
     ...(payload.contextWindow ? { contextWindow: payload.contextWindow } : {}),
@@ -1128,6 +1131,14 @@ export function readRuntimeConfiguredPayload(
     ...(readConfiguredValue(record.fastModeState, config?.fast_mode_state)
       ? {
           fastModeState: readConfiguredValue(record.fastModeState, config?.fast_mode_state)!,
+        }
+      : {}),
+    ...(readConfiguredValue(record.fastModeDisabledReason, config?.fast_mode_disabled_reason)
+      ? {
+          fastModeDisabledReason: readConfiguredValue(
+            record.fastModeDisabledReason,
+            config?.fast_mode_disabled_reason,
+          )!,
         }
       : {}),
     ...(readConfiguredValue(record.effort, config?.effort)
