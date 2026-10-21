@@ -810,6 +810,50 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     syncIsAtEndFromListState();
   }, [syncIsAtEndFromListState]);
 
+  // A disclosure toggled at the end keeps the end in view while rows re-measure.
+  // Anywhere else, maintainVisibleContentPosition holds the toggled row in place.
+  const disclosurePinsEndRef = useRef(false);
+  const disclosureSettleFrameRef = useRef<number | null>(null);
+  const pinDisclosureToEnd = useCallback(() => {
+    if (!disclosurePinsEndRef.current) return;
+    const node = listRef.current?.getScrollableNode?.();
+    if (node instanceof HTMLElement) node.scrollTop = node.scrollHeight;
+  }, [listRef]);
+  // Settles two frames after the last toggle or row resize, since tool output
+  // can render a few frames late.
+  const scheduleDisclosureSettle = useCallback(() => {
+    if (disclosureSettleFrameRef.current !== null) {
+      window.cancelAnimationFrame(disclosureSettleFrameRef.current);
+    }
+    disclosureSettleFrameRef.current = window.requestAnimationFrame(() => {
+      pinDisclosureToEnd();
+      disclosureSettleFrameRef.current = window.requestAnimationFrame(() => {
+        pinDisclosureToEnd();
+        disclosurePinsEndRef.current = false;
+        disclosureSettleFrameRef.current = null;
+        syncIsAtEndFromListState();
+      });
+    });
+  }, [pinDisclosureToEnd, syncIsAtEndFromListState]);
+  const pinEndThroughDisclosure = useCallback(() => {
+    if (!isAtEndRef.current) return;
+    disclosurePinsEndRef.current = true;
+    scheduleDisclosureSettle();
+  }, [scheduleDisclosureSettle]);
+  const handleItemSizeChanged = useCallback(() => {
+    if (!disclosurePinsEndRef.current) return;
+    queueMicrotask(pinDisclosureToEnd);
+    scheduleDisclosureSettle();
+  }, [pinDisclosureToEnd, scheduleDisclosureSettle]);
+  useEffect(
+    () => () => {
+      if (disclosureSettleFrameRef.current !== null) {
+        window.cancelAnimationFrame(disclosureSettleFrameRef.current);
+      }
+    },
+    [],
+  );
+
   const navigateToTimelineRow = useCallback(
     (rowIndex: number, viewPosition: number) => {
       isAtEndRef.current = false;
@@ -910,6 +954,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     latestMessageId,
     revertPopover,
     chatDiffContext,
+    pinEndThroughDisclosure,
   };
   const latestRowInputsRef = useRef(latestRowInputs);
   useLayoutEffect(() => {
@@ -917,20 +962,31 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   });
   const rowActions = useMemo<TimelineRowActions>(
     () => ({
-      onToggleWorkGroup: (groupId, paginatedEntryCount) =>
-        latestRowInputsRef.current.onToggleWorkGroup(groupId, paginatedEntryCount),
-      onSetWorkGroupExpanded: (groupId, expanded) =>
-        latestRowInputsRef.current.onSetWorkGroupExpanded?.(groupId, expanded),
+      onToggleWorkGroup: (groupId, paginatedEntryCount) => {
+        latestRowInputsRef.current.pinEndThroughDisclosure();
+        latestRowInputsRef.current.onToggleWorkGroup(groupId, paginatedEntryCount);
+      },
+      onSetWorkGroupExpanded: (groupId, expanded) => {
+        latestRowInputsRef.current.pinEndThroughDisclosure();
+        latestRowInputsRef.current.onSetWorkGroupExpanded?.(groupId, expanded);
+      },
       onOpenTurnDiff: (turnId, filePath) =>
         latestRowInputsRef.current.onOpenTurnDiff(turnId, filePath),
       onImageExpand: (preview) => latestRowInputsRef.current.onImageExpand(preview),
       onImageActionMenu: (item, position) =>
         latestRowInputsRef.current.onImageActionMenu?.(item, position),
-      onToggleCommandExecution: (commandExecutionId) =>
-        latestRowInputsRef.current.onToggleCommandExecution(commandExecutionId),
-      onToggleAllDirectories: () => latestRowInputsRef.current.onToggleAllDirectories(),
-      onToggleFileChangeDiff: (workEntryId) =>
-        latestRowInputsRef.current.chatDiffContext.onToggleFileChangeDiff(workEntryId),
+      onToggleCommandExecution: (commandExecutionId) => {
+        latestRowInputsRef.current.pinEndThroughDisclosure();
+        latestRowInputsRef.current.onToggleCommandExecution(commandExecutionId);
+      },
+      onToggleAllDirectories: () => {
+        latestRowInputsRef.current.pinEndThroughDisclosure();
+        latestRowInputsRef.current.onToggleAllDirectories();
+      },
+      onToggleFileChangeDiff: (workEntryId) => {
+        latestRowInputsRef.current.pinEndThroughDisclosure();
+        latestRowInputsRef.current.chatDiffContext.onToggleFileChangeDiff(workEntryId);
+      },
       onOpenFileChangeDiff: (fileChangeId, filePath) =>
         latestRowInputsRef.current.chatDiffContext.onOpenFileChangeDiff(fileChangeId, filePath),
       setRevertPopoverOpen: (messageId, open) =>
@@ -1187,6 +1243,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           // row data itself is still present.
           maintainVisibleContentPosition={{ size: true, data: true }}
           onScroll={handleScroll}
+          onItemSizeChanged={handleItemSizeChanged}
           onViewableItemsChanged={handleViewableItemsChanged}
           // Stable hook for browser tests
           // queries — the LegendList's overflow container has inline styles that

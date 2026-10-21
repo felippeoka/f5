@@ -2056,6 +2056,60 @@ describe("MessagesTimeline (LegendList)", () => {
     }
   });
 
+  it("stays at the end while a command row at the end opens and closes", async () => {
+    const commandId = "command-toggle-at-end";
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <TimelineHarness
+        initialEntries={[
+          ...makeOverflowEntries(16),
+          makeCommandEntry(commandId, {
+            output: Array.from({ length: 40 }, (_, line) => `line ${line}`).join("\n"),
+          }),
+        ]}
+        initialHeight={240}
+        onIsAtEndChangeSpy={() => {}}
+      />,
+      { container: host },
+    );
+    const toggle = () =>
+      host.querySelector<HTMLButtonElement>(
+        `[data-timeline-row-id="${commandId}"] button[aria-expanded]`,
+      );
+    try {
+      const scrollContainer = await waitForScrollContainer(host);
+      const distanceFromEnd = () =>
+        scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
+      await vi.waitFor(() => {
+        expect(toggle()).not.toBeNull();
+        expect(distanceFromEnd()).toBeLessThan(8);
+      });
+      for (const expanded of ["true", "false"]) {
+        toggle()!.click();
+        await vi.waitFor(() => {
+          expect(toggle()?.getAttribute("aria-expanded")).toBe(expanded);
+          expect(distanceFromEnd()).toBeLessThan(8);
+        });
+      }
+
+      // Scrolled up, the toggled row holds its place instead of following the end.
+      scrollContainer.scrollTop -= 120;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const rowTop = toggle()!.getBoundingClientRect().top;
+      toggle()!.click();
+      await vi.waitFor(() => {
+        expect(toggle()?.getAttribute("aria-expanded")).toBe("true");
+        expect(Math.abs(toggle()!.getBoundingClientRect().top - rowTop)).toBeLessThan(2);
+        expect(distanceFromEnd()).toBeGreaterThan(100);
+      });
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
   it("shares a single turn-diff fetch across inline file-change cards in the same turn", async () => {
     persistAppSettings({ showFileChangeDiffsInline: true });
     const turnId = TurnId.makeUnsafe("turn-inline-shared-fetch");
