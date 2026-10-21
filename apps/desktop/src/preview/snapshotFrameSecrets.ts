@@ -1,4 +1,5 @@
 import { previewSecretCollectionScript } from "./snapshotSecrets";
+import { previewDebugger } from "./previewDebugger";
 
 export const previewSnapshotChanged = () =>
   new Error("The page changed while capturing its snapshot. Take another snapshot.");
@@ -57,7 +58,7 @@ export function makePreviewSnapshotSecretReader(
   const send = async (method: string, params: Record<string, unknown> = {}, sessionId?: string) => {
     check();
     try {
-      const result = await guest.debugger.sendCommand(method, params, sessionId);
+      const result = await previewDebugger(guest).sendCommand(method, params, sessionId);
       check();
       return result;
     } catch {
@@ -66,7 +67,7 @@ export function makePreviewSnapshotSecretReader(
   };
   const detach = (sessionId: string) => {
     try {
-      void guest.debugger
+      void previewDebugger(guest)
         .sendCommand("Target.detachFromTarget", { sessionId })
         .catch(() => undefined);
     } catch {
@@ -101,7 +102,7 @@ export function makePreviewSnapshotSecretReader(
   const open = async () => {
     check();
     const identity = nativeIdentity();
-    if (!guest.debugger.isAttached()) guest.debugger.attach("1.3");
+    if (!previewDebugger(guest).isAttached()) previewDebugger(guest).attach("1.3");
     const root = await readTree();
     trees.push({ stamp: root.stamp });
     const seen = new Set<string>();
@@ -110,7 +111,7 @@ export function makePreviewSnapshotSecretReader(
       if (targetInfo?.type !== "iframe" || targetInfo.targetId !== frameId)
         throw previewSnapshotChanged();
       // Register even a late attachment so a timeout cannot leak its session.
-      const response = await guest.debugger.sendCommand("Target.attachToTarget", {
+      const response = await previewDebugger(guest).sendCommand("Target.attachToTarget", {
         targetId: frameId,
         flatten: true,
       });
