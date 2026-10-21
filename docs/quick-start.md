@@ -12,8 +12,8 @@ There are three ways to run F5:
 
 ## From source
 
-Run `bun install --frozen-lockfile` from the repository root before using these
-commands, including after pulling changes or switching branches with different dependencies.
+Run `bun install --frozen-lockfile` from the repository root once after cloning.
+The `dev*` and desktop build scripts reinstall automatically when `bun.lock` changes.
 
 ```bash
 # Development (with hot reload)
@@ -46,15 +46,17 @@ To run the server outside the desktop app without a checkout, use the
 
 ```bash
 git pull --ff-only
-bun install --frozen-lockfile
 bun run start:desktop
 ```
 
-Pulling source changes does not update `node_modules`. The desktop build checks
-for missing dependencies before invoking the build tools and lists any missing
-packages with the command to reinstall. You can also run `bun run check:dependencies`
-directly. This check detects missing packages; run the install command after updating
-even if the check passes, so installed versions match the lockfile.
+Pulling source changes does not update `node_modules`. Before building, `build:desktop`
+(and therefore `start:desktop`) and the `dev*` scripts compare `bun.lock` with the
+lockfile the current installation came from, and check that every declared dependency
+is present. If either is out of date they run `bun install --frozen-lockfile` first.
+If the install fails, for example because local `package.json` edits no longer match
+`bun.lock`, the build stops with bun's error. In CI the check reports missing packages
+without installing. `bun run check:dependencies` runs the same presence check without
+installing.
 
 ## Windows build tools
 
