@@ -216,10 +216,14 @@ export function toOpenCodeFileParts(input: {
     switch (attachment.type) {
       case "file":
       case "image": {
+        // OpenCode inlines only text/plain itself. Other text types (HTML, Markdown, CSV)
+        // reach the model API as raw file parts, which Anthropic and OpenAI reject, so they
+        // ride only as the file path in the attachment context.
+        const mimeType = attachment.mimeType.trim().toLowerCase();
         if (
           attachment.type === "file" &&
-          !attachment.mimeType.startsWith("text/") &&
-          attachment.mimeType !== "application/pdf"
+          mimeType !== "text/plain" &&
+          mimeType !== "application/pdf"
         )
           continue;
         const attachmentPath = input.resolveAttachmentPath(attachment);

@@ -4,6 +4,7 @@ import * as path from "node:path";
 
 import { Effect, Layer, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import type { ChatAttachment } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -16,6 +17,7 @@ import {
   openCodeRuntimeErrorDetail,
   resolveOpenCodeInvocation,
   loadOpenCodeSkills,
+  toOpenCodeFileParts,
 } from "./opencodeRuntime.ts";
 
 it("formats an error whose message is not a string", () => {
@@ -74,6 +76,32 @@ it("reads workspace skills over the SDK without the CLI's pipe-size truncation",
     enabled: true,
   });
   expect(skills[0]).not.toHaveProperty("content");
+});
+
+it("sends only plain text, PDFs and images as native OpenCode file parts", () => {
+  const attachment = (mimeType: string, type: "file" | "image" = "file") =>
+    ({
+      type,
+      id: `att-${mimeType.replace("/", "-")}`,
+      name: `file.${mimeType.split("/")[1]}`,
+      mimeType,
+      sizeBytes: 10,
+    }) as ChatAttachment;
+  const parts = toOpenCodeFileParts({
+    attachments: [
+      attachment("text/plain"),
+      attachment("text/html"),
+      attachment("text/markdown"),
+      attachment("text/csv"),
+      attachment("application/pdf"),
+      attachment("application/zip"),
+      attachment("image/png", "image"),
+    ],
+    resolveAttachmentPath: (item) => `/attachments/${item.id}`,
+  });
+  // HTML, Markdown and CSV reach the model API as raw file parts, which providers reject;
+  // they still reach the agent as paths in the attachment context.
+  expect(parts.map((part) => part.mime)).toEqual(["text/plain", "application/pdf", "image/png"]);
 });
 
 describe("buildOpenCodePermissionRules", () => {
