@@ -30,6 +30,7 @@ import {
   isRecoverableThreadResumeError,
   isUnknownMethodError,
   legacyCodexApprovalDecision,
+  codexSessionAllowedResponse,
   normalizeCodexModelSlug,
   readCodexAccountSnapshot,
   readEnabledSkillsFromSkillsListResponse,
@@ -3188,6 +3189,60 @@ describe("Codex server requests", () => {
         resolutionSource: "server",
       },
     });
+  });
+
+  it("stops asking for commands the user allowed for the session, until the mode changes", async () => {
+    const manager = new CodexAppServerManager();
+    const context = requestContext();
+    const internals = manager as unknown as {
+      handleServerRequest: (context: unknown, request: Record<string, unknown>) => void;
+      requireSession: (threadId: string) => unknown;
+      writeMessage: (...args: unknown[]) => Promise<void>;
+    };
+    vi.spyOn(internals, "requireSession").mockReturnValue(context);
+    const writeMessage = vi.spyOn(internals, "writeMessage").mockResolvedValue();
+    const command = (id: number, method = "item/commandExecution/requestApproval") =>
+      internals.handleServerRequest(context, {
+        id,
+        method,
+        params: { threadId: "thread_1", turnId: "turn_1", itemId: `item-${id}`, command: "ls" },
+      });
+
+    command(90);
+    const [first] = context.pendingApprovals.keys();
+    await manager.respondToRequest(asThreadId("thread_1"), first!, "acceptForSession");
+    expect(context.pendingApprovals.size).toBe(0);
+
+    // A new command in the same mode is answered without a prompt.
+    command(91);
+    await vi.waitFor(() =>
+      expect(writeMessage).toHaveBeenCalledWith(context, {
+        id: 91,
+        result: { decision: "acceptForSession" },
+      }),
+    );
+    expect(context.pendingApprovals.size).toBe(0);
+
+    // File changes were never allowed, so they still ask.
+    command(92, "item/fileChange/requestApproval");
+    expect(context.pendingApprovals.size).toBe(1);
+    context.pendingApprovals.clear();
+
+    // Another runtime mode ends the allowance.
+    (context.session as { runtimeMode: string }).runtimeMode = "approval-required";
+    command(93);
+    expect(context.pendingApprovals.size).toBe(1);
+  });
+
+  it("answers a session-allowed request only with a decision the request offers", () => {
+    expect(codexSessionAllowedResponse("legacy-decision", undefined)).toEqual({
+      decision: "approved_for_session",
+    });
+    expect(
+      codexSessionAllowedResponse("decision", { decisions: new Set(["accept", "decline"]) }),
+    ).toEqual({ decision: "accept" });
+    expect(codexSessionAllowedResponse("decision", { decisions: new Set(["decline"]) })).toBeNull();
+    expect(codexSessionAllowedResponse("permissions", undefined)).toBeNull();
   });
 
   it("answers currentTime/read without creating a prompt", async () => {

@@ -122,6 +122,8 @@ interface PendingApprovalRequest {
   /** Decisions and execpolicy prefix the command request offered; responses must match. */
   commandOffer?: CodexCommandApprovalOffer;
   requestedPermissions?: Record<string, unknown>;
+  /** The session allowance read when the request arrived; a session answer adds to it. */
+  sessionAllowance?: Set<ProviderRequestKind>;
   threadId: ThreadId;
   turnId?: TurnId;
   itemId?: ProviderItemId;
@@ -161,6 +163,13 @@ interface CodexSessionContext {
   writer: JsonRpcStdinWriter;
   pending: Map<PendingRequestKey, PendingRequest>;
   pendingApprovals: Map<ApprovalRequestId, PendingApprovalRequest>;
+  /**
+   * Approval kinds the user chose "Always allow this session" for. Codex's own
+   * acceptForSession only skips the exact command or patch it answered, so every
+   * new command would ask again. A different runtime mode ends the allowance, and
+   * so does the session closing, like Codex's own session approvals.
+   */
+  sessionApprovals?: { runtimeMode: RuntimeMode; kinds: Set<ProviderRequestKind> };
   memoryThreadIds?: Set<string>;
   pendingUserInputs: Map<ApprovalRequestId, PendingUserInputRequest>;
   /** MCP form/URL requests answered privately; optional for hand-built test contexts. */
@@ -415,6 +424,21 @@ function codexPermissionApprovalResponse(
     return { scope: "session", permissions };
   }
   return { permissions: {} };
+}
+
+/**
+ * The answer to a command or file-change request the user already allowed for the session,
+ * or null when the request does not offer a session (or plain) approval and must ask.
+ */
+export function codexSessionAllowedResponse(
+  responseKind: PendingApprovalRequest["responseKind"],
+  commandOffer: CodexCommandApprovalOffer | undefined,
+): Record<string, unknown> | null {
+  if (responseKind === "legacy-decision") return { decision: "approved_for_session" };
+  if (responseKind !== "decision") return null;
+  const offered = commandOffer?.decisions;
+  if (!offered || offered.has("acceptForSession")) return { decision: "acceptForSession" };
+  return offered.has("accept") ? { decision: "accept" } : null;
 }
 
 function codexApprovalResponse(
@@ -2582,6 +2606,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
     this.markNativeRequestResolvedLocally(context, correlation);
     context.pendingApprovals.delete(requestId);
+    // Only an explicit session answer allows the kind. An "always" answer is an execpolicy rule
+    // for one command prefix and must not widen into every command.
+    if (decision === "acceptForSession")
+      pendingRequest.sessionAllowance?.add(pendingRequest.requestKind);
 
     this.emitEvent({
       id: EventId.makeUnsafe(randomUUID()),
@@ -3466,6 +3494,22 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
     const approvalRequest = this.approvalRequestForMethod(request.method);
     const requestKind = approvalRequest?.requestKind;
+    const sessionAllowance =
+      requestKind === "command" || requestKind === "file-change"
+        ? this.sessionAllowance(context)
+        : undefined;
+    if (approvalRequest && requestKind && sessionAllowance?.has(requestKind)) {
+      const allowed = codexSessionAllowedResponse(
+        approvalRequest.responseKind,
+        approvalRequest.method === "item/commandExecution/requestApproval"
+          ? readCodexCommandApprovalOffer(request.params)
+          : undefined,
+      );
+      if (allowed) {
+        this.writeServerRequestResponse(context, { id: request.id, result: allowed });
+        return;
+      }
+    }
     let requestId: ApprovalRequestId | undefined;
     let responseChannel: NativeRequestCorrelation["responseChannel"] | undefined;
     if (approvalRequest) {
@@ -3489,6 +3533,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           ? { commandOffer: readCodexCommandApprovalOffer(request.params) }
           : {}),
         ...(requestedPermissions !== undefined ? { requestedPermissions } : {}),
+        ...(sessionAllowance ? { sessionAllowance } : {}),
         threadId: context.session.threadId,
         ...(route.turnId ? { turnId: route.turnId } : {}),
         ...(route.itemId ? { itemId: route.itemId } : {}),
@@ -3942,6 +3987,14 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       ...updates,
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  /** The kinds allowed for the session in its current runtime mode. */
+  private sessionAllowance(context: CodexSessionContext): Set<ProviderRequestKind> {
+    const runtimeMode = context.session.runtimeMode;
+    if (context.sessionApprovals?.runtimeMode !== runtimeMode)
+      context.sessionApprovals = { runtimeMode, kinds: new Set() };
+    return context.sessionApprovals.kinds;
   }
 
   private approvalRequestForMethod(method: string):
