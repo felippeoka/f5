@@ -3,11 +3,17 @@ import "../../index.css";
 import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
-import type { ModelSlug, ProviderKind, ServerProvider } from "@t3tools/contracts";
+import type {
+  ModelSlug,
+  ProviderKind,
+  ResolvedKeybindingsConfig,
+  ServerProvider,
+} from "@t3tools/contracts";
 
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import type { ModelPickerModelOption } from "./providerIconUtils";
 import { parsePersistedAppSettings } from "../../appSettings";
+import { shortcutLabelForCommand } from "../../keybindings";
 import { useModelPreferencesStore } from "../../modelPreferencesStore";
 import { createTestServerProvider } from "../../testServerProvider";
 
@@ -56,6 +62,32 @@ const MODEL_OPTIONS_BY_PROVIDER = {
   pi: [],
 } satisfies Record<ProviderKind, ReadonlyArray<ModelPickerModelOption>>;
 
+const PICKER_KEYBINDINGS: ResolvedKeybindingsConfig = [
+  {
+    command: "modelPicker.toggle",
+    shortcut: {
+      key: "m",
+      metaKey: false,
+      ctrlKey: true,
+      shiftKey: true,
+      altKey: false,
+      modKey: false,
+    },
+  },
+  {
+    command: "modelPicker.jump.1",
+    shortcut: {
+      key: "1",
+      metaKey: false,
+      ctrlKey: true,
+      shiftKey: false,
+      altKey: false,
+      modKey: false,
+    },
+    whenAst: { type: "identifier", name: "modelPickerOpen" },
+  },
+];
+
 async function mountPicker(props?: {
   provider?: ProviderKind;
   model?: ModelSlug;
@@ -73,20 +105,7 @@ async function mountPicker(props?: {
       lockedProvider={props?.lockedProvider ?? null}
       providers={props?.providers ?? READY_PROVIDERS}
       modelOptionsByProvider={props?.modelOptionsByProvider ?? MODEL_OPTIONS_BY_PROVIDER}
-      keybindings={[
-        {
-          command: "modelPicker.jump.1",
-          shortcut: {
-            key: "1",
-            metaKey: false,
-            ctrlKey: true,
-            shiftKey: false,
-            altKey: false,
-            modKey: false,
-          },
-          whenAst: { type: "identifier", name: "modelPickerOpen" },
-        },
-      ]}
+      keybindings={PICKER_KEYBINDINGS}
       onProviderModelChange={onProviderModelChange}
     />,
     { container: host },
@@ -139,6 +158,21 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Sonnet 4.6");
         expect(text).not.toContain("GPT-5.4 Mini");
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("names the toggle shortcut in the trigger tooltip", async () => {
+    const mounted = await mountPicker();
+
+    try {
+      const shortcut = shortcutLabelForCommand(PICKER_KEYBINDINGS, "modelPicker.toggle");
+      expect(shortcut).toBeTruthy();
+      await page.getByText("GPT-5.5", { exact: true }).hover();
+      const chip = page.getByText(shortcut!, { exact: true });
+      await expect.element(chip).toBeVisible();
+      expect(chip.element().parentElement?.textContent).toBe(`GPT-5.5${shortcut}`);
     } finally {
       await mounted.cleanup();
     }
