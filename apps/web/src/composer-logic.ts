@@ -13,6 +13,8 @@ export interface ComposerTrigger {
   query: string;
   rangeStart: number;
   rangeEnd: number;
+  /** A slash token after other text on its line: it searches skills, not commands. */
+  inline?: true;
 }
 
 const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";
@@ -270,6 +272,16 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   const skillMatch = /^\p{Sc}([a-zA-Z0-9-]*)$/u.exec(token);
   if (skillMatch && !/^[0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?$/.test(skillMatch[1] ?? "")) {
     return { kind: "skill", query: skillMatch[1] ?? "", rangeStart: tokenStart, rangeEnd: cursor };
+  }
+  if (token.startsWith("/")) {
+    const inline = text.slice(lineStart, tokenStart).trim() !== "";
+    return {
+      kind: "slash-command",
+      query: token.slice(1),
+      rangeStart: tokenStart,
+      rangeEnd: cursor,
+      ...(inline ? { inline: true as const } : {}),
+    };
   }
   if (!token.startsWith("@")) {
     return null;

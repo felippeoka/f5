@@ -2676,7 +2676,9 @@ export default memo(function ChatView({
       projectSkills: activeProject?.skills,
       providerSkills: selectedProviderSnapshot?.skills,
     });
-    return composerTrigger.kind === "skill" ? items.filter((item) => item.type === "skill") : items;
+    return composerTrigger.kind === "skill" || composerTrigger.inline
+      ? items.filter((item) => item.type === "skill")
+      : items;
   }, [
     activeProject?.skills,
     selectedProviderSnapshot?.skills,
@@ -2690,6 +2692,8 @@ export default memo(function ChatView({
     Boolean(composerTrigger) &&
     (composerTrigger?.kind !== "skill" ||
       (selectedProvider === "codex" && composerMenuItems.length > 0)) &&
+    // A mid-message slash is often a path, so it opens only on a matching skill.
+    (!composerTrigger?.inline || composerMenuItems.length > 0) &&
     dismissedComposerPromptRef.current !== prompt;
   const activeComposerMenuItem = useMemo(
     () =>

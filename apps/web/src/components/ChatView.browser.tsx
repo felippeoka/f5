@@ -5586,6 +5586,34 @@ describe("ChatView timeline (full app)", () => {
     }
   });
 
+  it("searches slash skills mid-message without offering commands or opening on paths", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithCodexRuntimeSkills(),
+    });
+
+    try {
+      const editor = await waitForComposerEditor();
+      await page.elementLocator(editor).fill("Please run /rev");
+      const list = page.getByRole("listbox", { name: "Commands" });
+      await expect.element(list).toBeVisible();
+      await vi.waitFor(() => {
+        const options = [...list.element().querySelectorAll('[role="option"]')].map(
+          (option) => option.textContent ?? "",
+        );
+        expect(options.some((label) => label.includes("review"))).toBe(true);
+        expect(options.some((label) => /\bplan\b|\bmodel\b/i.test(label))).toBe(false);
+      });
+
+      await page.elementLocator(editor).fill("Look in /Users/me/project");
+      await vi.waitFor(() =>
+        expect(document.querySelector("[data-composer-command-drawer]")).toBeNull(),
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("rewrites Codex runtime slash skills to dollar syntax when sending", async () => {
     const typedPrompt = "/review current diff";
 
