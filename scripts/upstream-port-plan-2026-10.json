@@ -3752,13 +3752,9 @@
     },
     {
       "upstreamSha": "e536bfd33bc3c351997141d93790df75eeded7b9",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web,mobile): waiting status shows a dot-dashed icon and a timer (#19617).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-19617"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:waiting-status",
+      "reason": "Not applicable: upstream gives its sidebar's Waiting status an icon and a timer. F5's thread statuses have no Waiting state (apps/web/src/threadStatus.ts:20); background work shows in the composer tray instead. Upstream change: feat(web,mobile): waiting status shows a dot-dashed icon and a timer (#19617)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "21bedfb175b9eec8652adc35d7882bdc3c3c9d59",
@@ -4313,13 +4309,10 @@
     },
     {
       "upstreamSha": "9a5dc75648de725c737069379600570e391ec8b5",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): live reasoning stays scrolled to the newest text while it streams (#19334).",
+      "classification": "equivalent:apps/web/src/components/chat/ReasoningSection.tsx:53",
+      "reason": "Equivalent: upstream pins its height-capped reasoning box to the newest streamed text. F5's reasoning panel has no capped inner scroller; it grows with the timeline, which follows the end as rows grow (apps/web/src/components/chat/MessagesTimeline.tsx:1239). Upstream change: fix(web): live reasoning stays scrolled to the newest text while it streams (#19334)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-19334"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "d10621de5f8f7e3af4831be04c0564a4ae65eade",
@@ -5708,13 +5701,10 @@
     },
     {
       "upstreamSha": "1d270bec29d74ed31b69577f7f8aee5541457d21",
-      "classification": "planned:15o",
-      "reason": "Planned: verify the final upstream revert without restoring the removed behavior; this is a behavioral decision, not a mechanical maintenance exclusion. Upstream change: fix(web): revert trailing toast icons (#18356).",
+      "classification": "equivalent:apps/web/src/components/ui/toast.tsx:38",
+      "reason": "Equivalent: upstream moves toast icons back in front of the title. F5 never took the trailing icons, and its toast icon still renders before the title. Upstream change: fix(web): revert trailing toast icons (#18356)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-retain-revert-of-trailing-toast-icons"],
-        "targetModules": ["apps/web/src/components/ui"]
-      }
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "cafe620e01106262b8876f1bb927189337523b75",
@@ -8590,13 +8580,11 @@
     },
     {
       "upstreamSha": "12865b4a73c23bb402717d5f592dcd954ed196e5",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): quote chips show what you said about the quote (#15703).",
+      "classification": "equivalent:apps/web/src/components/chat/composer/ComposerAssistantQuoteNode.ts:14",
+      "reason": "Equivalent: upstream lets a sent quote chip open to show the quoted text and the comment. F5 has no sent quote chip: it sends a quote as a Markdown blockquote followed by the comment, so the sent message already shows both. Upstream change: feat(web): quote chips show what you said about the quote (#15703)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-15703"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "evidence": ["apps/web/src/components/chat/composer/ComposerAssistantQuoteNode.test.ts:9"],
+      "f5Shas": ["3ccb2023978310a5794915fb5191d9f1addb223f"]
     },
     {
       "upstreamSha": "33afd5a5aa361890c9ce22479e8f52f6b18248aa",
@@ -8908,13 +8896,9 @@
     },
     {
       "upstreamSha": "300f7f9d45ff19c01bc987dbf1c3bc3e9a3a59ee",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): block-level Markdown in the rich text composer (#14677).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-14677"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream adds block-level Markdown (fences with highlighting and a language picker, lists, tasks, quotes, rules, headings) to its Tiptap rich text composer, about 3,800 lines. F5's composer is Lexical and styles only inline Markdown and headings without changing the text (apps/web/src/components/chat/composer/ComposerMarkdownStylePlugin.tsx:5), so this needs its own design and block. Upstream change: feat(web): block-level Markdown in the rich text composer (#14677)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "95ccbf406626a8a80fa545777a6388bdf5153086",
@@ -8946,13 +8930,9 @@
     },
     {
       "upstreamSha": "26285ab80513260d1ff29d2c3fbe18f21990cb62",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): fast typing no longer scrambles text when type-to-focus kicks in (#14595).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-14595"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:type-to-focus",
+      "reason": "Not applicable: F5 has no type-to-focus. Typing outside the composer is not redirected into it; F5's global key handler only runs registered shortcuts. Upstream fixes fast typing being scrambled when type-to-focus moves it into the Tiptap composer. Upstream change: fix(web): fast typing no longer scrambles text when type-to-focus kicks in (#14595)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "eba0521563946a0834af881465d3e1ff7a4ca2f1",
@@ -10632,13 +10612,9 @@
     },
     {
       "upstreamSha": "2a778f7a6e7b5f9403c5dbff2c2f4a9ce26c0ade",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): shell commands in the timeline are syntax highlighted (#15037).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-15037"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream highlights expanded shell commands with Shiki, including scripts nested in heredocs and shell wrappers. It adds the unbash dependency and a 544-line embedded-script parser, and builds on upstream's V2 item inspector and client-runtime command labels, which F5 lacks. That is feature work for its own block. Upstream change: feat(web): shell commands in the timeline are syntax highlighted (#15037)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c40873762863abe34e2e784c518d81cbc08f6662",
@@ -10917,13 +10893,9 @@
     },
     {
       "upstreamSha": "5a96895a85b43c838da6c89cf21068b99c003d5a",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix: expanded tool calls show their output, empty ones don't expand (#15505).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-15505"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not applicable: upstream's change is in orchestration-v2, which F5 does not have. Its thread stream withheld tool output, so clients had to fetch it back when a row opened. F5's command and tool rows carry their output in the thread's activities. Upstream change: fix: expanded tool calls show their output, empty ones don't expand (#15505)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "33b7d7b3ae2a7b1c3d1bd58c04cb9bf581ec2fe7",
@@ -11567,13 +11539,9 @@
     },
     {
       "upstreamSha": "db514607f4026cd2bbb7b96674168bb227ac043a",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(chat): sending on an older thread no longer jumps to the top (#15059).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-15059"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not applicable: upstream's change is in orchestration-v2, which F5 does not have. Old threads without V2 runs unfolded every turn when the first send created a run; F5's turns have no runless path. Upstream change: fix(chat): sending on an older thread no longer jumps to the top (#15059)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5c0429b1578cff3307c35c51a305e2749a6dcb6e",
@@ -12043,13 +12011,9 @@
     },
     {
       "upstreamSha": "438af295fefdd04cc38629f902d7faa07cf39712",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(notifications): stack agent alerts by thread on both platforms (#12048).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-12048"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not applicable: upstream groups agent alerts by thread in its relay's APNs and FCM deliveries and in the Android app. F5 has neither the relay push service nor a mobile app. Upstream change: feat(notifications): stack agent alerts by thread on both platforms (#12048)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "09388bf2da51b958fe5c11fb5bade155fe575e58",
@@ -12753,13 +12717,9 @@
     },
     {
       "upstreamSha": "5d707bb71de19eb0eb6fe4688602ee853aec2e3c",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): Mod+B bolds on non-Latin layouts (#13409).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-13409"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:tiptap-composer",
+      "reason": "Not applicable: upstream makes its rich text composer's Mod+B bold shortcut work on non-Latin layouts. F5's composer has no bold shortcut. Upstream change: fix(web): Mod+B bolds on non-Latin layouts (#13409)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "29a32660d3cb2ade1f13283f889b519f73b24fbd",
@@ -12798,13 +12758,11 @@
     },
     {
       "upstreamSha": "04c15f34b756aadbff4c93ff07a217fa2398e5d5",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): add chat width setting for wide screens (#11594).",
+      "classification": "equivalent:apps/web/src/appearanceSettings.ts:52",
+      "reason": "Equivalent: F5's Appearance settings already offer a chat width of narrow, comfortable, wide or full. It drives the one --chat-content-max-width variable that the timeline, composer and chat banners share. Upstream change: feat(web): add chat width setting for wide screens (#11594)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-11594"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "evidence": ["apps/web/src/appearanceSettings.test.ts:81"],
+      "f5Shas": ["e05e37b3376d85ff630a32d18ec7544af076acc0"]
     },
     {
       "upstreamSha": "94c42162b443072ca59a0733c02ee54229a61fef",
@@ -13187,13 +13145,9 @@
     },
     {
       "upstreamSha": "0c84b4289cc9dee9af770a823f812ea1e8bea05d",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): paste after clicking away from the composer lands in it again (#13553).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-13553"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:type-to-focus",
+      "reason": "Not applicable: F5 has no type-to-focus. Typing outside the composer is not redirected into it; F5's global key handler only runs registered shortcuts. Upstream stops closed popups from blocking paste redirection into the composer. Upstream change: fix(web): paste after clicking away from the composer lands in it again (#13553)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4f27a8463105662ddfc834e01bca375d5124be79",
@@ -13401,13 +13355,11 @@
     },
     {
       "upstreamSha": "66129c6fd518aa01d873ebb47060b41c17312d60",
-      "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): run shell commands from chat in the thread terminal (#13060).",
+      "classification": "equivalent:apps/web/src/lib/shellCodeBlock.ts:2",
+      "reason": "Equivalent: F5's chat code blocks already offer Run in terminal for complete, closed shell fences (sh, bash, zsh, fish, shell, PowerShell). It is hidden while streaming and for commands with hidden control or format characters, and runs only on an explicit click. Upstream change: feat(web): run shell commands from chat in the thread terminal (#13060)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15o-pr-13060"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      "evidence": ["apps/web/src/components/ChatMarkdown.shell.browser.tsx:24"],
+      "f5Shas": ["71b79bf982dd44c99392a5b26adbb53aced176c6"]
     },
     {
       "upstreamSha": "e759847f932c0de08261ec98a5fac3bae037120f",

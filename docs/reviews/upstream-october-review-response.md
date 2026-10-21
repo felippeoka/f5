@@ -2565,3 +2565,78 @@ Validation: 339 server tests in 23 files, including every Pi test file, pass,
 as do the 2 shared native-history reconciliation tests, the 18 browser cases
 for the model picker and question panel, and the 2 ChatView prefill cases.
 The server typecheck passes.
+
+## 15o triage log: chat UX
+
+All 21 open 15o records are classified: 8 ported, 5 equivalent, 6 not
+applicable and 2 deferred.
+
+New ports, each with a test that fails before the change:
+
+- [t3code#17954](https://github.com/pingdotgg/t3code/pull/17954): opening a
+  command, work group, file diff or directory tree at the end of a thread left
+  its new content below the viewport (a 365px gap in the test). A toggle made
+  at the end now keeps the list at the end while rows re-measure. Scrolled up,
+  the toggled row still holds its place.
+- [t3code#16311](https://github.com/pingdotgg/t3code/pull/16311): F5's editor
+  draft store, its only IndexedDB use, kept a connection the browser had
+  closed, so every later draft save failed until a reload. It now reopens
+  the connection, with concurrent callers sharing the new one.
+- [t3code#19197](https://github.com/pingdotgg/t3code/pull/19197): agent
+  questions render as chat Markdown, so URLs and file links are clickable.
+- [t3code#16284](https://github.com/pingdotgg/t3code/pull/16284): while a
+  tool runs, the working row keeps the turn's latest thought above it.
+- [t3code#13572](https://github.com/pingdotgg/t3code/pull/13572): the
+  background-task tray, F5's counterpart to upstream's agents-working banner,
+  links to the Agents panel.
+- [t3code#15824](https://github.com/pingdotgg/t3code/pull/15824): upstream
+  reverted its automatic repair of unclosed file links, so F5's port of that
+  repair is removed too. The record for the original
+  ([t3code#15520](https://github.com/pingdotgg/t3code/pull/15520)) now cites
+  both commits and the test that pins the reverted behavior.
+
+Ported earlier and now verified:
+[t3code#10439](https://github.com/pingdotgg/t3code/pull/10439), find in
+thread. Its server, shared and browser tests pass, so the record is
+promoted with specific test citations.
+
+Equivalent: F5 already has a chat width setting
+([t3code#11594](https://github.com/pingdotgg/t3code/pull/11594)) and Run in
+terminal on shell code blocks
+([t3code#13060](https://github.com/pingdotgg/t3code/pull/13060)). It sends a
+quote as a blockquote plus comment, so the sent message shows both
+([t3code#15703](https://github.com/pingdotgg/t3code/pull/15703)). It never
+took the trailing toast icons that
+[t3code#18356](https://github.com/pingdotgg/t3code/pull/18356) reverts. Its
+reasoning panel has no capped scroller to pin
+([t3code#19334](https://github.com/pingdotgg/t3code/pull/19334)).
+
+Not applicable: two type-to-focus fixes
+([t3code#13553](https://github.com/pingdotgg/t3code/pull/13553),
+[t3code#14595](https://github.com/pingdotgg/t3code/pull/14595)), since F5 has
+no type-to-focus. Two orchestration-v2 fixes
+([t3code#15505](https://github.com/pingdotgg/t3code/pull/15505),
+[t3code#15059](https://github.com/pingdotgg/t3code/pull/15059)). The Tiptap
+bold shortcut ([t3code#13409](https://github.com/pingdotgg/t3code/pull/13409)).
+The relay and Android alert stacking
+([t3code#12048](https://github.com/pingdotgg/t3code/pull/12048)). The Waiting
+status icon ([t3code#19617](https://github.com/pingdotgg/t3code/pull/19617)),
+since F5 has no Waiting status.
+
+Deferred as feature work for their own blocks: block-level Markdown in the
+rich text composer
+([t3code#14677](https://github.com/pingdotgg/t3code/pull/14677), about 3,800
+lines of Tiptap work, while F5's composer is Lexical), and shell command
+syntax highlighting
+([t3code#15037](https://github.com/pingdotgg/t3code/pull/15037), which adds
+the `unbash` dependency and builds on upstream's V2 item inspector).
+
+A pre-existing failure turned up along the way: the file view panel's browser
+suite had not loaded since `useOpenLink` started calling `useRouter` in
+`144d0a2460`, because its router mock lacked `useRouter`. The mock is fixed
+and its 4 cases pass.
+
+Validation: the timeline and ChatView browser suites pass (205 cases), as
+do the question panel (15), tray (8), editor draft (4), file view (4) and
+ChatMarkdown (8) suites, 187 web unit tests across the session-logic and
+timeline files, and the find-in-thread suites. The web typecheck passes.

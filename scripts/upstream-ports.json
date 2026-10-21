@@ -565,10 +565,14 @@
     {
       "upstreamSha": "04c15f34b756aadbff4c93ff07a217fa2398e5d5",
       "subject": "feat(web): add chat width setting for wide screens (#11594)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): add chat width setting for wide screens (#11594).",
+      "reason": "Equivalent: F5's Appearance settings already offer a chat width of narrow, comfortable, wide or full. It drives the one --chat-content-max-width variable that the timeline, composer and chat banners share. Upstream change: feat(web): add chat width setting for wide screens (#11594)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "equivalent",
+      "f5Shas": ["e05e37b3376d85ff630a32d18ec7544af076acc0"],
+      "evidence": [
+        "apps/web/src/appearanceSettings.ts:52",
+        "apps/web/src/appearanceSettings.test.ts:81"
+      ]
     },
     {
       "upstreamSha": "04df98db4c90790fb5171426894baa3bca57a935",
@@ -1710,10 +1714,9 @@
     {
       "upstreamSha": "0c84b4289cc9dee9af770a823f812ea1e8bea05d",
       "subject": "fix(web): paste after clicking away from the composer lands in it again (#13553)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): paste after clicking away from the composer lands in it again (#13553).",
+      "reason": "Not applicable: F5 has no type-to-focus. Typing outside the composer is not redirected into it; F5's global key handler only runs registered shortcuts. Upstream stops closed popups from blocking paste redirection into the composer. Upstream change: fix(web): paste after clicking away from the composer lands in it again (#13553)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0c91f687de606f62e157209f34e6aa74744b555a",
@@ -1774,15 +1777,15 @@
     {
       "upstreamSha": "0ce43a4eea2f21fe404639c248fb86328c410c5d",
       "subject": "fix(chat): repair unclosed local file links in assistant responses (#15520)",
-      "reason": "Ported as a remark plugin: [label](<path) becomes a link when the destination resolves to a local file, rewriting only text nodes whose source bytes equal their value, so code, escapes, images, HTML and URLs are untouched. The new test failed before the change (no file chip rendered). Upstream change: fix(chat): repair unclosed local file links in assistant responses (#15520)",
+      "reason": "Ported, then reverted with upstream: F5 ported the repair as a remark plugin in e408c84960, and removed it in 72c31721ab when upstream reverted it in t3code#15824. Malformed [label](<path) syntax renders as literal text again, matching upstream's final state. Upstream change: fix(chat): repair unclosed local file links in assistant responses (#15520)",
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "15a",
-      "f5Shas": ["e408c84960b3fd897ea9c2425d9884c6bec221d6"],
-      "evidence": [
-        "apps/web/src/lib/remarkUnclosedFileLinks.ts:15",
-        "apps/web/src/components/ChatMarkdown.test.tsx:114"
-      ]
+      "f5Shas": [
+        "e408c84960b3fd897ea9c2425d9884c6bec221d6",
+        "72c31721ab40e69bf372a6bdf2c3aa33d030b042"
+      ],
+      "evidence": ["apps/web/src/components/ChatMarkdown.test.tsx:108"]
     },
     {
       "upstreamSha": "0ce6b9deb0c3f6b4dd9df7ed809f7acb9d237ae0",
@@ -2496,20 +2499,18 @@
     {
       "upstreamSha": "12069eefd707f78eafc27812027c994eea0613cf",
       "subject": "feat(web): find messages and plans in the current thread (#10439)",
-      "reason": "Planned: implementation and focused evidence exist for persisted message/plan search on a dedicated read-only connection, unloaded-history navigation, exact occurrence highlighting, folded-plan expansion, Unicode offsets and retry/stale-response ownership. Delivery remains deferred pending the required full-workspace and comparative-performance gates. Upstream change: feat(web): find messages and plans in the current thread (#10439).",
+      "reason": "Ported: find in thread searches the thread's persisted messages and plans on a read-only connection, including history that is not loaded yet, highlights each occurrence, expands a folded plan to show a match, and ignores replies for a replaced query. Upstream change: feat(web): find messages and plans in the current thread (#10439)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "15o",
       "f5Shas": ["d4b451cfcb53fb3cdd831f88a9cee9183c0fdbdc"],
       "evidence": [
-        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.startup.test.ts:1",
-        "apps/server/src/persistence/Layers/Sqlite.test.ts:1",
-        "apps/web/src/components/ChatView.browser.tsx:2004",
-        "apps/web/src/components/chat/ThreadFindBar.browser.tsx:1",
-        "apps/web/src/components/chat/threadFindHighlights.browser.tsx:1",
-        "packages/shared/src/threadSearch.test.ts:1",
-        "packages/shared/src/threadFindText.test.ts:1",
-        "docs/reviews/upstream-october-review-response.md:1"
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.startup.test.ts:339",
+        "apps/server/src/persistence/Layers/Sqlite.test.ts:13",
+        "apps/web/src/components/ChatView.browser.tsx:2078",
+        "apps/web/src/components/chat/ThreadFindBar.browser.tsx:26",
+        "apps/web/src/components/chat/threadFindHighlights.browser.tsx:15",
+        "packages/shared/src/threadFindText.test.ts:3"
       ]
     },
     {
@@ -2593,10 +2594,14 @@
     {
       "upstreamSha": "12865b4a73c23bb402717d5f592dcd954ed196e5",
       "subject": "feat(web): quote chips show what you said about the quote (#15703)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): quote chips show what you said about the quote (#15703).",
+      "reason": "Equivalent: upstream lets a sent quote chip open to show the quoted text and the comment. F5 has no sent quote chip: it sends a quote as a Markdown blockquote followed by the comment, so the sent message already shows both. Upstream change: feat(web): quote chips show what you said about the quote (#15703)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "equivalent",
+      "f5Shas": ["3ccb2023978310a5794915fb5191d9f1addb223f"],
+      "evidence": [
+        "apps/web/src/components/chat/composer/ComposerAssistantQuoteNode.ts:14",
+        "apps/web/src/components/chat/composer/ComposerAssistantQuoteNode.test.ts:9"
+      ]
     },
     {
       "upstreamSha": "12a4c057f3d6880c611630ccdc0c8c7f2cd23f72",
@@ -4034,10 +4039,12 @@
     {
       "upstreamSha": "1cfd1c1a4489b96defb1cea79fc8561cf5dc2a24",
       "subject": "fix(web): toggling tools and thinking at the bottom keeps you at the bottom (#17954)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): toggling tools and thinking at the bottom keeps you at the bottom (#17954).",
+      "reason": "Ported: opening or closing a command, work group, file diff or directory tree at the end of a thread keeps the list at the end while rows re-measure. Scrolled up, the toggled row holds its place. The new test fails before the fix with a 365px gap. Upstream change: fix(web): toggling tools and thinking at the bottom keeps you at the bottom (#17954)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "ported",
+      "plannedWorkstream": "15o",
+      "f5Shas": ["afad6777bee391eafa829285de95cc654cc466b1"],
+      "evidence": ["apps/web/src/components/chat/MessagesTimeline.browser.tsx:2059"]
     },
     {
       "upstreamSha": "1d00edb23ad6bfade33beba927947d09f1beeca4",
@@ -4065,10 +4072,11 @@
     {
       "upstreamSha": "1d270bec29d74ed31b69577f7f8aee5541457d21",
       "subject": "fix(web): revert trailing toast icons (#18356)",
-      "reason": "Planned: verify the final upstream revert without restoring the removed behavior; this is a behavioral decision, not a mechanical maintenance exclusion. Upstream change: fix(web): revert trailing toast icons (#18356).",
+      "reason": "Equivalent: upstream moves toast icons back in front of the title. F5 never took the trailing icons, and its toast icon still renders before the title. Upstream change: fix(web): revert trailing toast icons (#18356)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/components/ui/toast.tsx:38"]
     },
     {
       "upstreamSha": "1d58b82eadd043f7f7034023d81661affcf94a90",
@@ -5273,10 +5281,9 @@
     {
       "upstreamSha": "26285ab80513260d1ff29d2c3fbe18f21990cb62",
       "subject": "fix(web): fast typing no longer scrambles text when type-to-focus kicks in (#14595)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): fast typing no longer scrambles text when type-to-focus kicks in (#14595).",
+      "reason": "Not applicable: F5 has no type-to-focus. Typing outside the composer is not redirected into it; F5's global key handler only runs registered shortcuts. Upstream fixes fast typing being scrambled when type-to-focus moves it into the Tiptap composer. Upstream change: fix(web): fast typing no longer scrambles text when type-to-focus kicks in (#14595)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "263097a8da038a143f2b7b7817250f0ad390ea32",
@@ -5874,10 +5881,9 @@
     {
       "upstreamSha": "2a778f7a6e7b5f9403c5dbff2c2f4a9ce26c0ade",
       "subject": "feat(web): shell commands in the timeline are syntax highlighted (#15037)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): shell commands in the timeline are syntax highlighted (#15037).",
+      "reason": "Deferred: upstream highlights expanded shell commands with Shiki, including scripts nested in heredocs and shell wrappers. It adds the unbash dependency and a 544-line embedded-script parser, and builds on upstream's V2 item inspector and client-runtime command labels, which F5 lacks. That is feature work for its own block. Upstream change: feat(web): shell commands in the timeline are syntax highlighted (#15037)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "2a7a449cca3c7760b689a54b3aa02476a206dbc9",
@@ -6780,10 +6786,9 @@
     {
       "upstreamSha": "300f7f9d45ff19c01bc987dbf1c3bc3e9a3a59ee",
       "subject": "feat(web): block-level Markdown in the rich text composer (#14677)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): block-level Markdown in the rich text composer (#14677).",
+      "reason": "Deferred: upstream adds block-level Markdown (fences with highlighting and a language picker, lists, tasks, quotes, rules, headings) to its Tiptap rich text composer, about 3,800 lines. F5's composer is Lexical and styles only inline Markdown and headings without changing the text (apps/web/src/components/chat/composer/ComposerMarkdownStylePlugin.tsx:5), so this needs its own design and block. Upstream change: feat(web): block-level Markdown in the rich text composer (#14677)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "30164cb1ba8ea05fdd6be69215dba2cc2f0e2aa8",
@@ -9436,10 +9441,9 @@
     {
       "upstreamSha": "438af295fefdd04cc38629f902d7faa07cf39712",
       "subject": "feat(notifications): stack agent alerts by thread on both platforms (#12048)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(notifications): stack agent alerts by thread on both platforms (#12048).",
+      "reason": "Not applicable: upstream groups agent alerts by thread in its relay's APNs and FCM deliveries and in the Android app. F5 has neither the relay push service nor a mobile app. Upstream change: feat(notifications): stack agent alerts by thread on both platforms (#12048)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "438bf466fd7e97bb80f0d1f936b2c857830249b7",
@@ -12687,10 +12691,9 @@
     {
       "upstreamSha": "5a96895a85b43c838da6c89cf21068b99c003d5a",
       "subject": "fix: expanded tool calls show their output, empty ones don't expand (#15505)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix: expanded tool calls show their output, empty ones don't expand (#15505).",
+      "reason": "Not applicable: upstream's change is in orchestration-v2, which F5 does not have. Its thread stream withheld tool output, so clients had to fetch it back when a row opened. F5's command and tool rows carry their output in the thread's activities. Upstream change: fix: expanded tool calls show their output, empty ones don't expand (#15505)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5a9b56291f82b9269346053594d8b5dfca736976",
@@ -13056,10 +13059,9 @@
     {
       "upstreamSha": "5d707bb71de19eb0eb6fe4688602ee853aec2e3c",
       "subject": "fix(web): Mod+B bolds on non-Latin layouts (#13409)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): Mod+B bolds on non-Latin layouts (#13409).",
+      "reason": "Not applicable: upstream makes its rich text composer's Mod+B bold shortcut work on non-Latin layouts. F5's composer has no bold shortcut. Upstream change: fix(web): Mod+B bolds on non-Latin layouts (#13409)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5d7665396083d285132d67038813862a93337ca5",
@@ -14197,10 +14199,14 @@
     {
       "upstreamSha": "66129c6fd518aa01d873ebb47060b41c17312d60",
       "subject": "feat(web): run shell commands from chat in the thread terminal (#13060)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): run shell commands from chat in the thread terminal (#13060).",
+      "reason": "Equivalent: F5's chat code blocks already offer Run in terminal for complete, closed shell fences (sh, bash, zsh, fish, shell, PowerShell). It is hidden while streaming and for commands with hidden control or format characters, and runs only on an explicit click. Upstream change: feat(web): run shell commands from chat in the thread terminal (#13060)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "equivalent",
+      "f5Shas": ["71b79bf982dd44c99392a5b26adbb53aced176c6"],
+      "evidence": [
+        "apps/web/src/lib/shellCodeBlock.ts:2",
+        "apps/web/src/components/ChatMarkdown.shell.browser.tsx:24"
+      ]
     },
     {
       "upstreamSha": "6615d3d70ba399c4b274d17f19487d94afac17ed",
@@ -17733,10 +17739,12 @@
     {
       "upstreamSha": "801ca76ed6a5b9d5d6a40f6c1ba231d9ffb3757e",
       "subject": "revert(chat): remove automatic file-link repair (#15824)",
-      "reason": "Planned: verify the final upstream revert without restoring the removed behavior; this is a behavioral decision, not a mechanical maintenance exclusion. Upstream change: revert(chat): remove automatic file-link repair (#15824).",
+      "reason": "Ported: F5's port of the automatic file-link repair (t3code#15520) is removed to match upstream's revert, so malformed [label](<path) syntax renders as literal text again while valid file links still become chips. Upstream change: revert(chat): remove automatic file-link repair (#15824)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "ported",
+      "plannedWorkstream": "15o",
+      "f5Shas": ["72c31721ab40e69bf372a6bdf2c3aa33d030b042"],
+      "evidence": ["apps/web/src/components/ChatMarkdown.test.tsx:108"]
     },
     {
       "upstreamSha": "802b5d7c0b861bb60072b9e753477d9079cdc96a",
@@ -18464,10 +18472,12 @@
     {
       "upstreamSha": "85272eeeae53c5baa1cba1a36d84bbec81a3a0b5",
       "subject": "fix(chat): make links in agent questions clickable (#19197)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(chat): make links in agent questions clickable (#19197).",
+      "reason": "Ported: question text from the agent renders as chat Markdown in both the blocking and message question panels, so URLs are clickable and file links resolve against the thread's working directory. Upstream change: fix(chat): make links in agent questions clickable (#19197)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "ported",
+      "plannedWorkstream": "15o",
+      "f5Shas": ["c572a36397a6c937d6fe58b0f82db6ec20d6e3d1"],
+      "evidence": ["apps/web/src/components/chat/AsyncUserInputPanel.browser.tsx:62"]
     },
     {
       "upstreamSha": "85389b9883a2c7b31022573563b59981d697c3b4",
@@ -20732,10 +20742,15 @@
     {
       "upstreamSha": "95ccbf406626a8a80fa545777a6388bdf5153086",
       "subject": "feat(clients): live row shows the agent's latest thought (#16284)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(clients): live row shows the agent's latest thought (#16284).",
+      "reason": "Ported: while a tool runs, the working row keeps the turn's latest reasoning heading as a gray line with a brain icon above the tool, up to four lines. Providers that send no reasoning look the same. Upstream change: feat(clients): live row shows the agent's latest thought (#16284)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "ported",
+      "plannedWorkstream": "15o",
+      "f5Shas": ["782e41d47e91997c0802790b9c1ac20275e38e5f"],
+      "evidence": [
+        "apps/web/src/session-logic.test.ts:90",
+        "apps/web/src/components/chat/MessagesTimeline.test.tsx:233"
+      ]
     },
     {
       "upstreamSha": "95d99373b74edfb3bfd092c61a15999a95727423",
@@ -21311,10 +21326,11 @@
     {
       "upstreamSha": "9a5dc75648de725c737069379600570e391ec8b5",
       "subject": "fix(web): live reasoning stays scrolled to the newest text while it streams (#19334)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): live reasoning stays scrolled to the newest text while it streams (#19334).",
+      "reason": "Equivalent: upstream pins its height-capped reasoning box to the newest streamed text. F5's reasoning panel has no capped inner scroller; it grows with the timeline, which follows the end as rows grow (apps/web/src/components/chat/MessagesTimeline.tsx:1239). Upstream change: fix(web): live reasoning stays scrolled to the newest text while it streams (#19334)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/components/chat/ReasoningSection.tsx:53"]
     },
     {
       "upstreamSha": "9a609a4e444ba739d6fcd607769d68b679b0bcc5",
@@ -21535,10 +21551,12 @@
     {
       "upstreamSha": "9c49228f5425f644cff9b41ae88ca564d40d79fa",
       "subject": "fix(web): recover from a closed IndexedDB connection (#16311)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(web): recover from a closed IndexedDB connection (#16311).",
+      "reason": "Ported: F5's only IndexedDB store, editor drafts, drops a connection the browser closed and reopens it once when a transaction finds it closing, with concurrent callers sharing the new connection. The new test fails before the fix. Upstream change: fix(web): recover from a closed IndexedDB connection (#16311)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "ported",
+      "plannedWorkstream": "15o",
+      "f5Shas": ["bc22bd21712286536ef2c1179277ab29c431d4c2"],
+      "evidence": ["apps/web/src/editorDrafts.browser.ts:48"]
     },
     {
       "upstreamSha": "9c524d57718e639a6abe0a5fa3cbf6e9b086df86",
@@ -29948,10 +29966,9 @@
     {
       "upstreamSha": "db514607f4026cd2bbb7b96674168bb227ac043a",
       "subject": "fix(chat): sending on an older thread no longer jumps to the top (#15059)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: fix(chat): sending on an older thread no longer jumps to the top (#15059).",
+      "reason": "Not applicable: upstream's change is in orchestration-v2, which F5 does not have. Old threads without V2 runs unfolded every turn when the first send created a run; F5's turns have no runless path. Upstream change: fix(chat): sending on an older thread no longer jumps to the top (#15059)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "db5919d87daffd2d2db16e72602a586feb002adb",
@@ -30573,10 +30590,12 @@
     {
       "upstreamSha": "df9826f0806cc4874cd79f24a42a1e9e506030c2",
       "subject": "feat(web): agents working banner links to the Agents panel (#13572)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): agents working banner links to the Agents panel (#13572).",
+      "reason": "Ported: F5's background-task tray (its counterpart to upstream's agents-working banner) has a View action that opens the Agents panel, hidden while that panel is showing. Upstream change: feat(web): agents working banner links to the Agents panel (#13572)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "ported",
+      "plannedWorkstream": "15o",
+      "f5Shas": ["b566819e59e4da59ec72f6ce53347b7820e39ed4"],
+      "evidence": ["apps/web/src/components/chat/NativeRuntimeTray.browser.tsx:270"]
     },
     {
       "upstreamSha": "dfa345b3697a9117364cc6730a1598d6c27096f2",
@@ -31314,10 +31333,9 @@
     {
       "upstreamSha": "e536bfd33bc3c351997141d93790df75eeded7b9",
       "subject": "feat(web,mobile): waiting status shows a dot-dashed icon and a timer (#19617)",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web,mobile): waiting status shows a dot-dashed icon and a timer (#19617).",
+      "reason": "Not applicable: upstream gives its sidebar's Waiting status an icon and a timer. F5's thread statuses have no Waiting state (apps/web/src/threadStatus.ts:20); background work shows in the composer tray instead. Upstream change: feat(web,mobile): waiting status shows a dot-dashed icon and a timer (#19617)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15o"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e544a4a1f6dc599eea71e9b2fb7f28d0ed9cbe02",
