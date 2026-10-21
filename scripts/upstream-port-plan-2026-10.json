@@ -1878,13 +1878,9 @@
     },
     {
       "upstreamSha": "4539e774685452e885879a9b84e0fb0339e1cff6",
-      "classification": "planned:15d",
-      "reason": "Planned: reconcile the approved 15d feature and its follow-ups. Upstream change: perf(web): the HTML render frame compiles without manual memoization (#20688).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-20688"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream removed manual memoization from the HTML render frame for the React Compiler allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the HTML render frame compiles without manual memoization (#20688)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "daf4643356c77feca9274bc8a62068eef93290ea",
@@ -3585,13 +3581,11 @@
     },
     {
       "upstreamSha": "17e1087d36aa2ed7b6ca6b1a3775a2fe2a9f15c6",
-      "classification": "planned:15d",
-      "reason": "Planned: implement and verify the explicitly approved 15d scenario. Upstream change: feat(web): open html render images in the image viewer (#20036).",
+      "classification": "equivalent:apps/web/src/components/chat/HtmlRenderFrame.tsx:155",
+      "reason": "Equivalent: clicking an image in an f5 HTML render opens it in the shared image viewer, limited to https and raster or SVG data URLs. Upstream change: feat(web): open html render images in the image viewer (#20036)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-20036"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "evidence": ["apps/web/src/components/chat/HtmlRenderFrame.browser.tsx:109"],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "81493efb71e8e8244f95d3e9f71d8369654ab151",
@@ -4857,13 +4851,11 @@
     },
     {
       "upstreamSha": "aba3a6ddc0d2625739cb65c333f6052a4a35bc71",
-      "classification": "planned:15d",
-      "reason": "Planned: implement and verify the explicitly approved 15d scenario. Upstream change: feat(web): view visual replies full screen with zoom (#17561).",
+      "classification": "equivalent:apps/web/src/components/chat/HtmlRenderFrame.tsx:272",
+      "reason": "Equivalent: f5 HTML renders open full screen with zoom from 50% to 200%, and Escape inside the page returns inline. Upstream change: feat(web): view visual replies full screen with zoom (#17561)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-17561"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "evidence": ["apps/web/src/components/chat/HtmlRenderFrame.browser.tsx:123"],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "1ce8089ebd3317dad220f49deb541654c2f05fb5",
@@ -4892,13 +4884,11 @@
     },
     {
       "upstreamSha": "573cec01664d8bfef9da53dd31d68398e5814170",
-      "classification": "planned:15d",
-      "reason": "Planned: implement and verify the explicitly approved 15d scenario. Upstream change: fix(web): app shortcuts keep working after clicking into an HTML render (#18898).",
+      "classification": "equivalent:apps/web/src/components/chat/HtmlRenderFrame.tsx:128",
+      "reason": "Equivalent: the page forwards key presses that match configured app shortcuts over its private channel, and the frame replays them on the host so shortcuts keep working after a click into the page. Upstream change: fix(web): app shortcuts keep working after clicking into an HTML render (#18898)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-18898"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "evidence": ["apps/web/src/components/chat/HtmlRenderFrame.browser.tsx:143"],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "dff750b1b8818eb004b8c3d060edcdc09f88a07f",
@@ -6883,13 +6873,14 @@
     },
     {
       "upstreamSha": "c8b89a01d70fd54cbc6b6a70ba0fdff702b821aa",
-      "classification": "planned:15d",
-      "reason": "Planned: implement and verify the explicitly approved 15d scenario. Upstream change: fix(desktop): copy images from HTML previews (#17555).",
+      "classification": "equivalent:apps/web/src/components/chat/imageAttachmentActions.ts:118",
+      "reason": "Equivalent: upstream fixed its window context menu's Copy Image item for images inside HTML preview frames. f5's main window menu has no Copy Image item; an image in an HTML render opens the image viewer, whose Copy action writes the image through the desktop clipboard bridge. Upstream change: fix(desktop): copy images from HTML previews (#17555)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-17555"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "evidence": ["apps/web/src/components/chat/HtmlRenderFrame.tsx:155"],
+      "f5Shas": [
+        "db4174dcc78d5a964b9bd1904e421095a6df9e32",
+        "42d9a5862ed8c86c61bb4f953cfa616303301162"
+      ]
     },
     {
       "upstreamSha": "0442f5bfcca6eca556ee79d41f4addb7a2022188",
@@ -10547,13 +10538,14 @@
     },
     {
       "upstreamSha": "64275ae39653379e63f49f87be021c190fd20e81",
-      "classification": "planned:15d",
-      "reason": "Planned: implement and verify the explicitly approved 15d scenario. Upstream change: fix(web): inline HTML renders no longer trap the thread's scroll (#16283).",
+      "classification": "equivalent:apps/web/src/components/chat/HtmlRenderFrame.tsx:96",
+      "reason": "Equivalent: wheel events inside an inline HTML render are forwarded, clamped, to the nearest scrollable thread ancestor, so the page does not trap the thread's scroll. Upstream change: fix(web): inline HTML renders no longer trap the thread's scroll (#16283)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-16283"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "evidence": ["apps/web/src/components/chat/HtmlRenderFrame.browser.tsx:173"],
+      "f5Shas": [
+        "42d9a5862ed8c86c61bb4f953cfa616303301162",
+        "de67e4413d7c8b5f67f6f52a59bf071fefb54114"
+      ]
     },
     {
       "upstreamSha": "db4d0a8e6e49d92a9efcd8d6f82bbed10e2bd748",
@@ -10687,13 +10679,11 @@
     },
     {
       "upstreamSha": "677d1527c3d96b90b2294d9a0aed7d8c8874b29b",
-      "classification": "planned:15d",
-      "reason": "Planned: implement and verify the explicitly approved 15d scenario. Upstream change: feat: agents can show HTML pages inline in threads (#15968).",
+      "classification": "equivalent:apps/web/src/components/chat/HtmlRenderFrame.tsx:220",
+      "reason": "Equivalent: f5 agents show HTML pages inline through the thread render tools, in an opaque allow-scripts sandbox with a CSP and a private message channel. Upstream change: feat: agents can show HTML pages inline in threads (#15968)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-15968"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "evidence": ["apps/web/src/components/chat/HtmlRenderFrame.browser.tsx:68"],
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"]
     },
     {
       "upstreamSha": "c138163c8cc39d4a98b2d3d796bcef183013bac5",
@@ -11877,13 +11867,14 @@
     },
     {
       "upstreamSha": "5e35272fda7cc94d9c140377bc8db70580295133",
-      "classification": "planned:15d",
-      "reason": "Planned: implement and verify the explicitly approved 15d scenario. Upstream change: feat(web): render mermaid code blocks as diagrams (#15067).",
+      "classification": "equivalent:apps/web/src/components/chat/MermaidDiagram.tsx:4",
+      "reason": "Equivalent: mermaid code blocks in chat markdown render as SVG diagrams with a source toggle and redraw on theme changes. Upstream change: feat(web): render mermaid code blocks as diagrams (#15067)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15d-pr-15067"],
-        "targetModules": ["apps/server/src/mcp/PreviewMcpHttpServer.ts", "apps/server/src/mcp"]
-      }
+      "evidence": ["apps/web/src/components/chat/MermaidDiagram.browser.tsx:21"],
+      "f5Shas": [
+        "f46c26cd2cfc43fa846d701fd48c411656e3b7ab",
+        "71b79bf982dd44c99392a5b26adbb53aced176c6"
+      ]
     },
     {
       "upstreamSha": "429c625a8515f9c2e4af28c488fbf32ce7789645",

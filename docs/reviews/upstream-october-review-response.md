@@ -2011,3 +2011,39 @@ The plan's one-release fallback is in place too. A `githubTransport` setting
 (`http` by default) can send the same captured requests through `gh api`. It is
 read per request, and Settings → Accounts → GitHub exposes it as "GitHub
 requests".
+
+## 15d triage log: HTML renders
+
+All 11 open 15d records are classified. Three are ported:
+
+- [t3code#16325](https://github.com/pingdotgg/t3code/pull/16325): theme
+  colors passed to a page are rasterized to `#rrggbb`, so chart and canvas
+  libraries that cannot parse `oklch()` or `color-mix()` get usable values.
+- [t3code#19654](https://github.com/pingdotgg/t3code/pull/19654): while the
+  page loads, a skeleton holds its recorded height, so the thread does not
+  jump. Upstream also caches signed page URLs so a remount reuses the
+  download. f5 serves pages from a stable attachment URL marked immutable, so
+  the browser cache already does that.
+- [t3code#18897](https://github.com/pingdotgg/t3code/pull/18897): links in a
+  page go through the same handler as chat links. Pull request links open
+  beside the thread, and the preview pane setting applies.
+
+Seven are equivalent: inline pages in a sandbox
+([t3code#15968](https://github.com/pingdotgg/t3code/pull/15968)), images
+opening in the image viewer
+([t3code#20036](https://github.com/pingdotgg/t3code/pull/20036)), full screen
+with zoom ([t3code#17561](https://github.com/pingdotgg/t3code/pull/17561)),
+shortcuts after a click into the page
+([t3code#18898](https://github.com/pingdotgg/t3code/pull/18898)), scroll
+forwarding ([t3code#16283](https://github.com/pingdotgg/t3code/pull/16283))
+and mermaid diagrams
+([t3code#15067](https://github.com/pingdotgg/t3code/pull/15067)). Scroll
+forwarding had no test, so one was added; it fails when forwarding is removed.
+[t3code#17555](https://github.com/pingdotgg/t3code/pull/17555) fixes the
+Copy Image item of upstream's window context menu for images inside preview
+frames. f5's menu has no such item; images in a page are copied from the image
+viewer instead.
+
+[t3code#20688](https://github.com/pingdotgg/t3code/pull/20688) is a React
+Compiler memoization cleanup and is deferred with the other compiler
+refactors.
