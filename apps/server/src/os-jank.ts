@@ -2,7 +2,7 @@ import * as OS from "node:os";
 import * as PathNode from "node:path";
 import { Effect, Path } from "effect";
 import { F5_HOME_DIR_NAME, USERDATA_STATE_DIR_NAME } from "@t3tools/shared/appStatePaths";
-import { readPathFromLoginShell } from "@t3tools/shared/shell";
+import { readEnvironmentFromLoginShell } from "@t3tools/shared/shell";
 import { ensureWindowsPathHydrated } from "@t3tools/shared/windowsPath";
 
 export async function fixPath(
@@ -22,9 +22,13 @@ export async function fixPath(
 
   try {
     const shell = env.SHELL ?? "/bin/zsh";
-    const result = readPathFromLoginShell(shell);
-    if (result) {
-      env.PATH = result;
+    const result = readEnvironmentFromLoginShell(shell, ["PATH", "__MISE_DIFF"]);
+    if (result.PATH) {
+      env.PATH = result.PATH;
+      // mise's record of the PATH entries it added. It must travel with the
+      // shell's PATH, or `mise x` can rebuild PATH behind a same-named wrapper
+      // (`exec mise x claude -- claude`) that then re-runs itself forever.
+      if (result.__MISE_DIFF) env.__MISE_DIFF = result.__MISE_DIFF;
     }
   } catch {
     // Silently ignore — keep default PATH

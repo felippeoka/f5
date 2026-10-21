@@ -10,6 +10,7 @@ describe("syncShellEnvironment", () => {
     };
     const readEnvironment = vi.fn(() => ({
       PATH: "/opt/homebrew/bin:/usr/bin",
+      __MISE_DIFF: "mise-diff",
       SSH_AUTH_SOCK: "/tmp/secretive.sock",
     }));
 
@@ -18,8 +19,10 @@ describe("syncShellEnvironment", () => {
       readEnvironment,
     });
 
+    expect(env.__MISE_DIFF).toBe("mise-diff");
     expect(readEnvironment).toHaveBeenCalledWith("/bin/zsh", [
       "PATH",
+      "__MISE_DIFF",
       "SSH_AUTH_SOCK",
       "LANG",
       "LC_ALL",

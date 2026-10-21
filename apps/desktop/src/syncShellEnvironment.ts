@@ -35,6 +35,7 @@ export function syncShellEnvironment(
     const shell = env.SHELL ?? "/bin/zsh";
     const shellEnvironment = (options.readEnvironment ?? readEnvironmentFromLoginShell)(shell, [
       "PATH",
+      "__MISE_DIFF",
       "SSH_AUTH_SOCK",
       ...LOCALE_NAMES,
       ...CA_TRUST_NAMES,
@@ -52,6 +53,10 @@ export function syncShellEnvironment(
 
     if (shellEnvironment.PATH) {
       env.PATH = shellEnvironment.PATH;
+      // mise's record of the PATH entries it added. It must travel with the
+      // shell's PATH, or `mise x` can rebuild PATH behind a same-named wrapper
+      // (`exec mise x claude -- claude`) that then re-runs itself forever.
+      if (shellEnvironment.__MISE_DIFF) env.__MISE_DIFF = shellEnvironment.__MISE_DIFF;
     }
 
     if (!env.SSH_AUTH_SOCK && shellEnvironment.SSH_AUTH_SOCK) {
