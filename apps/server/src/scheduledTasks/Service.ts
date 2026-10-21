@@ -562,7 +562,14 @@ export const makeScheduledTaskService = (deps: {
       });
     const listRuns = (input: ScheduledTaskRunsInput, actor: ScheduleActor) =>
       Effect.gen(function* () {
-        yield* requireTask(input.taskId, actor);
+        if (actor.kind === "user") {
+          if (!(yield* store.task(input.taskId, true)))
+            return yield* scheduleError("not_found", "Task not found.");
+        } else yield* requireTask(input.taskId, actor);
+        if (input.runId) {
+          const run = yield* store.run(input.runId);
+          return { runs: run?.run.taskId === input.taskId ? [run.run] : [], nextCursor: null };
+        }
         const rows = yield* store.history(input.taskId, input.before, input.limit ?? 50);
         const last = rows.at(-1)?.run;
         return {
@@ -1098,7 +1105,11 @@ export const makeScheduledTaskService = (deps: {
           const rows = yield* sql<{
             payload_json: string;
           }>`UPDATE scheduled_notifications SET owner=${input.owner},lease_until=${leaseExpiresAt} WHERE id IN(SELECT id FROM scheduled_notifications WHERE acknowledged_at IS NULL AND (lease_until IS NULL OR lease_until <= ${at}) ORDER BY created_at LIMIT 20) RETURNING payload_json`;
+          const leases = yield* sql<{
+            deadline: string | null;
+          }>`SELECT MIN(lease_until) AS deadline FROM scheduled_notifications WHERE acknowledged_at IS NULL AND lease_until IS NOT NULL`;
           return {
+            retryAt: leases[0]?.deadline ?? null,
             notifications: rows.map((row) => JSON.parse(row.payload_json) as ScheduledNotification),
             leaseExpiresAt,
           };

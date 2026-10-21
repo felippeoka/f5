@@ -4,7 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import { ComputerHostChannel } from "./ComputerHostChannel";
 import type { ComputerController } from "./ComputerController";
 import { ComputerLeaseAuthority } from "./ComputerLeaseAuthority";
-function setup(certified = false, advertiseBackground?: boolean) {
+function setup(
+  certified = false,
+  advertiseBackground?: boolean,
+  notification?: (
+    profile: string,
+    notice: import("@t3tools/contracts").DesktopScheduledNotification,
+  ) => boolean,
+) {
   const controller = {
     disconnect: vi.fn(),
     setPaused: vi.fn(),
@@ -25,6 +32,7 @@ function setup(certified = false, advertiseBackground?: boolean) {
     { certified: () => certified },
     undefined,
     {
+      ...(notification ? { notification } : {}),
       background: () => ({ available: true }),
       ...(advertiseBackground !== undefined ? { advertiseBackground } : {}),
     },
@@ -538,3 +546,43 @@ it.each([
     expect(messages.find((message) => message.type === "leasesChanged")).toBeUndefined();
   },
 );
+
+it("delivers and acknowledges scheduled notices without computer access, fencing stale incarnations", () => {
+  const notify = vi.fn(() => true);
+  const h = setup(false, false, notify);
+  h.hello(["scheduled-notifications-v1"]);
+  const notification = {
+    id: "notice",
+    title: "Task",
+    body: "Finished",
+    taskId: "task",
+    threadId: "thread",
+  };
+  h.process.emit("message", { type: "scheduledNotification", notification });
+  expect(notify).toHaveBeenCalledWith("profile", notification);
+  expect(h.process.send).toHaveBeenCalledWith(
+    { type: "scheduledNotificationAck", id: "notice" },
+    expect.any(Function),
+  );
+  h.channel.register(
+    "profile",
+    "replacement",
+    Object.assign(new EventEmitter(), {
+      connected: true,
+      send: vi.fn(),
+      disconnect: vi.fn(),
+    }) as unknown as ChildProcess,
+  );
+  h.process.emit("message", { type: "scheduledNotification", notification });
+  expect(notify).toHaveBeenCalledTimes(1);
+});
+it("does not acknowledge notices when desktop presentation is unavailable", () => {
+  const h = setup(false, false, () => false);
+  h.hello(["scheduled-notifications-v1"]);
+  h.process.send.mockClear();
+  h.process.emit("message", {
+    type: "scheduledNotification",
+    notification: { id: "n", title: "T", body: "B", taskId: "t", threadId: null },
+  });
+  expect(h.process.send).not.toHaveBeenCalled();
+});

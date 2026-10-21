@@ -1,8 +1,11 @@
+import { makeScheduledNotificationDelivery } from "./scheduledTasks/notificationDelivery.ts";
+import { TextGeneration } from "./git/Services/TextGeneration.ts";
+import { parseNaturalLanguageSchedule } from "./scheduledTasks/naturalLanguage.ts";
 import { TURN_SUBMISSION_FAILURES } from "./TurnSubmissionError.ts";
 import { makeTurnSubmissionService } from "./TurnSubmissionService.ts";
 import { RouteRequestError, mapNextTurnQueueRouteError } from "./turnSubmissionErrors.ts";
 import { makeScheduledTaskService, userScheduleActor } from "./scheduledTasks/Service.ts";
-import { makeScheduledTaskStore } from "./scheduledTasks/Store.ts";
+import { makeScheduledTaskStore, scheduleError } from "./scheduledTasks/Store.ts";
 import { withProviderThreadAccess } from "./provider/providerThreadAccess.ts";
 import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
 import { McpServerWriteDefinition } from "@t3tools/contracts";
@@ -3218,7 +3221,36 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const scheduledTaskStore = yield* makeScheduledTaskStore.pipe(
     Effect.provideService(SqlClient.SqlClient, sql),
   );
+  let notificationWake: Effect.Effect<void> = Effect.void;
+  const scheduleTextGeneration = yield* Effect.serviceOption(TextGeneration);
   const scheduledTasks = yield* makeScheduledTaskService({
+    naturalLanguage: (input, now) =>
+      Effect.gen(function* () {
+        if (Option.isNone(scheduleTextGeneration))
+          return yield* new RouteRequestError({ message: "Text generation is unavailable." });
+        const project = (yield* agentBridgeHost.readSnapshot).projects.find(
+          (p) => p.id === input.projectId && p.deletedAt === null,
+        );
+        if (!project)
+          return yield* new RouteRequestError({
+            message: "Choose a project for schedule conversion.",
+          });
+        const effective = yield* readProjectSettings(yield* serverSettings.getSettings, project);
+        const selection = effective.settings.textGenerationModelSelection;
+        const providers = yield* agentBridgeHost.listProviderInstances;
+        return yield* parseNaturalLanguageSchedule({
+          preview: input,
+          now,
+          cwd: project.workspaceRoot,
+          modelSelection: selection,
+          isCodex: providers.some(
+            (p) => p.instanceId === selection.instanceId && p.driver === "codex",
+          ),
+          textGeneration: scheduleTextGeneration.value,
+        });
+      }).pipe(
+        Effect.mapError((error) => scheduleError("natural_language_unavailable", error.message)),
+      ),
     store: scheduledTaskStore,
     wakeQueue: (threadId) =>
       awaitOrchestrationRuntimeForRoute.pipe(
@@ -3239,12 +3271,35 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ),
     host: agentBridgeHost,
     settings: serverSettings,
-    publish: (payload) => pushBus.publishAll(WS_CHANNELS.scheduledTasksChanged, payload),
+    publish: (payload) =>
+      pushBus
+        .publishAll(WS_CHANNELS.scheduledTasksChanged, payload)
+        .pipe(Effect.andThen(Effect.suspend(() => notificationWake))),
   });
   yield* scheduledTasks.start.pipe(
     Effect.catchCause((cause) => Effect.logError("scheduledTasks.start", cause)),
     Effect.forkScoped,
   );
+  if (Option.isSome(computerAutomationBroker)) {
+    const delivery = yield* makeScheduledNotificationDelivery({
+      host: computerAutomationBroker.value.host,
+      service: scheduledTasks,
+      store: scheduledTaskStore,
+      changed: () =>
+        scheduledTaskStore.readRevision.pipe(
+          Effect.flatMap((revision) =>
+            pushBus.publishAll(WS_CHANNELS.scheduledTasksChanged, {
+              revision,
+              taskIds: [],
+              runIds: [],
+            }),
+          ),
+          Effect.ignore,
+        ),
+    });
+    notificationWake = delivery.wake;
+    yield* delivery.start;
+  }
   const agentBridge = yield* makeAgentBridgeService({
     host: agentBridgeHost,
     store: makeAgentBridgeStore(sql),
@@ -6080,6 +6135,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           .resolveRun(stripRequestTag(request.body), userScheduleActor)
           .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       case WS_METHODS.scheduledTasksClaimNotifications:
+        if (
+          Option.isSome(computerAutomationBroker) &&
+          computerAutomationBroker.value.host.notificationsCapable()
+        )
+          return { notifications: [], leaseExpiresAt: new Date().toISOString(), retryAt: null };
         return yield* scheduledTasks
           .claimNotifications(stripRequestTag(request.body))
           .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));

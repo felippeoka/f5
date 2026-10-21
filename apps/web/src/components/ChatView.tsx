@@ -7212,6 +7212,7 @@ export default function ChatView({
             isServerThread={isServerThread}
             activeThreadId={activeThread.id}
             activeThreadTitle={activeThread.title}
+            scheduledOrigin={activeThread.scheduledOrigin}
             nativeGoalSummary={
               nativeGoal ? `Goal: ${nativeGoal.objective} · ${nativeGoal.status}` : undefined
             }

@@ -1132,6 +1132,7 @@ function buildThreadFromReadModel(
     existing.proposedPlans === proposedPlans &&
     existing.error === error &&
     existing.createdAt === thread.createdAt &&
+    areUnknownEqual(existing.scheduledOrigin ?? null, thread.scheduledOrigin ?? null) &&
     existing.archivedAt === thread.archivedAt &&
     (existing.pinnedAt ?? null) === pinnedAt &&
     (existing.pinOrderKey ?? null) === pinOrderKey &&
@@ -1173,6 +1174,7 @@ function buildThreadFromReadModel(
     codexThreadId: null,
     projectId: thread.projectId,
     title: thread.title,
+    scheduledOrigin: thread.scheduledOrigin ?? null,
     model,
     ...(thread.modelSelection !== undefined ? { modelSelection: thread.modelSelection } : {}),
     runtimeMode: thread.runtimeMode,

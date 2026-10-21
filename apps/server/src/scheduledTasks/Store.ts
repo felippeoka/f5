@@ -55,6 +55,7 @@ export interface StoredRun {
   readonly retryAt: string | null;
 }
 interface RunRow {
+  turn_ids_json?: string;
   state_json: string;
   snapshot_json: string;
   command_json: string | null;
@@ -68,7 +69,10 @@ interface RunRow {
   retry_at: string | null;
 }
 const decodeRun = (row: RunRow): StoredRun => ({
-  run: Schema.decodeUnknownSync(Schema.fromJsonString(ScheduledTaskRun))(row.state_json),
+  run: {
+    ...Schema.decodeUnknownSync(Schema.fromJsonString(ScheduledTaskRun))(row.state_json),
+    ...(row.turn_ids_json ? { turnIds: JSON.parse(row.turn_ids_json) } : {}),
+  },
   snapshot: Schema.decodeUnknownSync(Schema.fromJsonString(ScheduledTask))(row.snapshot_json),
   command: row.command_json ? JSON.parse(row.command_json) : null,
   submissionId: row.submission_id,
@@ -121,7 +125,7 @@ export const makeScheduledTaskStore = Effect.gen(function* () {
       Effect.mapError(storageError),
     );
   const run = (id: string) =>
-    sql<RunRow>`SELECT * FROM scheduled_task_runs WHERE id=${id}`.pipe(
+    sql<RunRow>`SELECT r.*,(SELECT json_group_array(turn_id) FROM scheduled_run_submissions s WHERE s.run_id=r.id AND turn_id IS NOT NULL) AS turn_ids_json FROM scheduled_task_runs r WHERE id=${id}`.pipe(
       Effect.map((rows) => (rows[0] ? decodeRun(rows[0]) : null)),
       Effect.mapError(storageError),
     );

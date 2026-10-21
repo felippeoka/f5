@@ -24,11 +24,11 @@ The server review corrections include:
 - Global disabled intervals have bounded history summaries; exhausted one-shots are disabled on cutover. Transient provider probes are distinguished from missing providers. Ordinary delayed single fires retain the schedule trigger.
 - History uses a validated opaque keyset cursor. Notification bodies use readable messages. Production constructs the lifecycle store/projector once.
 
-Two review suggestions need qualification. Removing a thread settles a provably unsent run as `failed/thread_removed`; a known active turn or uncertain provider handoff retains ownership until stopped or reconciled. Immediate release in that case would permit overlap. Notification claims already use an atomic exclusive SQL lease, so two owners cannot simultaneously claim the same unexpired notification. Desktop/browser capability negotiation and presentation are still part of the unimplemented notification phase.
+Two review suggestions need qualification. Removing a thread settles a provably unsent run as `failed/thread_removed`; a known active turn or uncertain provider handoff retains ownership until stopped or reconciled. Immediate release in that case would permit overlap. Notification claims already use an atomic exclusive SQL lease, so two owners cannot simultaneously claim the same unexpired notification. Phase 2 adds desktop/browser capability negotiation and presentation.
 
 ## Verification and remaining delivery
 
-Phase 1 implements the server core, including the review corrections above. Phase 2 (management UI, natural-language conversion, desktop/browser delivery) and Phase 3 (Bridge restoration, grants, MCP tools) remain open. The notification outbox and API are infrastructure only; they do not yet present OS notifications.
+Phase 1 implements the server core, including the review corrections above. Phase 2 adds the Scheduled management route, project-scoped execution defaults, shared provider/model/options and prompt/skill controls, explicit NL confirmation, run history and origin badges. NL output is validated by the cron wrapper. Native notifications use the existing incarnation-bound Electron handshake and a leased outbox independently of renderer or computer-control permission; browser delivery falls back to in-app notices and wakes on pushes/reconnects/lease expiry. Ordinary thread notices check associated turn IDs, preserving notifications for later independent user turns. Phase 3 (Bridge restoration, grants, MCP tools) remains open.
 
 Current verification uses Node 24:
 
@@ -41,3 +41,5 @@ Current verification uses Node 24:
 `bun run test:full` was attempted and stops before the exhaustive Git matrix at existing upstream-ledger process-identity failures (`ps` is denied with `EPERM`). A separate full server-unit run reports 4,814 passing tests and 23 failures in process inspection, editor discovery, storage/backup helpers and backup HTTP operations. The additional storage and representative backup/HTTP failures were reproduced on untouched `main`; prior baseline checks reproduced the process, editor and helper failures. No tests or ledger code were changed to bypass them.
 
 The user explicitly authorized reproduced baseline failures as an exception to the green phase-commit requirement. That exception applies only to verified baseline failures; feature regressions must still be repaired. Remaining phases will follow in separate commits before push and PR.
+
+Phase 2 verification: the production web build passes its bundle budget; browser dialog/model/ordinary-notification tests pass (15 tests), server NL and outbox tests pass, and the desktop channel tests pass (21 tests). Workspace tests retain the explicitly allowed baseline process-identity failure. Phase 2 also adds the missing public origin type alias from Phase 1 and exposes associated turn IDs through a filtered run-history lookup for precise notification suppression.

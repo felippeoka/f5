@@ -69,3 +69,4 @@ export const ScheduledOrigin = Schema.Struct({
   taskId: ScheduledTaskId,
   runId: ScheduledTaskRunId,
 });
+export type ScheduledOrigin = typeof ScheduledOrigin.Type;

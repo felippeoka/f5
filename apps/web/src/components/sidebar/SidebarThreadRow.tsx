@@ -1,3 +1,4 @@
+import { ScheduledOriginBadge } from "../scheduled/ScheduledOriginBadge";
 import type { ThreadId } from "@t3tools/contracts";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -313,7 +314,10 @@ export function PinnedThreadDragHandle({ threadId }: { threadId: ThreadId }) {
 }
 
 export function ThreadRowTrailingMeta(props: {
-  thread: Pick<ThreadListItem, "id" | "branch" | "worktreePath" | "titleRegeneration">;
+  thread: Pick<
+    ThreadListItem,
+    "id" | "branch" | "worktreePath" | "titleRegeneration" | "scheduledOrigin"
+  >;
   lastInteractionAt: string;
   terminalStatus: TerminalStatusIndicator | null;
   isHighlighted: boolean;
@@ -334,6 +338,7 @@ export function ThreadRowTrailingMeta(props: {
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <ScheduledOriginBadge origin={props.thread.scheduledOrigin} />
       {props.thread.titleRegeneration ? (
         <LoaderCircleIcon
           aria-label="Regenerating thread title"

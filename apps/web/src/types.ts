@@ -161,6 +161,7 @@ export interface Thread {
   codexThreadId: string | null;
   projectId: ProjectId;
   title: string;
+  scheduledOrigin?: import("@t3tools/contracts").ScheduledOrigin | null;
   model: string;
   modelSelection?: ModelSelection | undefined;
   runtimeMode: RuntimeMode;
@@ -219,6 +220,7 @@ export type ThreadListItem = Pick<
   | "id"
   | "projectId"
   | "title"
+  | "scheduledOrigin"
   | "titleState"
   | "titleSource"
   | "titleRevision"

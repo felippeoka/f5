@@ -500,7 +500,21 @@ export const ComputerActivity = Schema.Struct({
   delivery: Schema.optional(ComputerDelivery),
 });
 export type ComputerActivity = typeof ComputerActivity.Type;
+export const SCHEDULED_NOTIFICATIONS_CAPABILITY = "scheduled-notifications-v1";
+export const DesktopScheduledNotification = Schema.Struct({
+  id: Id,
+  title: Schema.String,
+  body: Schema.String,
+  taskId: Id,
+  threadId: Schema.NullOr(Id),
+});
+export type DesktopScheduledNotification = typeof DesktopScheduledNotification.Type;
 export const DesktopComputerHostMessage = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("scheduledNotification"),
+    notification: DesktopScheduledNotification,
+  }),
+  Schema.Struct({ type: Schema.Literal("scheduledNotificationAck"), id: Id }),
   Schema.Struct({
     type: Schema.Literals(["chromeLeaseAcquire", "chromeLeaseRelease", "chromeLeaseValidate"]),
     requestId: Id,

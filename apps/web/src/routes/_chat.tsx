@@ -1,3 +1,4 @@
+import { ScheduledNotificationController } from "../components/scheduled/ScheduledNotificationController";
 import { WorktreeRemovalDialogHost } from "../components/WorktreeRemovalDialogHost";
 import { ComputerAccessInbox } from "../components/ComputerAccessCard";
 import { useServerUpdateOutcome } from "../hooks/useServerUpdateOutcome";
@@ -130,6 +131,7 @@ function ChatRouteLayout() {
         <ThreadNavigationController />
         <ProjectCloneController />
         <ModelRecencyController />
+        <ScheduledNotificationController />
         <ThreadStatusNotificationController />
         <QuitHoldOverlay />
         <NextTurnQueueController />

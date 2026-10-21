@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, ProjectId, ThreadId, TurnId, TrimmedNonEmptyString } from "./baseSchemas";
 import { ModelSelection, RuntimeMode } from "./orchestration";
 
 export { ScheduledTaskId, ScheduledTaskRunId, ScheduledOrigin } from "./baseSchemas";
@@ -94,6 +94,7 @@ export const ScheduledTaskRun = Schema.Struct({
   finishedAt: Schema.NullOr(IsoDateTime),
   evaluatedThrough: Schema.NullOr(IsoDateTime),
   suppressedCount: Schema.Int,
+  turnIds: Schema.optional(Schema.Array(TurnId)),
 });
 export type ScheduledTaskRun = typeof ScheduledTaskRun.Type;
 export const SchedulePreviewInput = Schema.Struct({
@@ -148,6 +149,7 @@ export const ScheduledTaskGetInput = Schema.Struct({ id: ScheduledTaskId });
 export const ScheduledTaskListInput = Schema.Struct({ projectId: Schema.optional(ProjectId) });
 export const ScheduledTaskRunsInput = Schema.Struct({
   taskId: ScheduledTaskId,
+  runId: Schema.optional(ScheduledTaskRunId),
   before: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
 });
@@ -197,6 +199,7 @@ export const ScheduledAckInput = Schema.Struct({
 export const ScheduledNotificationBatch = Schema.Struct({
   notifications: Schema.Array(ScheduledNotification),
   leaseExpiresAt: IsoDateTime,
+  retryAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 export const SCHEDULED_TASK_WS_METHODS = {
   list: "scheduledTasks.list",

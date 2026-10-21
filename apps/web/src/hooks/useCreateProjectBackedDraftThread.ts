@@ -1,17 +1,11 @@
-import { providerSelectionsToModelOptions } from "../providerModelOptions";
-import { inferProviderForModel } from "@t3tools/shared/model";
+import { resolveNewThreadPreferences } from "../newThreadPreferences";
 import {
   cachedGlobalDraftSettings,
   defaultDraftRuntimeMode,
   rememberDraftSettings,
 } from "../lib/draftSettingsDefaults";
 import { ensureNativeApi } from "../nativeApi";
-import {
-  isKnownProviderKind,
-  type ProjectId,
-  type ServerSettings,
-  ThreadId,
-} from "@t3tools/contracts";
+import { type ProjectId, type ServerSettings, ThreadId } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -53,38 +47,12 @@ export function seedDraftThreadFromModelPreferences(
   serverSettings = cachedGlobalDraftSettings(),
 ): void {
   const project = useStore.getState().projects.find((entry) => entry.id === projectId);
-  if (project?.defaultModelSelection) {
-    const selection = project.defaultModelSelection;
-    const driver =
-      serverSettings.providerInstances[selection.instanceId]?.driver ?? selection.instanceId;
-    const provider = isKnownProviderKind(driver)
-      ? driver
-      : inferProviderForModel(selection.model, "codex");
-    const draft = useComposerDraftStore.getState();
-    draft.setProvider(threadId, provider);
-    draft.setProviderInstance(threadId, selection.instanceId);
-    draft.setModel(threadId, selection.model);
-    draft.setModelOptions(threadId, providerSelectionsToModelOptions(provider, selection.options));
-    return;
-  }
-  if (project?.defaultModel) {
-    const draft = useComposerDraftStore.getState();
-    draft.setProvider(threadId, inferProviderForModel(project.defaultModel, "codex"));
-    draft.setModel(threadId, project.defaultModel);
-    return;
-  }
-  const preferences = getModelPreferences();
-  const { setModel, setModelOptions, setProvider } = useComposerDraftStore.getState();
-  if (preferences.lastProvider) {
-    setProvider(threadId, preferences.lastProvider);
-    const rememberedModel = preferences.lastModelByProvider[preferences.lastProvider];
-    if (rememberedModel) {
-      setModel(threadId, rememberedModel);
-    }
-  }
-  if (preferences.lastModelOptions) {
-    setModelOptions(threadId, preferences.lastModelOptions);
-  }
+  const preference = resolveNewThreadPreferences(project, serverSettings, getModelPreferences());
+  const draft = useComposerDraftStore.getState();
+  if (preference.provider) draft.setProvider(threadId, preference.provider);
+  if (preference.instanceId) draft.setProviderInstance(threadId, preference.instanceId);
+  if (preference.model) draft.setModel(threadId, preference.model);
+  if (preference.options) draft.setModelOptions(threadId, preference.options);
 }
 
 function maybeMarkOnboardingLiteCompleted(

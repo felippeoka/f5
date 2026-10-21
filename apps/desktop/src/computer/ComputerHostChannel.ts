@@ -2,6 +2,7 @@ import { ComputerGrantAuthority } from "./ComputerGrantAuthority";
 import type { ChildProcess } from "node:child_process";
 import { Schema } from "effect";
 import {
+  SCHEDULED_NOTIFICATIONS_CAPABILITY,
   COMPUTER_BACKGROUND_CAPABILITY,
   COMPUTER_AGENT_IDENTITY_CAPABILITY,
   COMPUTER_ACTIVITY_CORRELATION_CAPABILITY,
@@ -57,6 +58,11 @@ export class ComputerHostChannel {
        * legacy single-holder protocol and none of the background paths run.
        */
       advertiseBackground?: boolean;
+      notificationAvailable?: () => boolean;
+      notification?: (
+        profileId: string,
+        notification: import("@t3tools/contracts").DesktopScheduledNotification,
+      ) => boolean;
     } = {},
   ) {
     this.execution = options.execution ?? new ComputerExecutionAuthority();
@@ -131,6 +137,9 @@ export class ComputerHostChannel {
         backend.capabilities = new Set(
           (message.capabilities ?? []).filter(
             (capability) =>
+              (capability === SCHEDULED_NOTIFICATIONS_CAPABILITY &&
+                !!this.options.notification &&
+                this.options.notificationAvailable?.() !== false) ||
               capability === COMPUTER_AGENT_IDENTITY_CAPABILITY ||
               capability === COMPUTER_ACTIVITY_CORRELATION_CAPABILITY ||
               (capability === COMPUTER_BACKGROUND_CAPABILITY &&
@@ -150,6 +159,13 @@ export class ComputerHostChannel {
       const fail = (requestId: string, error: unknown) =>
         this.send(profileId, { type: "response", requestId, error: computerError(error) });
       switch (message.type) {
+        case "scheduledNotification":
+          if (
+            backend.capabilities.has(SCHEDULED_NOTIFICATIONS_CAPABILITY) &&
+            this.options.notification?.(profileId, message.notification)
+          )
+            this.send(profileId, { type: "scheduledNotificationAck", id: message.notification.id });
+          return;
         case "request":
           if (message.request.authorization.profileId !== profileId) {
             child.disconnect();

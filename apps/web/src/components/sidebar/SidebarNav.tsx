@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  CalendarClockIcon,
   GitForkIcon,
   GaugeIcon,
   GitPullRequestIcon,
@@ -79,6 +80,7 @@ export function SidebarNav(props: {
   pullRequestsShortcutLabel: string | null;
 }) {
   const navigate = useNavigate();
+  const useLocationPath = useLocation({ select: (loc) => loc.pathname });
   const isOnHome = useLocation({ select: (loc) => loc.pathname === "/" });
   const isOnPullRequests = useLocation({ select: (loc) => loc.pathname === "/pull-requests" });
   const isOnWorktrees = useLocation({ select: (loc) => loc.pathname === "/worktrees" });
@@ -133,6 +135,14 @@ export function SidebarNav(props: {
             label="Worktrees"
             isActive={isOnWorktrees}
             onSelect={() => void navigate({ to: "/worktrees" })}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <NavRow
+            icon={CalendarClockIcon}
+            label="Scheduled"
+            isActive={useLocationPath === "/scheduled"}
+            onSelect={() => void navigate({ to: "/scheduled" })}
           />
         </SidebarMenuItem>
         <SidebarMenuItem>

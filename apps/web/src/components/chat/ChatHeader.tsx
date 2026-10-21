@@ -1,3 +1,4 @@
+import { ScheduledOriginBadge } from "../scheduled/ScheduledOriginBadge";
 import { ThreadPrLinks } from "../prHub/ThreadPrLinks";
 import {
   type EditorId,
@@ -55,6 +56,7 @@ interface ChatHeaderProps {
   isServerThread: boolean;
   activeThreadTitle: string;
   nativeGoalSummary?: string | undefined;
+  scheduledOrigin?: import("@t3tools/contracts").ScheduledOrigin | null | undefined;
   activeProjectId?: ProjectId | undefined;
   activeProjectIcon?: Project["icon"] | undefined;
   activeProjectName: string | undefined;
@@ -118,6 +120,7 @@ export const ChatHeader = memo(function ChatHeader({
   isServerThread,
   activeThreadTitle,
   nativeGoalSummary,
+  scheduledOrigin,
   activeProjectId,
   activeProjectIcon,
   activeProjectName,
@@ -330,6 +333,7 @@ export const ChatHeader = memo(function ChatHeader({
             {activeThreadTitle}
           </h2>
         )}
+        <ScheduledOriginBadge origin={scheduledOrigin} />
         {nativeGoalSummary && (
           <span
             className="max-w-64 truncate text-xs text-muted-foreground"
