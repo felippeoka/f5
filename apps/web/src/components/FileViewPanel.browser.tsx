@@ -288,3 +288,25 @@ it("watches the open file and turns an external edit into a conflict for a dirty
     client.clear();
   }
 });
+
+it("shows the attempted path and workspace folder when a file cannot be read", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  route.fileViewPath = "src/missing.ts";
+  api.setWatchedPaths.mockResolvedValue({ watched: 1, degraded: false, rejected: [] });
+  api.onWatchedPathsChanged.mockReturnValue(() => undefined);
+  api.readFile.mockRejectedValue(new Error("File not found."));
+  const screen = await render(
+    <QueryClientProvider client={client}>
+      <FileViewPanel mode="sheet" />
+    </QueryClientProvider>,
+  );
+  try {
+    await vi.waitFor(() => {
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("File not found.");
+      expect(text).toContain("Attempted path src/missing.ts in workspace folder /repo");
+    });
+  } finally {
+    await screen.unmount();
+  }
+});
