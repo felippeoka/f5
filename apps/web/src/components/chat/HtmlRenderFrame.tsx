@@ -5,9 +5,10 @@ import { htmlRenderDocument } from "@t3tools/shared/htmlRender";
 import { attachmentPreviewUrlForId } from "../../orchestrationState";
 import { useHtmlRenderTheme } from "../../hooks/useHtmlRenderTheme";
 import { readBoundedResponseText } from "../../lib/readBoundedResponseText";
-import { readNativeApi } from "../../nativeApi";
+import { useOpenLink } from "../../hooks/useOpenLink";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
+import { Skeleton } from "../ui/skeleton";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 
 export function HtmlRenderFrame({
@@ -19,6 +20,7 @@ export function HtmlRenderFrame({
 }) {
   const theme = useHtmlRenderTheme();
   const bindings = useServerKeybindings();
+  const openLink = useOpenLink();
   const initialTheme = useRef(theme);
   const port = useRef<MessagePort | null>(null);
   const receiveRef = useRef<(event: MessageEvent) => void>(() => undefined);
@@ -144,11 +146,8 @@ export function HtmlRenderFrame({
       }
       if (data.type === "link" && typeof data.value === "string" && data.value.length <= 8192) {
         try {
-          const url = new URL(data.value);
-          if (/^https?:$/.test(url.protocol))
-            void readNativeApi()
-              ?.shell.openExternal(url.href)
-              .catch(() => undefined);
+          // Same routing as chat links: pull requests and the preview pane included.
+          void openLink(new URL(data.value).href).catch(() => undefined);
         } catch {
           /* Invalid page link. */
         }
@@ -185,7 +184,7 @@ export function HtmlRenderFrame({
     optionsRef.current = { shortcuts, theme };
     port.current?.postMessage({ type: "shortcuts", value: shortcuts });
     port.current?.postMessage({ type: "theme", value: theme });
-  }, [bridgeId, onImageExpand, reference.attachmentId, bindings, fullscreen, theme]);
+  }, [bridgeId, onImageExpand, openLink, reference.attachmentId, bindings, fullscreen, theme]);
   useLayoutEffect(() => {
     const connect = (event: MessageEvent) => {
       if (
@@ -249,7 +248,13 @@ export function HtmlRenderFrame({
           </Button>
         </p>
       ) : !document ? (
-        <p className="p-3 text-sm text-muted-foreground">Loading page…</p>
+        // Holds the page's own height, so the thread does not jump when it loads.
+        <Skeleton
+          role="status"
+          aria-label="Loading page…"
+          className="m-2 rounded-lg"
+          style={{ height: `${Math.max(0, height - 16)}px` }}
+        />
       ) : null}
       {!fullscreen ? iframe : null}
       <Dialog open={fullscreen} onOpenChange={setFullscreen}>

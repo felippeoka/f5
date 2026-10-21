@@ -3,6 +3,9 @@ import "../../index.css";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
+import { ThreadId } from "@t3tools/contracts";
+import { OpenLinkThread } from "../../hooks/useOpenLink";
+import { useRightPanelStore } from "../../rightPanelStore";
 import { TooltipProvider } from "../ui/tooltip";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 
@@ -28,6 +31,12 @@ beforeEach(() => {
   source = "<p>Hello</p>";
   api.bindings = [];
   api.openExternal.mockClear();
+  localStorage.clear();
+  window.desktopBridge = {
+    openExternal: api.openExternal,
+    setTheme: async () => undefined,
+  } as never;
+  useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {} });
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) =>
     String(input).includes("/attachments/html-page")
       ? Promise.resolve(new Response(source, { headers: { "content-type": "text/html" } }))
@@ -37,16 +46,19 @@ beforeEach(() => {
 afterEach(async () => {
   await active?.unmount();
   active = undefined;
+  delete window.desktopBridge;
   vi.restoreAllMocks();
 });
-async function mount(onImageExpand = vi.fn()) {
+async function mount(onImageExpand = vi.fn(), owner?: ThreadId) {
   active = await render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <TooltipProvider>
-        <HtmlRenderFrame reference={reference} onImageExpand={onImageExpand} />
-      </TooltipProvider>
+      <OpenLinkThread.Provider value={owner}>
+        <TooltipProvider>
+          <HtmlRenderFrame reference={reference} onImageExpand={onImageExpand} />
+        </TooltipProvider>
+      </OpenLinkThread.Provider>
     </QueryClientProvider>,
   );
   await expect
@@ -82,6 +94,17 @@ it("opens links externally without navigating the parent", async () => {
   await mount();
   await page.getByTitle("HTML widget", { exact: true }).click();
   await expect.poll(() => api.openExternal.mock.calls).toEqual([["https://example.test/review"]]);
+});
+it("opens pull request links beside the thread, like chat links", async () => {
+  const thread = ThreadId.makeUnsafe("html-render-owner");
+  source =
+    '<a style="display:block;height:120px;width:100%" href="https://github.com/org/repo/pull/7">Hello</a>';
+  await mount(vi.fn(), thread);
+  await page.getByTitle("HTML widget", { exact: true }).click();
+  await expect
+    .poll(() => useRightPanelStore.getState().byThreadId[thread]?.activeSurfaceId)
+    .toBe("pr:github:github.com/org/repo#7");
+  expect(api.openExternal).not.toHaveBeenCalled();
 });
 it("opens rendered images through the existing image viewer", async () => {
   const image = vi.fn();
@@ -146,4 +169,17 @@ it("forwards configured trusted shortcuts using captured native key getters", as
   } finally {
     window.removeEventListener("keydown", receive);
   }
+});
+it("holds the page's height with a skeleton while the page loads", async () => {
+  vi.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>(() => undefined));
+  active = await render(
+    <QueryClientProvider client={new QueryClient()}>
+      <TooltipProvider>
+        <HtmlRenderFrame reference={{ ...reference, height: 400 }} onImageExpand={vi.fn()} />
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+  const skeleton = page.getByRole("status", { name: "Loading page…" });
+  await expect.element(skeleton).toBeVisible();
+  expect(skeleton.element().getBoundingClientRect().height).toBe(384);
 });
