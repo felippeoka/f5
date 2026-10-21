@@ -307,26 +307,43 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     );
   };
 
+  const warnedDecodeFailures = new Set<string>();
+  // A notification has no reply to fail, so one the schema rejects is logged and dropped.
+  // Ending the connection over it would kill a working session because one update, possibly
+  // from a newer spec, did not parse. An agent repeats a bad shape on every update, so each
+  // method is warned about once per connection. The payload is never logged.
+  const dropUndecodableNotification = (method: string) => () => {
+    const diagnostics = { method, detail: `Invalid ${method} notification payload` };
+    const firstOfItsKind = !warnedDecodeFailures.has(method);
+    warnedDecodeFailures.add(method);
+    return logProtocol({
+      direction: "incoming",
+      stage: "decode_failed",
+      payload: diagnostics,
+    }).pipe(
+      Effect.andThen(
+        firstOfItsKind
+          ? Effect.logWarning("Dropped an ACP notification that failed to decode").pipe(
+              Effect.annotateLogs(diagnostics),
+            )
+          : Effect.void,
+      ),
+    );
+  };
+
   const handleRequestEncoded = (message: RpcMessage.RequestEncoded) => {
     if (message.id === "") {
       if (message.tag === CLIENT_METHODS.session_update) {
         return decodeSessionUpdate(message.payload).pipe(
-          Effect.map(
-            (params) =>
-              ({
+          Effect.matchEffect({
+            onFailure: dropUndecodableNotification(CLIENT_METHODS.session_update),
+            onSuccess: (params) =>
+              dispatchNotification({
                 _tag: "SessionUpdate",
                 method: CLIENT_METHODS.session_update,
                 params,
-              }) satisfies AcpIncomingNotification,
-          ),
-          Effect.mapError(
-            (cause) =>
-              new AcpError.AcpProtocolParseError({
-                detail: `Invalid ${CLIENT_METHODS.session_update} notification payload`,
-                cause,
               }),
-          ),
-          Effect.flatMap(dispatchNotification),
+          }),
         );
       }
       if (
@@ -335,22 +352,11 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       ) {
         const method = message.tag;
         return decodeElicitationComplete(message.payload).pipe(
-          Effect.map(
-            (params) =>
-              ({
-                _tag: "ElicitationComplete",
-                method,
-                params,
-              }) satisfies AcpIncomingNotification,
-          ),
-          Effect.mapError(
-            (cause) =>
-              new AcpError.AcpProtocolParseError({
-                detail: `Invalid ${method} notification payload`,
-                cause,
-              }),
-          ),
-          Effect.flatMap(dispatchNotification),
+          Effect.matchEffect({
+            onFailure: dropUndecodableNotification(method),
+            onSuccess: (params) =>
+              dispatchNotification({ _tag: "ElicitationComplete", method, params }),
+          }),
         );
       }
       return dispatchNotification({
