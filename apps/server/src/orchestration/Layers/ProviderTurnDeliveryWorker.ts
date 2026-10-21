@@ -1,7 +1,12 @@
+import { fenceScheduledRun } from "../../scheduledTasks/cancellation.ts";
+import { scheduledSendGate } from "../../scheduledTasks/sendGate.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { DeliveryAttemptContext } from "../../provider/deliveryAttemptContext";
 import { CommandId, TurnId, type OrchestrationUsageLimit, type ThreadId } from "@t3tools/contracts";
 import {
   Cause,
+  Clock,
   Deferred,
   Duration,
   Effect,
@@ -41,6 +46,8 @@ import {
 
 const make = Effect.gen(function* () {
   const repository = yield* ProviderTurnDeliveryRepository;
+  const scheduledSql = yield* Effect.serviceOption(SqlClient.SqlClient);
+  const scheduledSettings = yield* Effect.serviceOption(ServerSettingsService);
   const provider = yield* ProviderService;
   const reactor = yield* ProviderCommandReactor;
   const turns = yield* ProjectionTurnRepository;
@@ -360,6 +367,28 @@ const make = Effect.gen(function* () {
         (candidate.notBefore !== null && Date.parse(candidate.notBefore) > Date.now())
       )
         return;
+      if (Option.isSome(scheduledSql) && Option.isSome(scheduledSettings)) {
+        const gate = yield* scheduledSendGate(
+          scheduledSql.value,
+          yield* scheduledSettings.value.getSettings,
+          candidate.commandId,
+        );
+        if (gate === "cancel") {
+          const sql = scheduledSql.value;
+          const links = yield* sql<{
+            run_id: string;
+          }>`SELECT run_id FROM scheduled_run_submissions WHERE submission_id=${candidate.commandId}`;
+          if (links[0])
+            yield* sql.withTransaction(
+              fenceScheduledRun(
+                links[0].run_id,
+                new Date(yield* Clock.currentTimeMillis).toISOString(),
+              ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+            );
+          return;
+        }
+        if (gate === "wait") return;
+      }
       yield* Metric.update(
         Metric.withAttributes(deliveryOutboxRowsDecoded, metricAttributes({ source: "claim" })),
         1,
@@ -707,6 +736,17 @@ const make = Effect.gen(function* () {
     );
 
   return {
+    wakeScheduled: (threadId) =>
+      repository.listActionable.pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(
+            rows.filter((row) => row.threadId === threadId),
+            (row) => enqueueById(row.deliveryId),
+            { discard: true },
+          ),
+        ),
+        Effect.ignore,
+      ),
     start,
     // Starts can remain active while new steers arrive. Observe the steer lane
     // after the start lane drains so shutdown also waits for those deliveries.

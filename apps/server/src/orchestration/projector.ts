@@ -698,6 +698,7 @@ export function projectEvent(
             tasksTracking: null,
             compaction: null,
             sessionNotes: null,
+            ...(payload.scheduledOrigin ? { scheduledOrigin: payload.scheduledOrigin } : {}),
             threadReferences: payload.threadReferences,
             activities: [],
             checkpoints: [],

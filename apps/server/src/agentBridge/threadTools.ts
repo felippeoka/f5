@@ -1,3 +1,4 @@
+import { buildNewThreadSubmission } from "../turnSubmission.ts";
 import { isListedModel, pickPreferredModel } from "@t3tools/shared/model";
 /**
  * Agent Bridge thread tools: read exposed projects, threads, and diffs, and
@@ -12,12 +13,10 @@ import {
   BOOTSTRAP_THREAD_NOT_CREATED_ERROR_CODE,
   CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
-  DEFAULT_NEW_THREAD_TITLE,
   EventId,
   isKnownProviderKind,
   isProviderAvailable,
   MessageId,
-  ProjectId,
   ThreadId,
   type TurnId,
   type AgentBridgeScope,
@@ -32,9 +31,7 @@ import {
   type TurnSubmissionResult,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
-import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { runtimeModeCapabilities } from "@t3tools/shared/runtimeMode";
-import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/worktree";
 import {
   Clock,
   Data,
@@ -1103,47 +1100,21 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
             const submissionId = `${AGENT_BRIDGE_COMMAND_PREFIX}${mintId()}`;
             const modelSelection = createModelSelection(provider.instanceId, modelSlug);
             const interactionMode = input.interactionMode ?? "default";
-            const command: ClientThreadTurnStartCommand = {
-              type: "thread.turn.start",
-              commandId: CommandId.makeUnsafe(submissionId),
+            const command = buildNewThreadSubmission({
+              project,
               threadId: ThreadId.makeUnsafe(threadId),
-              message: {
-                messageId: MessageId.makeUnsafe(mintId()),
-                role: "user",
-                text: input.prompt,
-                attachments: [],
-              },
-              ...(isKnownProviderKind(provider.driver) ? { provider: provider.driver } : {}),
-              model: modelSlug,
+              commandId: CommandId.makeUnsafe(submissionId),
+              messageId: MessageId.makeUnsafe(mintId()),
+              prompt: input.prompt,
               modelSelection,
-              titleSourceText: input.prompt,
               runtimeMode: "approval-required",
               interactionMode,
-              bootstrap: {
-                createThread: {
-                  projectId: ProjectId.makeUnsafe(project.id),
-                  title: input.title ?? DEFAULT_NEW_THREAD_TITLE,
-                  model: modelSlug,
-                  modelSelection,
-                  runtimeMode: "approval-required",
-                  interactionMode,
-                  branch,
-                  worktreePath: null,
-                  createdAt,
-                },
-                ...(useWorktree && branch !== null
-                  ? {
-                      prepareWorktree: {
-                        projectCwd: project.workspaceRoot,
-                        baseBranch: branch,
-                        branch: buildTemporaryWorktreeBranchName(),
-                      },
-                      ...(setupProjectScript(project.scripts) ? { runSetupScript: true } : {}),
-                    }
-                  : {}),
-              },
+              branch,
+              useWorktree,
               createdAt,
-            };
+              ...(input.title ? { title: input.title } : {}),
+              ...(isKnownProviderKind(provider.driver) ? { provider: provider.driver } : {}),
+            });
             return {
               command,
               submissionId,

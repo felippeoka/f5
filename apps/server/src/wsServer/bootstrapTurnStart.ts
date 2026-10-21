@@ -456,6 +456,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
             type: "thread.create",
             commandId: serverCommandId("bootstrap-thread-create"),
             threadId: input.command.threadId,
+            scheduledOrigin: bootstrap.createThread.scheduledOrigin,
             projectId: bootstrap.createThread.projectId,
             title: bootstrap.createThread.title,
             model: bootstrap.createThread.model,

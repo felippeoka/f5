@@ -812,6 +812,22 @@ export function createWsNativeApi(): NativeApi {
         };
       },
     },
+    scheduledTasks: {
+      list: requestMethod(WS_METHODS.scheduledTasksList),
+      get: requestMethod(WS_METHODS.scheduledTasksGet),
+      create: requestMethod(WS_METHODS.scheduledTasksCreate),
+      update: requestMethod(WS_METHODS.scheduledTasksUpdate),
+      delete: requestMethod(WS_METHODS.scheduledTasksDelete),
+      setEnabled: requestMethod(WS_METHODS.scheduledTasksSetEnabled),
+      runNow: requestMethod(WS_METHODS.scheduledTasksRunNow),
+      listRuns: requestMethod(WS_METHODS.scheduledTasksListRuns),
+      previewSchedule: requestMethod(WS_METHODS.scheduledTasksPreviewSchedule),
+      resolveRun: requestMethod(WS_METHODS.scheduledTasksResolveRun),
+      claimNotifications: requestMethod(WS_METHODS.scheduledTasksClaimNotifications),
+      acknowledgeNotifications: requestMethod(WS_METHODS.scheduledTasksAcknowledgeNotifications),
+      onChanged: (callback) =>
+        transport.subscribe(WS_CHANNELS.scheduledTasksChanged, (message) => callback(message.data)),
+    },
     nextTurnQueue: {
       list: requestMethod(WS_METHODS.nextTurnQueueList),
       submit: requestMethod(WS_METHODS.nextTurnQueueSubmit),

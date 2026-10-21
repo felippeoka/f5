@@ -1,3 +1,8 @@
+import { makeScheduledTaskStore } from "../../scheduledTasks/Store.ts";
+import {
+  makeScheduledRunProjector,
+  SCHEDULED_RUN_EVENT_TYPES,
+} from "../../scheduledTasks/projector.ts";
 import {
   ELICITATION_SUBMITTED_ACTIVITY_KIND,
   projectPendingUserInputs,
@@ -96,6 +101,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   codeReviewWorkflows: "projection.code-review-workflows",
   investigationWorkflows: "projection.investigation-workflows",
   usageFacts: "projection.usage-facts",
+  scheduledTaskRuns: "scheduledTaskRuns",
 } as const;
 
 type ProjectorName =
@@ -711,6 +717,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             estimatedContextTokens: null,
             modelContextWindowTokens: estimateModelContextWindowTokens(event.payload.model),
             sessionNotes: null,
+            scheduledOrigin: event.payload.scheduledOrigin ?? null,
             threadReferences: event.payload.threadReferences ?? [],
             archivedAt: null,
             pinnedAt: null,
@@ -2397,6 +2404,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   // requests (millions of events on long-lived profiles). Give it `eventTypes`
   // when it only reacts to a few event types, or ship a migration that seeds
   // its `projection_state` row.
+  const projectScheduledRunEvent = makeScheduledRunProjector(yield* makeScheduledTaskStore);
   const projectors: ReadonlyArray<ProjectorDefinition> = [
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -2476,6 +2484,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadPullRequests,
       apply: applyThreadPullRequestsProjection,
+    },
+    {
+      name: "scheduledTaskRuns",
+      eventTypes: SCHEDULED_RUN_EVENT_TYPES,
+      apply: (event) =>
+        projectScheduledRunEvent(event).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
     },
   ];
 

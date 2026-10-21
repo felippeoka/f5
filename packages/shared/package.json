@@ -349,7 +349,11 @@
       "import": "./src/storageCleanup.ts"
     },
     "./mcpTools": "./src/mcpTools.ts",
-    "./mcpSecrets": "./src/mcpSecrets.ts"
+    "./mcpSecrets": "./src/mcpSecrets.ts",
+    "./cronSchedule": {
+      "types": "./src/cronSchedule.ts",
+      "import": "./src/cronSchedule.ts"
+    }
   },
   "scripts": {
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
@@ -357,6 +361,8 @@
   },
   "dependencies": {
     "@t3tools/contracts": "workspace:*",
+    "croner": "10.0.1",
+    "cronstrue": "3.37.0",
     "effect": "catalog:",
     "smol-toml": "1.6.0"
   },

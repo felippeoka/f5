@@ -1,3 +1,4 @@
+import { assertScheduledDeliveryAllowed } from "../../scheduledTasks/deliveryGate.ts";
 import { ServerConfig } from "../../config.ts";
 import { withRepositoryLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
@@ -1354,6 +1355,11 @@ const make = Effect.gen(function* () {
     });
 
     yield* requireDeliverableThread(input.threadId);
+    if (Option.isSome(sqlOption))
+      yield* assertScheduledDeliveryAllowed(input.deliveryId).pipe(
+        Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+        Effect.provideService(ServerSettingsService, serverSettings),
+      );
     return yield* providerService.sendTurn({
       threadId: input.threadId,
       ...(input.submissionSource ? { submissionSource: input.submissionSource } : {}),

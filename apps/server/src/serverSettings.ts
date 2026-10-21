@@ -673,6 +673,15 @@ const makeServerSettings = Effect.gen(function* () {
           );
           const next = yield* Schema.decodeEffect(ServerSettings)({
             ...prepared.settings,
+            scheduledTasks: {
+              ...prepared.settings.scheduledTasks,
+              ...(prepared.settings.scheduledTasks.enabled !== current.scheduledTasks.enabled
+                ? {
+                    epoch: current.scheduledTasks.epoch + 1,
+                    cutoverAt: new Date().toISOString(),
+                  }
+                : {}),
+            },
             clientSettingMigrations: { ...prepared.settings.clientSettingMigrations, ...markers },
           }).pipe(
             Effect.mapError(

@@ -58,3 +58,5 @@ export * from "./runtimeInfo";
 export * from "./workflowSummary";
 
 export * from "./worktrees";
+
+export * from "./scheduledTasks";

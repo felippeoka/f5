@@ -659,6 +659,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           branch: command.branch,
           worktreePath: command.worktreePath,
           threadReferences: command.threadReferences ?? [],
+          ...(command.scheduledOrigin ? { scheduledOrigin: command.scheduledOrigin } : {}),
           ...(command.pullRequest ? { pullRequest: command.pullRequest } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,

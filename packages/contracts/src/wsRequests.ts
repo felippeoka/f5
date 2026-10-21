@@ -1,3 +1,4 @@
+import * as Scheduled from "./scheduledTasks";
 import { Schema, Struct, Tuple } from "effect";
 import { AttachmentCloneToUploadInput, AttachmentUploadsInput } from "./attachmentUpload";
 import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
@@ -563,6 +564,30 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.storageAutomationDryRun, StorageAutomationDryRunInput),
   tagRequestBody(WS_METHODS.storageAutomationAudit, StorageAutomationAuditInput),
   tagRequestBody(WS_METHODS.storageGetDiskSpace, StorageGetDiskSpaceRequest),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.list, Scheduled.ScheduledTaskListInput),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.get, Scheduled.ScheduledTaskGetInput),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.create, Scheduled.ScheduledTaskCreateInput),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.update, Scheduled.ScheduledTaskUpdateInput),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.delete, Scheduled.ScheduledTaskVersionInput),
+  tagRequestBody(
+    Scheduled.SCHEDULED_TASK_WS_METHODS.setEnabled,
+    Scheduled.ScheduledTaskEnabledInput,
+  ),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.runNow, Scheduled.ScheduledTaskRunNowInput),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.listRuns, Scheduled.ScheduledTaskRunsInput),
+  tagRequestBody(
+    Scheduled.SCHEDULED_TASK_WS_METHODS.previewSchedule,
+    Scheduled.SchedulePreviewInput,
+  ),
+  tagRequestBody(Scheduled.SCHEDULED_TASK_WS_METHODS.resolveRun, Scheduled.ScheduledResolveInput),
+  tagRequestBody(
+    Scheduled.SCHEDULED_TASK_WS_METHODS.claimNotifications,
+    Scheduled.ScheduledClaimInput,
+  ),
+  tagRequestBody(
+    Scheduled.SCHEDULED_TASK_WS_METHODS.acknowledgeNotifications,
+    Scheduled.ScheduledAckInput,
+  ),
   tagRequestBody(WS_METHODS.nextTurnQueueList, NextTurnQueueListInput),
   tagRequestBody(WS_METHODS.nextTurnQueueSubmit, NextTurnQueueSubmitInput),
   tagRequestBody(WS_METHODS.nextTurnQueueSummary, NextTurnQueueSummaryInput),

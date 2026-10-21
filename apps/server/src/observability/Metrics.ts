@@ -441,3 +441,7 @@ export const terminalSnapshotsTotal = Metric.counter("f5_terminal_snapshots_tota
 export const terminalStateChangesTotal = Metric.counter("f5_terminal_state_changes_total", {
   description: "Published terminal state revisions.",
 });
+
+export const scheduledRunTransitionsTotal = Metric.counter("f5_scheduled_run_transitions_total", {
+  description: "Scheduled execution transitions, grouped by bounded outcome and reason.",
+});

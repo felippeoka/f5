@@ -17,6 +17,7 @@ import {
   TaskItem,
   ThreadCompaction,
   ThreadTaskTracking,
+  ScheduledOrigin,
   ThreadId,
   ThreadReference,
   ThreadSessionNotes,
@@ -29,6 +30,7 @@ import type { Effect } from "effect";
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
 export const ProjectionThread = Schema.Struct({
+  scheduledOrigin: Schema.optional(Schema.NullOr(ScheduledOrigin)),
   threadId: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
