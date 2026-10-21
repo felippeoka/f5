@@ -2157,3 +2157,139 @@ Two are not applicable:
 [t3code#15546](https://github.com/pingdotgg/t3code/pull/15546) handle
 upstream releasing or unloading provider sessions when a thread settles. f5
 settling leaves the session alone.
+
+## 15t triage log: provider adapters and queue correctness
+
+All 158 open 15t records are classified: 28 ported, 34 equivalent, 64 not
+applicable, 31 deferred and 1 declined. Each port has a regression test.
+
+Claude:
+
+- [t3code#13999](https://github.com/pingdotgg/t3code/pull/13999): Stop lets
+  Claude abort the turn, waiting up to 3 seconds, before closing the session.
+- [t3code#19322](https://github.com/pingdotgg/t3code/pull/19322): the CLI runs
+  in its own process group, and the group is killed on exit, so plugin MCP
+  servers no longer outlive the session. This does not apply on Windows.
+- [t3code#15872](https://github.com/pingdotgg/t3code/pull/15872): a 403 shows
+  the CLI's own text instead of asking to log in again.
+- [t3code#18706](https://github.com/pingdotgg/t3code/pull/18706): probes and
+  text generation drop `--strict-mcp-config` when an enterprise
+  `managed-mcp.json` exists.
+- [t3code#19394](https://github.com/pingdotgg/t3code/pull/19394): failed text
+  generation shows the CLI's error result.
+- [t3code#19320](https://github.com/pingdotgg/t3code/pull/19320): instance
+  probes run in the state directory instead of `$HOME`.
+- [t3code#16358](https://github.com/pingdotgg/t3code/pull/16358): the limits
+  read skips the transcript scan.
+- [t3code#17778](https://github.com/pingdotgg/t3code/pull/17778): a gateway's
+  wrapped 429 cooldown becomes the usage limit's reset, so the queue resumes
+  the turn.
+
+Codex:
+
+- [t3code#19635](https://github.com/pingdotgg/t3code/pull/19635): "Always
+  allow this session" covers later commands.
+- [t3code#19368](https://github.com/pingdotgg/t3code/pull/19368): new threads
+  give optional MCP servers a 10 second startup grace.
+- [t3code#17058](https://github.com/pingdotgg/t3code/pull/17058): text
+  generation turns the user's MCP servers off.
+- [t3code#17663](https://github.com/pingdotgg/t3code/pull/17663): shadow homes
+  replace Codex-created runtime locks with the shared ones.
+- [t3code#15389](https://github.com/pingdotgg/t3code/pull/15389): an archived
+  session is unarchived and resumed instead of failing the start.
+
+ACP, Grok, Muse and OpenCode:
+
+- [t3code#20015](https://github.com/pingdotgg/t3code/pull/20015): one
+  undecodable session update is dropped instead of ending the session.
+- [t3code#19313](https://github.com/pingdotgg/t3code/pull/19313): a custom ACP
+  instance's configured models reach the agent.
+- [t3code#13386](https://github.com/pingdotgg/t3code/pull/13386): progress from
+  a tool that is already shown no longer splits the answer.
+- [t3code#18075](https://github.com/pingdotgg/t3code/pull/18075): Grok health
+  checks keep its updater off.
+- [t3code#14486](https://github.com/pingdotgg/t3code/pull/14486): Grok CLIs
+  older than 1.0.13 report as too old.
+- [t3code#19558](https://github.com/pingdotgg/t3code/pull/19558): Muse gets
+  its permission profile on start and resume, on durable hosts only, since
+  the ephemeral host refuses one.
+- [t3code#12469](https://github.com/pingdotgg/t3code/pull/12469): the OpenCode
+  error formatter survives a message-less error.
+- [t3code#14198](https://github.com/pingdotgg/t3code/pull/14198): OpenCode 2.x
+  reports as unsupported, since f5 only speaks the 1.x protocol.
+- [t3code#13368](https://github.com/pingdotgg/t3code/pull/13368): f5 stops
+  naming OpenCode sessions `T3 Code <thread id>`, so OpenCode titles them.
+- [t3code#17424](https://github.com/pingdotgg/t3code/pull/17424), web half:
+  OpenCode Zen and Go rows show the sub-provider on its own.
+
+Elsewhere:
+
+- [t3code#13295](https://github.com/pingdotgg/t3code/pull/13295): after a
+  failed dispatch, the engine republishes only the events that dispatch
+  appended. Events another server wrote to a shared state directory no longer
+  start a second turn.
+- [t3code#19364](https://github.com/pingdotgg/t3code/pull/19364): pasted images
+  are scaled to a 2000px long edge.
+- [t3code#19340](https://github.com/pingdotgg/t3code/pull/19340): mise's
+  `__MISE_DIFF` travels with `PATH` from the login shell.
+- [t3code#7079](https://github.com/pingdotgg/t3code/pull/7079): the
+  Antigravity editor opens the IDE (`antigravity-ide`), not the `agy` CLI.
+- [t3code#13373](https://github.com/pingdotgg/t3code/pull/13373), web half: the
+  Antigravity icon drops its baked-in tile.
+
+Most of the not-applicable records belong to upstream's orchestration-v2,
+OpenCode 2 adapter, delegated tasks, model manifest, Cursor SDK, relay or
+mobile app, none of which f5 has. Equivalents include f5's per-turn
+permission mode reset, its fresh random prompt uuids, its live-session
+command lists, its crashed-agent handling for Grok and its server-side
+queue for messages sent while a thread is closed.
+
+Deferred, in order of risk:
+
+- [t3code#13547](https://github.com/pingdotgg/t3code/pull/13547) is the most
+  important open item. When a newer Codex model's catalog ships its own
+  collaboration-mode text, Codex drops the client's `developer_instructions`.
+  f5 sends all of its instructions there: the mode prompt, runtime info,
+  project memories and resumed context. The fix moves them to `turn/start`
+  `additionalContext`. That needs a Codex version gate, entries kept under
+  Codex's per-entry token cap and a restore after compaction, and each of
+  these has to be checked against a live Codex.
+- [t3code#16908](https://github.com/pingdotgg/t3code/pull/16908) drops the
+  200k/1M choice from Claude 5-series models. f5 still offers it on Fable 5
+  and Sonnet 5, and routes 1M through the `[1m]` suffix and a Fable 5.1
+  switch, so the change waits on confirming what the CLI does without the
+  suffix.
+- [t3code#14896](https://github.com/pingdotgg/t3code/pull/14896) needs an
+  `interrupted` tool status in the runtime contract.
+- [t3code#16958](https://github.com/pingdotgg/t3code/pull/16958) and
+  [t3code#15416](https://github.com/pingdotgg/t3code/pull/15416) change how
+  provider updates run: a live progress channel, and self-updaters for
+  unproven installs.
+- The live command output hub
+  ([t3code#15094](https://github.com/pingdotgg/t3code/pull/15094)), Claude 5
+  task lists ([t3code#14964](https://github.com/pingdotgg/t3code/pull/14964)),
+  Claude 5.1 progress text
+  ([t3code#18923](https://github.com/pingdotgg/t3code/pull/18923)), Codex
+  follow-up directives
+  ([t3code#19401](https://github.com/pingdotgg/t3code/pull/19401)), Muse 1.4.6
+  presentation ([t3code#18409](https://github.com/pingdotgg/t3code/pull/18409)),
+  Muse on Windows ([t3code#17163](https://github.com/pingdotgg/t3code/pull/17163)),
+  the Sol Ultrafast originator
+  ([t3code#18200](https://github.com/pingdotgg/t3code/pull/18200)) and the Muse
+  logo ([t3code#19562](https://github.com/pingdotgg/t3code/pull/19562)) are
+  features rather than fixes.
+- Eighteen React Compiler cleanups are deferred together.
+
+[t3code#18364](https://github.com/pingdotgg/t3code/pull/18364) is declined
+because upstream reverted it.
+
+Two ledger corrections came out of this batch. First, the
+[t3code#17414](https://github.com/pingdotgg/t3code/pull/17414) reason cited
+the fixed OpenCode title that the
+[t3code#13368](https://github.com/pingdotgg/t3code/pull/13368) port then
+removed, so it now cites
+the untitled session create. Second, later edits in this batch had shifted
+the line numbers of 103 earlier evidence citations. Those were remapped
+through the git diff, and none of the cited lines had itself changed. A few
+citations from earlier workstreams already pointed at closing braces before
+this batch; they are unchanged.

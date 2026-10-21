@@ -248,7 +248,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:269"],
+      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:272"],
       "f5Shas": [
         "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f",
         "ea2cf9a1fb07a26788c237012bb7099cea23ba4c"
@@ -577,7 +577,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:237"],
+      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:240"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -623,10 +623,11 @@
     {
       "upstreamSha": "050cfad04f673fb092630614b8f7e82000b43ea5",
       "subject": "fix(grok): recover from crashed provider sessions (#10607)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(grok): recover from crashed provider sessions (#10607).",
+      "reason": "Equivalent: upstream settles the active turn and stops a Grok session when its ACP connection terminates. f5's handleUnexpectedAgentExit fails the active turn with the exit reason and stops the session as a recoverable error exit when the agent dies. Upstream change: fix(grok): recover from crashed provider sessions (#10607)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["60efcb2f360989c98dcf4da8eee95e3107ba511a"],
+      "evidence": ["apps/server/src/provider/Layers/GrokAdapter.ts:539"]
     },
     {
       "upstreamSha": "051a4057a67ceebc7a36b13678f404b7ee871a46",
@@ -706,10 +707,14 @@
     {
       "upstreamSha": "05e4f888a0d8591c790d036140080092cf024d30",
       "subject": "fix(server): snoozed threads allow queued automatic wakes (#19099)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): snoozed threads allow queued automatic wakes (#19099).",
+      "reason": "Equivalent: f5's snooze changes only visibility. It never refuses because of queued work, and the next-turn queue does not consult snooze, so queued automatic wakes still deliver on a snoozed thread. Upstream change: fix(server): snoozed threads allow queued automatic wakes (#19099)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["710f95287355d92a4eec2609b12c2cf58f5b749f"],
+      "evidence": [
+        "apps/server/src/orchestration/decider.ts:993",
+        "apps/server/src/orchestration/decider.pinSnooze.test.ts:113"
+      ]
     },
     {
       "upstreamSha": "05eb051184ac4d486795ac6f8be29129b8b8845f",
@@ -812,10 +817,14 @@
     {
       "upstreamSha": "06620faf6de7dc9dc02f245c9fedc49644c2ee08",
       "subject": "fix(server): Claude thinking before a tool call stays a collapsed Thought (#18887)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude thinking before a tool call stays a collapsed Thought (#18887).",
+      "reason": "Equivalent: f5 never adopted the reverted heuristic; Claude thinking blocks before a tool call stay reasoning and render as a collapsed Thought. Upstream change: fix(server): Claude thinking before a tool call stays a collapsed Thought (#18887)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["848bc1063123debf957c74f0b2dcc8c298510e4a"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4323",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:5187"
+      ]
     },
     {
       "upstreamSha": "0671e34279d42faf69fccfd46ceae305ccfa7c6d",
@@ -975,10 +984,9 @@
     {
       "upstreamSha": "0796638512d4c610469905adc597cc33c307fc32",
       "subject": "fix(chat): Codex follow-up suggestions show their label instead of raw markup (#19401)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(chat): Codex follow-up suggestions show their label instead of raw markup (#19401).",
+      "reason": "Deferred: upstream extends its Codex markdown directive layer (file citations, artifact templates) to render :codex-followup labels. f5 has no Codex directive layer in its chat markdown; port the layer and its follow-up handling together. Upstream change: fix(chat): Codex follow-up suggestions show their label instead of raw markup (#19401)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "07993f39ff2741ca63804a4ff4c1641079aa4d88",
@@ -1196,10 +1204,9 @@
     {
       "upstreamSha": "08e18b7833c9b5d33bfcd1ce8976dcb67c11dde5",
       "subject": "fix(models): remove new badges from Claude Opus and Sonnet 5.5 (#17646)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(models): remove new badges from Claude Opus and Sonnet 5.5 (#17646).",
+      "reason": "Not applicable: upstream drops the \"new\" badge from Claude Opus and Sonnet 5.5 in its model manifest. f5 has no model manifest and shows no model badges. Upstream change: fix(models): remove new badges from Claude Opus and Sonnet 5.5 (#17646)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "08e4932f0465327968368b22be343b58a07d476a",
@@ -1541,10 +1548,14 @@
     {
       "upstreamSha": "0b68a4a9c36e90341491bad07196a8c123fd4e33",
       "subject": "fix(server): steering no longer ends running subagents (#19210)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): steering no longer ends running subagents (#19210).",
+      "reason": "Equivalent: steering writes into the running query and leaves running subagents alone; the test steers with a background agent active and asserts it keeps reporting progress under its original turn. Upstream change: fix(server): steering no longer ends running subagents (#19210)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:8165",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13816"
+      ]
     },
     {
       "upstreamSha": "0b6ec43c54165a87941b7a070849be8979646040",
@@ -1570,7 +1581,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:696",
+        "apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:702",
         "apps/server/src/provider/Layers/GrokAdapter.test.ts:321"
       ],
       "f5Shas": [
@@ -1647,10 +1658,9 @@
     {
       "upstreamSha": "0bfd9dd19d0c9418a936190525ec8f4c4fdae09b",
       "subject": "fix(server): held queued wakes no longer keep delegated tasks running (#17028)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): held queued wakes no longer keep delegated tasks running (#17028).",
+      "reason": "Not applicable: upstream stops held queued wakes from keeping delegated tasks running, in its orchestrator MCP service and orchestration-v2 subagent projection. f5 has no delegated-task orchestration. Upstream change: fix(server): held queued wakes no longer keep delegated tasks running (#17028)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0c200c5f83c039f85da0cb1b8d1611db3e708c92",
@@ -1669,10 +1679,11 @@
     {
       "upstreamSha": "0c48f62705df3568d6dcb7abee9361c6ecaad855",
       "subject": "perf(client): provider status pushes keep unchanged providers identical (#20392)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(client): provider status pushes keep unchanged providers identical (#20392).",
+      "reason": "Equivalent: a provider status push invalidates the server config query, and React Query's default structural sharing keeps every unchanged provider object identical in the refetched result. Upstream change: perf(client): provider status pushes keep unchanged providers identical (#20392)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["553ee4c282c6a3e5e811903ef80abc1b659bf11a"],
+      "evidence": ["apps/web/src/routes/__root.tsx:1196", "apps/web/src/lib/serverReactQuery.ts:10"]
     },
     {
       "upstreamSha": "0c5771d60a8ef2db34dfbbc142f7524badc829e0",
@@ -2039,10 +2050,9 @@
     {
       "upstreamSha": "0eef5d0c76f1765b7a44fa82e965bf5142d64169",
       "subject": "fix(codex): prevent unsupported agent history in ChatGPT sharing (#17499)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(codex): prevent unsupported agent history in ChatGPT sharing (#17499).",
+      "reason": "Not applicable: upstream disables Codex multi-agent features for its managed ChatGPT token-sharing provider. f5 has no token-sharing Codex provider. Upstream change: fix(codex): prevent unsupported agent history in ChatGPT sharing (#17499)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0f09627a111f7e9adc22c256c725565672676f1a",
@@ -2260,7 +2270,7 @@
       "disposition": "deferred",
       "plannedWorkstream": "15r",
       "f5Shas": ["bb7b674bb952ff31f0b029e645e8531105ef036d"],
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13495"]
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13587"]
     },
     {
       "upstreamSha": "10ac2f2ba495508a2a2fd469e67eda5df73f0df1",
@@ -2319,7 +2329,7 @@
         "apps/server/src/provider/acp/AcpRuntimeModel.ts:527",
         "apps/server/src/provider/acp/AcpRuntimeModel.test.ts:368",
         "apps/server/src/provider/acp/AcpSessionRuntime.toolProgress.test.ts:1",
-        "apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts:505"
+        "apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts:549"
       ]
     },
     {
@@ -2405,10 +2415,14 @@
     {
       "upstreamSha": "119e61b6c1ee642fa48b4447812fb77f17b0bfe5",
       "subject": "fix(server): a Claude usage limit no longer resets the context meter to 0% (#16394)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): a Claude usage limit no longer resets the context meter to 0% (#16394).",
+      "reason": "Equivalent: f5 updates Claude's context usage only from streamed message_start and message_delta events. The CLI's <synthetic> usage-limit frames arrive as whole assistant messages without stream events, so they never reset the meter. Upstream change: fix(server): a Claude usage limit no longer resets the context meter to 0% (#16394)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4141",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4151"
+      ]
     },
     {
       "upstreamSha": "11b00afc0268d00692b668674f4b43bb4838795b",
@@ -2458,10 +2472,9 @@
     {
       "upstreamSha": "11f66760d097996c58e4118ed5b4fd497000c93f",
       "subject": "perf(web): the provider settings panel compiles with the React Compiler (#20664)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider settings panel compiles with the React Compiler (#20664).",
+      "reason": "Deferred: upstream changed the provider settings panel for its React Compiler adoption (t3code#20664). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider settings panel compiles with the React Compiler (#20664)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "11fd54fcbbfb39f824bb4c908d428c20d801267c",
@@ -2727,7 +2740,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/codexAppServerManager.ts:1829"],
+      "evidence": ["apps/server/src/codexAppServerManager.ts:1856"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -2769,10 +2782,16 @@
     {
       "upstreamSha": "140ee145ac33653ac2c36f7940e4f54f6e92497f",
       "subject": "fix(server): Codex shadow homes replace stray sqlite maintenance locks (#17663)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Codex shadow homes replace stray sqlite maintenance locks (#17663).",
+      "reason": "Ported: when Codex has already created a local .sqlite-maintenance.lock or mcp-oauth-locks entry in a shadow home, f5 replaces it with the link to the shared one instead of refusing to rebuild the shadow home. Upstream change: fix(server): Codex shadow homes replace stray sqlite maintenance locks (#17663)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["189e9e8a67885a7272bacbe0e0e2677e9b2da038"],
+      "evidence": [
+        "apps/server/src/provider/Drivers/CodexHomeLayout.ts:35",
+        "apps/server/src/provider/Drivers/CodexHomeLayout.ts:471",
+        "apps/server/src/provider/Drivers/CodexHomeLayout.test.ts:227"
+      ]
     },
     {
       "upstreamSha": "143341b0bc4e3e81066ab2cd86ddd199574bfd83",
@@ -3350,7 +3369,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1c",
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.ts:1308",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:1313",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:1941"
       ],
       "f5Shas": ["5d48a79b409bf4790864f0112061877c5572d931"]
@@ -3544,10 +3563,9 @@
     {
       "upstreamSha": "196950a6e9c1d6997e81e517e97e3de947968bc7",
       "subject": "perf(web): the provider update notification compiles without manual memoization (#20609)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider update notification compiles without manual memoization (#20609).",
+      "reason": "Deferred: upstream changed the provider update notification for its React Compiler adoption (t3code#20609). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider update notification compiles without manual memoization (#20609)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "196c8ea0d642acd1db66bd57f5d98abe81d8da6e",
@@ -3574,10 +3592,16 @@
     {
       "upstreamSha": "19a67ef5211996a737d9f9fe608ab2c80f8a6714",
       "subject": "fix(acp): custom models now reach the agent instead of failing to open (#19313)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(acp): custom models now reach the agent instead of failing to open (#19313).",
+      "reason": "Ported: the ACP session runtime accepts a custom ACP instance's configured custom models for the model config option and sends them to the agent, which validates them, instead of rejecting them as unadvertised. Upstream change: fix(acp): custom models now reach the agent instead of failing to open (#19313)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["10879f9ab73dcaeb894158ffe8657cf32d7ebcd9"],
+      "evidence": [
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:538",
+        "apps/server/src/provider/acp/CustomAcpSupport.ts:34",
+        "apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts:771"
+      ]
     },
     {
       "upstreamSha": "19a760c3e32005e10eb96d33bad81aaa836a1306",
@@ -3691,10 +3715,9 @@
     {
       "upstreamSha": "1a553d0f5dd2aa39a64895ec770dc51ef1448b1a",
       "subject": "fix(shared): merge OpenCode Go limits by credential (#14209)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(shared): merge OpenCode Go limits by credential (#14209).",
+      "reason": "Not applicable: upstream fingerprints the OpenCode Go key so limits from several connected environments with the same key merge. f5 runs a single local server with no connected environments, so there is nothing to merge. Upstream change: fix(shared): merge OpenCode Go limits by credential (#14209)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1a5ff424cee104e1e8bbcf9bbf5414bbad843be3",
@@ -3773,10 +3796,14 @@
     {
       "upstreamSha": "1af138668b8bcf5c289382dde1ccaecdd79614b8",
       "subject": "fix(mobile): attachment images no longer re-download on every reconnect (#18824)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(mobile): attachment images no longer re-download on every reconnect (#18824).",
+      "reason": "Equivalent: upstream keys deterministic attachment ids on their bytes so a cached id never changes image. f5 gives every stored attachment a fresh random id, so an id never points at different bytes. The rest of the change is mobile-only. Upstream change: fix(mobile): attachment images no longer re-download on every reconnect (#18824)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": [
+        "apps/server/src/attachmentStore.ts:58",
+        "apps/server/src/attachmentIngress.ts:88"
+      ]
     },
     {
       "upstreamSha": "1afe5545b7d0397bbd6515981372072d146002ad",
@@ -3869,10 +3896,9 @@
     {
       "upstreamSha": "1beb0355d05bbe4a780b238e3138f0a8ed99df5f",
       "subject": "fix(server): queue background notifications during active tools (#15892)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): queue background notifications during active tools (#15892).",
+      "reason": "Not applicable: upstream queues Claude background notifications while tools are active, in its orchestration-v2 Claude adapter and orchestrator. f5 has neither. Upstream change: fix(server): queue background notifications during active tools (#15892)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1c1270663880903b16568594c4bf5f322407903a",
@@ -4037,10 +4063,9 @@
     {
       "upstreamSha": "1d58b82eadd043f7f7034023d81661affcf94a90",
       "subject": "fix(web): update toast download badge no longer hides behind the provider logo (#18401)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): update toast download badge no longer hides behind the provider logo (#18401).",
+      "reason": "Not applicable: upstream raises the download badge above the provider logo in its provider update toast. f5 has no ProviderUpdatePrimaryNotification toast. Upstream change: fix(web): update toast download badge no longer hides behind the provider logo (#18401)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1d58f2ecc4b2f6cea9897dcf46734af6210d053e",
@@ -4174,18 +4199,23 @@
     {
       "upstreamSha": "1e7c8e0f24c217a3229615fa1de1e6ed85d7e835",
       "subject": "fix(server): Claude MCP tools show their names and icons (#14860)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude MCP tools show their names and icons (#14860).",
+      "reason": "Not applicable: upstream shows Claude MCP tool names and icons in its orchestration-v2 Claude adapter. f5 has no v2 adapter. Upstream change: fix(server): Claude MCP tools show their names and icons (#14860)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1e844a3d0647e9d2ca87d91b2fab5833bba19d08",
       "subject": "fix(editors): stop treating the agy CLI as the Antigravity IDE (#7079)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(editors): stop treating the agy CLI as the Antigravity IDE (#7079).",
+      "reason": "Ported: the Antigravity editor launches `antigravity-ide` instead of the standalone `agy` CLI, and on macOS looks inside \"Antigravity IDE.app\" rather than the separate Antigravity Hub. f5's editor entries take one command, so upstream's `agy-ide` fallback is not carried. Upstream change: fix(editors): stop treating the agy CLI as the Antigravity IDE (#7079)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["3b2b945921c391935b9254666686c33058cfde36"],
+      "evidence": [
+        "packages/contracts/src/editor.ts:18",
+        "apps/server/src/open.ts:109",
+        "apps/server/src/open.test.ts:31"
+      ]
     },
     {
       "upstreamSha": "1e87029261f9b81061a2a7420849b9eeaf1a2ebe",
@@ -4531,7 +4561,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:337"],
+      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:340"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -4544,18 +4574,16 @@
     {
       "upstreamSha": "2182353fdfbac18b7045d213e750cb79f32742ce",
       "subject": "perf(web): the local provider update groups compile without manual memoization (#20604)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the local provider update groups compile without manual memoization (#20604).",
+      "reason": "Deferred: upstream changed the local provider update groups compile without manual memoization for its React Compiler adoption (t3code#20604). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the local provider update groups compile without manual memoization (#20604)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "2188bdd8b5c0251f40daebdb66647dd0150cf076",
       "subject": "revert(web): remove automatic compaction before resume (#15771)",
-      "reason": "Planned: verify the final upstream revert without restoring the removed behavior; this is a behavioral decision, not a mechanical maintenance exclusion. Upstream change: revert(web): remove automatic compaction before resume (#15771).",
+      "reason": "Not applicable: upstream reverts sending /compact automatically before the first message past its resume banner. f5 never sent an automatic /compact; its resume compaction is Claude's own resume_return dialog, behind the resumeCompactionPrompt setting. Upstream change: revert(web): remove automatic compaction before resume (#15771)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "219c1d265d917f0e7083b9033f4014c0c2940463",
@@ -4840,10 +4868,16 @@
     {
       "upstreamSha": "233e70b3b2b42f52f12a8ad48089f648a1cb143d",
       "subject": "fix(server): Claude no longer shows unavailable when its health check can't run in $HOME (#19320)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude no longer shows unavailable when its health check can't run in $HOME (#19320).",
+      "reason": "Ported: Claude's instance-level version, auth and capability probes run in f5's state directory instead of the server cwd, which is $HOME in packaged builds where cwd-scoped claude wrappers refuse to run. Upstream change: fix(server): Claude no longer shows unavailable when its health check can't run in $HOME (#19320)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["cead63920c32011bdfe027c29ae4bd6e6b7a3982"],
+      "evidence": [
+        "apps/server/src/provider/Drivers/ClaudeDriver.ts:227",
+        "apps/server/src/provider/Drivers/ClaudeDriver.ts:266",
+        "apps/server/src/provider/Layers/ClaudeProvider.test.ts:106"
+      ]
     },
     {
       "upstreamSha": "237d51e6cd2f935d3ddced4efe8fcd4a5d697e43",
@@ -5109,10 +5143,15 @@
     {
       "upstreamSha": "255ac27d5200b01c50acef105ab0ec8bb6ab8345",
       "subject": "fix(server): Claude limits load again for users with large transcript histories (#16358)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Claude limits load again for users with large transcript histories (#16358).",
+      "reason": "Ported: the Claude account usage read passes skipBehaviors, so the CLI no longer scans every local transcript before answering and limits load within the probe deadline for users with large transcript histories. Upstream change: fix(server): Claude limits load again for users with large transcript histories (#16358)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["adc3ed2a5e6fd91a63880f22cbf41e83c06aa08a"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeProvider.ts:529",
+        "apps/server/src/provider/Layers/ClaudeUsageProbe.test.ts:47"
+      ]
     },
     {
       "upstreamSha": "25629a76a0458bdeb707483722894158af090b41",
@@ -5280,10 +5319,15 @@
     {
       "upstreamSha": "2679d279ce4b4879290bc756cf219b10f77e1873",
       "subject": "fix(server): let OpenCode generate session titles (#13368)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): let OpenCode generate session titles (#13368).",
+      "reason": "Ported in f5's form: f5 created every OpenCode session titled \"T3 Code <thread id>\", which stops OpenCode from generating a title. Sessions are now created without a title. Upstream additionally forwards a user-renamed title; f5 has no session title input to forward. Upstream change: fix(server): let OpenCode generate session titles (#13368)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["468588d586ae3aa0efa27190735e36444a6836c5"],
+      "evidence": [
+        "apps/server/src/provider/Layers/OpenCodeAdapter.ts:1308",
+        "apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:602"
+      ]
     },
     {
       "upstreamSha": "26894dda7b6d78c5863ccec6581caf0ec7f4843b",
@@ -5432,10 +5476,11 @@
     {
       "upstreamSha": "27ab45593fdcaffe718c1fa54dcbb2df4bd769a2",
       "subject": "fix(server): ACP mode states with null descriptions are no longer dropped (#16218)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): ACP mode states with null descriptions are no longer dropped (#16218).",
+      "reason": "Equivalent: upstream's hand-written guard for modes advertised in initialize._meta rejected a mode whose description was null. f5 has no _meta mode guard and reads session modes from the decoded response, normalizing a null description with `mode.description?.trim()`. Upstream change: fix(server): ACP mode states with null descriptions are no longer dropped (#16218)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["c0e97fadf4a6820ca0f670bbc2b88e8a1823d763"],
+      "evidence": ["apps/server/src/provider/acp/AcpRuntimeModel.ts:146"]
     },
     {
       "upstreamSha": "27bdf1aa14e6b946b72fb7013062084ca70796a6",
@@ -5582,10 +5627,11 @@
     {
       "upstreamSha": "295d7cba09bb4b4084482a74b5a42a0cac72a0b1",
       "subject": "fix(web): queued messages send while their thread is not open (#13764)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): queued messages send while their thread is not open (#13764).",
+      "reason": "Equivalent: upstream moves queued-message sending out of ChatView so queued messages send while their thread is not open. f5 queues every send in its server-side durable next-turn queue, which dispatches regardless of which thread the client shows. Upstream change: fix(web): queued messages send while their thread is not open (#13764)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["b4bec80827a1888003d44f8ee83872b97db4e067"],
+      "evidence": ["apps/server/src/nextTurnQueue/Layers/NextTurnQueueDispatcher.ts:1399"]
     },
     {
       "upstreamSha": "2971ec3209d7ef1b00d7ded70fe6342816b1539f",
@@ -5652,10 +5698,11 @@
     {
       "upstreamSha": "29a32660d3cb2ade1f13283f889b519f73b24fbd",
       "subject": "fix(git): exclude SSH ports from provider URLs (#12537)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(git): exclude SSH ports from provider URLs (#12537).",
+      "reason": "Equivalent: upstream stops keeping the SSH port in a remote's provider host. f5 strips the port from ssh:// remotes and takes the hostname, never the host with port, from URL remotes. Upstream change: fix(git): exclude SSH ports from provider URLs (#12537)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["9efc66cbd2e28e6bb27077d562c5a7ff493a3f75"],
+      "evidence": ["packages/shared/src/sourceControl.ts:228"]
     },
     {
       "upstreamSha": "29abbf9b424b122c52bb20dccffac68bee367c09",
@@ -5817,10 +5864,16 @@
     {
       "upstreamSha": "2a7bd1673c7bdad4304b7771944e73c29ecd3c01",
       "subject": "fix(provider-grok): Grok health checks no longer start Grok's updater (#18075)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(provider-grok): Grok health checks no longer start Grok's updater (#18075).",
+      "reason": "Ported: Grok health and skill probes set GROK_DISABLE_AUTOUPDATER=1 on a copy of the environment, so a background probe cannot start an update. Sessions and text generation keep the caller's environment. Upstream change: fix(provider-grok): Grok health checks no longer start Grok's updater (#18075)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["a138bdab2f3e056b46de0c51bb70a5dd19b18987"],
+      "evidence": [
+        "apps/server/src/provider/Layers/GrokProvider.ts:110",
+        "apps/server/src/provider/Drivers/GrokSkills.ts:56",
+        "apps/server/src/provider/Layers/GrokProvider.test.ts:36"
+      ]
     },
     {
       "upstreamSha": "2a93885bac5798a79d55069a0b5dc3e53c6176bc",
@@ -6381,10 +6434,9 @@
     {
       "upstreamSha": "2d943723769da0b675b56168d764d1ad96fc8d28",
       "subject": "fix(server): Cursor threads in Auto use Cursor's Auto-review (#19712)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Cursor threads in Auto use Cursor's Auto-review (#19712).",
+      "reason": "Not applicable: upstream maps its Auto runtime mode to Cursor's Auto-review. f5's Cursor adapter supports only approval-required and full-access and rejects Auto (apps/server/src/provider/Layers/CursorAdapter.ts:269). Upstream change: fix(server): Cursor threads in Auto use Cursor's Auto-review (#19712)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "2daff8c25adf701fddd062ae93b94cc57d420ec2",
@@ -6953,10 +7005,16 @@
     {
       "upstreamSha": "3213a0c77b4ba8e37a361b884d1035eb8dfd76d1",
       "subject": "fix(server): closing a Claude session no longer leaves plugin MCP servers running (#19322)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): closing a Claude session no longer leaves plugin MCP servers running (#19322).",
+      "reason": "Ported: on macOS and Linux the Claude CLI starts as its own process group leader, and the group gets SIGKILL when the CLI exits, so plugin MCP server children do not outlive the session. Stderr still feeds the diagnostics tail. Windows keeps the SDK spawn. Upstream change: fix(server): closing a Claude session no longer leaves plugin MCP servers running (#19322)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["6faa9bf503a9d7155d93f7654154a77e8e123cb3"],
+      "evidence": [
+        "apps/server/src/provider/claudeProcessGroup.ts:17",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:7576",
+        "apps/server/src/provider/claudeProcessGroup.test.ts:15"
+      ]
     },
     {
       "upstreamSha": "32142cff186c607c8cae644927cee8d6c9cba757",
@@ -7157,10 +7215,9 @@
     {
       "upstreamSha": "33aa4614783e856977a5f0b856dc65ebc1ce6794",
       "subject": "fix(web): every reconnect gets its own grace period before the unavailable banner (#20441)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(web): every reconnect gets its own grace period before the unavailable banner (#20441).",
+      "reason": "Not applicable: upstream gives each reconnect its own grace period before its unavailable banner. f5 has no grace-period banner; its connection surface shows the disconnected state directly and the transport retries on its own ladder (apps/web/src/wsTransport.ts:99). Upstream change: fix(web): every reconnect gets its own grace period before the unavailable banner (#20441)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "33afd5a5aa361890c9ce22479e8f52f6b18248aa",
@@ -7293,10 +7350,9 @@
     {
       "upstreamSha": "348f217a853dd4a23d7fa4834dedb05f545c2075",
       "subject": "fix(web,mobile): muse code uses meta's official blue logo (#19562)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web,mobile): muse code uses meta's official blue logo (#19562).",
+      "reason": "Deferred: upstream swaps the Muse Code icon for Meta's blue gradient logo. f5 keeps its own provider icon set (apps/web/src/components/Icons.tsx), which has no gradient support; revisit in a branding pass. Upstream change: fix(web,mobile): muse code uses meta's official blue logo (#19562)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "349ce3014233352e073a5fc1b3f12bd786160913",
@@ -7449,10 +7505,9 @@
     {
       "upstreamSha": "364f5084d7418e1605220b09de5aaebd46305a73",
       "subject": "fix(server): Windows Codex install uses system tar and retries rename (#18523)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Windows Codex install uses system tar and retries rename (#18523).",
+      "reason": "Not applicable: upstream fixes its managed Codex runtime install on Windows (system tar, rename retry, stale staging cleanup). f5 does not install Codex; it runs the user's Codex CLI. f5's own release installer already resolves System32 tar on Windows (packages/shared/src/cliRelease.ts:9). Upstream change: fix(server): Windows Codex install uses system tar and retries rename (#18523)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3653cb22ffb30bf133fecc30c955941fe267cf1c",
@@ -7575,10 +7630,9 @@
     {
       "upstreamSha": "36f91c45687f97fc8e12ff89eaa8cff6f23abe8b",
       "subject": "fix(ssh): reconnecting keeps the remote server and its agents running (#19432)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(ssh): reconnecting keeps the remote server and its agents running (#19432).",
+      "reason": "Not applicable: upstream fixes its SSH tunnel launcher so a reconnect keeps the remote server running. f5 has no SSH remote server or tunnel. Upstream change: fix(ssh): reconnecting keeps the remote server and its agents running (#19432)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "371b52d9dad76876f84609a4cd0f80eaa757b69c",
@@ -8005,10 +8059,16 @@
     {
       "upstreamSha": "39aeaf404ad6d923f1bb7de4ec61549559d356ff",
       "subject": "fix(server): \"Always allow this session\" stops Codex asking for every command (#19635)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): \"Always allow this session\" stops Codex asking for every command (#19635).",
+      "reason": "Ported: after the user allows a Codex command or file change for the session, later requests of that kind are answered automatically until the runtime mode changes. acceptAlways stays a one-prefix execpolicy rule and does not widen into a session allowance. Upstream change: fix(server): \"Always allow this session\" stops Codex asking for every command (#19635)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["0ed0821980ac7c455860967c387535ac9aae82a1"],
+      "evidence": [
+        "apps/server/src/codexAppServerManager.ts:433",
+        "apps/server/src/codexAppServerManager.ts:4020",
+        "apps/server/src/codexAppServerManager.test.ts:3248"
+      ]
     },
     {
       "upstreamSha": "39bcf7c69c6b061a1f8e7a6e3dd3314560ee288e",
@@ -8052,10 +8112,9 @@
     {
       "upstreamSha": "3a6ab583d2799c9c904d8d0943afba60ec2cc5f0",
       "subject": "fix(acp): Copilot's default agent no longer disappears from the Agent menu (#19330)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(acp): Copilot's default agent no longer disappears from the Agent menu (#19330).",
+      "reason": "Not applicable: upstream maps an ACP select choice whose value is the empty string (GitHub Copilot's default agent) to a reserved id in its generic config option menus. f5's custom ACP provider surfaces only the agent's model list, with no other option menus (apps/server/src/provider/acp/CustomAcpSupport.ts:92). Upstream change: fix(acp): Copilot's default agent no longer disappears from the Agent menu (#19330)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3a7058da50c91906158c89fc3f845e6c04379414",
@@ -8166,7 +8225,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:4032"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:4037"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -8359,7 +8418,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:3502",
-        "apps/server/src/provider/Layers/ClaudeAdapter.ts:174"
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:179"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -8719,10 +8778,9 @@
     {
       "upstreamSha": "3f70c831c65f339e71c549a2e1395aaffa9ce17e",
       "subject": "fix(server): Claude 5.1+ text before a tool call shows as assistant text (#18364)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Claude 5.1+ text before a tool call shows as assistant text (#18364).",
+      "reason": "Declined: upstream reverted this a day later in t3code#18887 because it turned real thinking before a tool call into assistant text; the narrower follow-up is t3code#18923. Upstream change: fix(server): Claude 5.1+ text before a tool call shows as assistant text (#18364)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "declined"
     },
     {
       "upstreamSha": "3faeee49ac67dfd9534369f1e1c627c0356b75ac",
@@ -8753,7 +8811,7 @@
       "disposition": "ported",
       "plannedWorkstream": "7b",
       "evidence": [
-        "apps/server/src/codexAppServerManager.ts:1104",
+        "apps/server/src/codexAppServerManager.ts:1114",
         "docs/reviews/phase-seven-media-validation.md:1"
       ],
       "f5Shas": ["d4d6991e764631bc825a3e4061651d6ff1ab484f"]
@@ -8779,10 +8837,15 @@
     {
       "upstreamSha": "3feae3a94077317e78b7fd4591454ed68f9d4fd2",
       "subject": "fix(server): keep OpenCode timeouts from crashing the error formatter (#12469)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): keep OpenCode timeouts from crashing the error formatter (#12469).",
+      "reason": "Ported: the OpenCode error formatter checks that an Error's message is a string before trimming it, so a message-less Effect TimeoutError no longer throws while being formatted. Upstream change: fix(server): keep OpenCode timeouts from crashing the error formatter (#12469)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["0f5a942ffcc1d51b1ceba8cc08b0655bf3aac9ca"],
+      "evidence": [
+        "apps/server/src/provider/opencodeRuntime.ts:78",
+        "apps/server/src/provider/opencodeRuntime.test.ts:21"
+      ]
     },
     {
       "upstreamSha": "3fedf52467dd8d2734a7aca4c6c7da421c12474f",
@@ -8977,7 +9040,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:133"],
+      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:136"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -9090,10 +9153,9 @@
     {
       "upstreamSha": "42160f2925daa3c0d4ef2b95f68a87858972e6a3",
       "subject": "fix(ci): retry Cursor webhook HTTP 400s on main (#19077)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(ci): retry Cursor webhook HTTP 400s on main (#19077).",
+      "reason": "Not applicable: upstream retries its Cursor webhook GitHub Action on HTTP 400. f5 has no such workflow. Upstream change: fix(ci): retry Cursor webhook HTTP 400s on main (#19077)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "422248515a1eebff607b44d5abef91e13f6228fc",
@@ -9345,10 +9407,9 @@
     {
       "upstreamSha": "43acbcd1e5d056e908607aee1e0e887e75238274",
       "subject": "perf(web): provider setup section compile with the React Compiler (#20505)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): provider setup section compile with the React Compiler (#20505).",
+      "reason": "Deferred: upstream changed provider setup section for its React Compiler adoption (t3code#20505). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): provider setup section compile with the React Compiler (#20505)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "43bafd4674841fb8782f5174033b684aa0d83f67",
@@ -9372,7 +9433,7 @@
       "plannedWorkstream": "15r",
       "f5Shas": ["5d74a6bde2b856176f0d85637995688a5832bb31"],
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13585",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13677",
         "packages/shared/src/orchestrationActivityPayload.test.ts:1",
         "apps/web/src/components/chat/MessagesTimeline.browser.tsx:1"
       ]
@@ -9398,10 +9459,9 @@
     {
       "upstreamSha": "4408bf5a4fb0c97373d57abfdf6f541e315b1e67",
       "subject": "fix(opencode): accept v2 serve ready line when spawning server (#13651)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(opencode): accept v2 serve ready line when spawning server (#13651).",
+      "reason": "Not applicable: upstream accepts OpenCode 2's new `serve` ready line. f5 now refuses OpenCode 2 (apps/server/src/provider/Layers/OpenCodeProvider.ts:387), and OpenCode 1.x still prints the ready line f5 parses. Upstream change: fix(opencode): accept v2 serve ready line when spawning server (#13651)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "442735897f6f92af33798075baa12d4fd4d710dd",
@@ -9474,10 +9534,16 @@
     {
       "upstreamSha": "44bd4c9cafa61a415f76fbb261f321a158660577",
       "subject": "fix(codex): resume archived native sessions (#15389)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(codex): resume archived native sessions (#15389).",
+      "reason": "Ported: when Codex refuses to resume an archived session, f5 sends thread/unarchive and resumes again, keeping the session's history instead of failing the start. Upstream change: fix(codex): resume archived native sessions (#15389)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["3b09906b33562b5e01c0af417257ef82cd563c31"],
+      "evidence": [
+        "apps/server/src/codexAppServerManager.ts:1117",
+        "apps/server/src/codexAppServerManager.ts:1355",
+        "apps/server/src/codexAppServerManager.test.ts:782"
+      ]
     },
     {
       "upstreamSha": "44dc8ae259f5c3349f7ab8045e39bd62408b52a9",
@@ -9510,10 +9576,14 @@
     {
       "upstreamSha": "451afcb22d93f06cb24f9bc16703404564952553",
       "subject": "fix(codex): Pro Max accounts load, so Ultrafast shows up (#14304)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(codex): Pro Max accounts load, so Ultrafast shows up (#14304).",
+      "reason": "Equivalent: upstream's generated schema rejected the promax plan type, so Pro Max accounts failed to load. f5 reads any plan type without a closed enum, and takes service tiers from the model catalog as listed. Upstream change: fix(codex): Pro Max accounts load, so Ultrafast shows up (#14304)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": [
+        "apps/server/src/codexAppServerManager.ts:586",
+        "apps/server/src/provider/codexModelCatalog.ts:51"
+      ]
     },
     {
       "upstreamSha": "452d032a2a2e47bced99ba662a1eda18f9edd116",
@@ -9643,10 +9713,17 @@
     {
       "upstreamSha": "4606f9d6f213952124d93792854b0c4e48658e60",
       "subject": "fix(server): restore auto resume for wrapped Claude gateway rate limits (#17778)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): restore auto resume for wrapped Claude gateway rate limits (#17778).",
+      "reason": "Ported: a failed Claude result that a gateway reports as a 503 wrapping a 429 rate_limit_error with \"(reset after ...)\" now carries a message-sourced usage limit whose reset is that cooldown, so the next-turn queue auto-resumes the turn. Upstream's fix is in its orchestration-v2 adapter; f5 applies it in its Claude adapter's result handling. Upstream change: fix(server): restore auto resume for wrapped Claude gateway rate limits (#17778)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["ea3a229b1bdaa590ae3258aa296d874b041861c7"],
+      "evidence": [
+        "apps/server/src/provider/usageLimitMessages.ts:78",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4979",
+        "apps/server/src/provider/usageLimitMessages.test.ts:28",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:6800"
+      ]
     },
     {
       "upstreamSha": "46140c96afe1d8a8b5b4bde1fccb671f8760017a",
@@ -9801,7 +9878,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:3873"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:3878"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -9828,10 +9905,17 @@
     {
       "upstreamSha": "477282263a9115f911380b5aec7d4973267e4edc",
       "subject": "fix: worktree threads keep their worktree when the agent starts, and messages sent during setup queue (#17654)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: worktree threads keep their worktree when the agent starts, and messages sent during setup queue (#17654).",
+      "reason": "Equivalent: every f5 send, a new thread's first included, goes through the durable queue, and the queue gate holds items while a thread's worktree setup is gating, so a message sent during setup waits and starts once setup ends. The worktree-retention half of the upstream fix is in its v2 orchestrator, which f5 does not have. Upstream change: fix: worktree threads keep their worktree when the agent starts, and messages sent during setup queue (#17654)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "b4bec80827a1888003d44f8ee83872b97db4e067",
+        "3228773cd3bb602c81b219716c1f440b5db3f792"
+      ],
+      "evidence": [
+        "apps/server/src/nextTurnQueue/gate.ts:61",
+        "apps/web/src/components/ChatView.tsx:3988"
+      ]
     },
     {
       "upstreamSha": "478b06c60972b3469d73584a08d54323072e4839",
@@ -10266,10 +10350,9 @@
     {
       "upstreamSha": "4a5dade3b4915cdfd25729d2c24d5751a282ef7e",
       "subject": "perf(client): provider status pushes no longer re-render environment presentation consumers (#20821)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(client): provider status pushes no longer re-render environment presentation consumers (#20821).",
+      "reason": "Not applicable: upstream decoupled its multi-environment presentation atoms (environment icons, cloud connect lists, pooled usage) from provider status pushes. f5 has one environment and no environment presentation layer. Upstream change: perf(client): provider status pushes no longer re-render environment presentation consumers (#20821)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4a7083f2b7bc020185b6531988064a407d982434",
@@ -10288,10 +10371,9 @@
     {
       "upstreamSha": "4a90c1cf5db5f25893827643fb32d3304dddcdd9",
       "subject": "fix(web): keep queued threads subscribed (#15293)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keep queued threads subscribed (#15293).",
+      "reason": "Not applicable: upstream keeps a thread's detail subscription while its run is queued. f5's web client applies every thread's domain events from one orchestration stream (apps/web/src/applyDomainEvent.ts) and has no per-thread subscription that could drop. Upstream change: fix(web): keep queued threads subscribed (#15293)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4a9516d3d5e73869fc9d33b744b31ef2f26ba404",
@@ -10384,10 +10466,9 @@
     {
       "upstreamSha": "4b5c60485366421794787aee7513913f92eced29",
       "subject": "fix(server): provider sessions clean up when their start is interrupted (#15571)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): provider sessions clean up when their start is interrupted (#15571).",
+      "reason": "Not applicable: upstream cleans up provider sessions whose start is interrupted, in its orchestration-v2 ProviderSessionManager, v2 adapters and LocalDeviceHost. f5 has none of these. Upstream change: fix(server): provider sessions clean up when their start is interrupted (#15571)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4b6d9a09f80c4e782bdcf27ed1ef5c4f8fdd98db",
@@ -10436,10 +10517,11 @@
     {
       "upstreamSha": "4baba3b50359743998502f804801c2473b4123fe",
       "subject": "fix(server): disabled providers stop checking for CLI updates (#16772)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): disabled providers stop checking for CLI updates (#16772).",
+      "reason": "Equivalent: f5's provider update advisor skips an instance that is disabled, or whose snapshot is disabled or not installed, so disabled providers never check for CLI updates. Upstream change: fix(server): disabled providers stop checking for CLI updates (#16772)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["b78c752f97cd6d34c470c1d691244e3972842a38"],
+      "evidence": ["apps/server/src/provider/Layers/ProviderUpdateAdvisorLive.ts:828"]
     },
     {
       "upstreamSha": "4bd0ecca19934dce38e16cd42eba5bf81c170d91",
@@ -10519,7 +10601,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:375"],
+      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:378"],
       "f5Shas": [
         "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f",
         "ea2cf9a1fb07a26788c237012bb7099cea23ba4c"
@@ -10624,7 +10706,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7559"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7651"],
       "f5Shas": [
         "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f",
         "ea2cf9a1fb07a26788c237012bb7099cea23ba4c"
@@ -11005,9 +11087,9 @@
       "evidence": [
         "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:137",
         "apps/server/src/wsServer/bootstrapTurnStart.ts:89",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:218",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:228",
         "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:144",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:253",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:259",
         "apps/server/src/nextTurnQueue/dispatchOutcome.ts:57"
       ],
       "f5Shas": [
@@ -11052,10 +11134,9 @@
     {
       "upstreamSha": "500cb4266f2bb290aba2c2038295500ff7b25188",
       "subject": "fix(web): add provider wizard no longer shifts sideways while it grows (#17292)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): add provider wizard no longer shifts sideways while it grows (#17292).",
+      "reason": "Not applicable: upstream stops its add-provider wizard from shifting sideways while it grows. f5 has no wizard component (apps/web/src/components/ui/wizard.tsx does not exist). Upstream change: fix(web): add provider wizard no longer shifts sideways while it grows (#17292)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5014e5fcdd6e5f4a53d0fea4cbecba733821a854",
@@ -11216,10 +11297,9 @@
     {
       "upstreamSha": "5108c978b1d9a8bd029e5ea96781d8cbc90b3877",
       "subject": "fix(server): restarts keep delegated tasks, queued threads, and stops intact (#15323)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): restarts keep delegated tasks, queued threads, and stops intact (#15323).",
+      "reason": "Not applicable: upstream keeps delegated tasks, queued threads and stops intact across restarts in its orchestration-v2 orchestrator, effect worker and delegated completion delivery. f5 has neither delegated tasks nor orchestration-v2; its durable next-turn queue already survives restarts. Upstream change: fix(server): restarts keep delegated tasks, queued threads, and stops intact (#15323)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "511d20c6f20c2ed6ff787aba068d7d673e2949b9",
@@ -11277,7 +11357,7 @@
     {
       "upstreamSha": "519d64f6cec0a0f9ed18fbca4a3f8695cac44506",
       "subject": "fix(server): settled and idle-released threads no longer stay Waiting (#19355)",
-      "reason": "Not applicable: upstream's provider session manager releases idle sessions and settled threads, which left background tasks marked Waiting after the CLI exited. f5 settling neither releases nor unloads the provider session, and it refuses to settle while background work is active (apps/server/src/orchestration/Layers/OrchestrationEngine.ts:501). Upstream change: fix(server): settled and idle-released threads no longer stay Waiting (#19355)",
+      "reason": "Not applicable: upstream's provider session manager releases idle sessions and settled threads, which left background tasks marked Waiting after the CLI exited. f5 settling neither releases nor unloads the provider session, and it refuses to settle while background work is active (apps/server/src/orchestration/Layers/OrchestrationEngine.ts:507). Upstream change: fix(server): settled and idle-released threads no longer stay Waiting (#19355)",
       "reviewStatus": "reviewed",
       "disposition": "not-applicable"
     },
@@ -11384,7 +11464,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1c",
       "evidence": [
-        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:248",
+        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:272",
         "apps/server/src/git/Utils.ts:100",
         "apps/server/src/git/Layers/ClaudeTextGeneration.test.ts:422"
       ],
@@ -11479,10 +11559,9 @@
     {
       "upstreamSha": "53456bc0129f61325dbaa498e2399c33b4360cb8",
       "subject": "fix(marketing): use the official OpenCode and Antigravity logos (#13365)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(marketing): use the official OpenCode and Antigravity logos (#13365).",
+      "reason": "Not applicable: upstream swaps the OpenCode and Antigravity logos on its marketing site's harness list. f5's marketing page shows no harness logos. Upstream change: fix(marketing): use the official OpenCode and Antigravity logos (#13365)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5349522108bec896bb6a69ae76c6e1b8d419ae16",
@@ -11748,10 +11827,15 @@
     {
       "upstreamSha": "559c4b1f2192a17060c698f014074a223cbcf7bd",
       "subject": "fix(acp): one malformed session update no longer ends the session (#20015)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(acp): one malformed session update no longer ends the session (#20015).",
+      "reason": "Ported: an ACP session/update or elicitation-complete notification that fails to decode is logged once per method and dropped, and the session keeps running. Upstream change: fix(acp): one malformed session update no longer ends the session (#20015)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["b10be59eadc0de9ac1969f52df979d4180aea917"],
+      "evidence": [
+        "packages/effect-acp/src/protocol.ts:315",
+        "packages/effect-acp/src/protocol.test.ts:132"
+      ]
     },
     {
       "upstreamSha": "55a823413b31764ca3f41cfa4d38b8d38cd189e3",
@@ -11842,10 +11926,14 @@
     {
       "upstreamSha": "563645cf6e104ad930f4c9b209678a77eef07e65",
       "subject": "fix(server): a logged-out Claude CLI no longer reports as authenticated (#15459)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): a logged-out Claude CLI no longer reports as authenticated (#15459).",
+      "reason": "Equivalent: upstream stops treating a completed capability probe as proof of login. f5 never infers auth from the probe; it runs `claude auth status` and reports the instance unauthenticated or unknown unless that check says otherwise. Upstream change: fix(server): a logged-out Claude CLI no longer reports as authenticated (#15459)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["5fb9d70e9a2885bf5d80929b490168d4733ca469"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeProvider.ts:684",
+        "apps/server/src/provider/Layers/ClaudeProvider.ts:687"
+      ]
     },
     {
       "upstreamSha": "564719165e9131ab2aa55e9c805b860a415690da",
@@ -11871,10 +11959,9 @@
     {
       "upstreamSha": "567783ecdc658c8bf86c4c4980df5df8ebdd9037",
       "subject": "fix(codex): the protocol generator runs again on Effect rc.115 (#13480)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(codex): the protocol generator runs again on Effect rc.115 (#13480).",
+      "reason": "Not applicable: upstream regenerates its effect-codex-app-server protocol package for Effect rc.115. f5 has no generated Codex protocol package; its Codex manager sends JSON-RPC directly. Upstream change: fix(codex): the protocol generator runs again on Effect rc.115 (#13480)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "567bc559acbf3d092cdf35855fe0df9b14497f46",
@@ -11998,7 +12085,7 @@
       "reviewStatus": "reviewed",
       "disposition": "not-applicable",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:4949"]
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:4958"]
     },
     {
       "upstreamSha": "573a8f2f30d59c528997daf1e02bdb58e0d9dc54",
@@ -12303,7 +12390,7 @@
       "reason": "F5 discovers OpenCode skills through a time-bounded SDK call rather than CLI pipe output, and retains only skill metadata, never document content.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
-      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:338"],
+      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:341"],
       "f5Shas": ["c21d537fafb5bfef6280239040cbd0a92c9a38e3"]
     },
     {
@@ -12689,10 +12776,9 @@
     {
       "upstreamSha": "5bf19d12b0fd54fc9999579869bcf264bc555874",
       "subject": "fix(server): threads stay working while Claude starts a wake turn (#15055)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): threads stay working while Claude starts a wake turn (#15055).",
+      "reason": "Not applicable: upstream opens a continuation run when Claude's init frame starts a wake turn, in its orchestration-v2 Claude adapter. f5 does not project Claude-initiated wake turns as runs; it ignores unrelated native results (apps/server/src/provider/Layers/ClaudeAdapter.ts:4907) and delivers background completions through its own next-turn queue. Upstream change: fix(server): threads stay working while Claude starts a wake turn (#15055)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5bf43c9f3d09faae49fbc99714456d18e3172ff2",
@@ -12820,10 +12906,9 @@
     {
       "upstreamSha": "5cc75e8cb5e63d5f50b9a79f4f7f5671b6106fcb",
       "subject": "perf(web): the provider updates action compiles with the React Compiler (#20485)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider updates action compiles with the React Compiler (#20485).",
+      "reason": "Deferred: upstream changed the provider updates action for its React Compiler adoption (t3code#20485). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider updates action compiles with the React Compiler (#20485)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "5cc99e1c23980d7995a13c47f969b47cb68ed1be",
@@ -13362,9 +13447,9 @@
         "bb7a277aed4338825c10f8976512bf9d59aa75ef"
       ],
       "evidence": [
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:892",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:538",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:1029",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:899",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:544",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:1036",
         "apps/server/src/nextTurnQueue/Layers/NextTurnQueueDispatcher.ts:1057",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:4498"
       ]
@@ -13462,7 +13547,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:443"],
+      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:446"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -13482,10 +13567,9 @@
     {
       "upstreamSha": "61eb4af69c38c1f39e58ed76aa695b751f9f9baf",
       "subject": "fix(client-runtime): queued runs that start after a steer show up in the thread (#17764)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(client-runtime): queued runs that start after a steer show up in the thread (#17764).",
+      "reason": "Not applicable: upstream fixes its client-runtime environment cache dropping queued runs that start after a steer. f5's web client has no environment cache store. Upstream change: fix(client-runtime): queued runs that start after a steer show up in the thread (#17764)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6262e5f50081845bb247e5af2fc81b068c8ae893",
@@ -13569,7 +13653,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:322"],
+      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:325"],
       "f5Shas": [
         "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f",
         "ea2cf9a1fb07a26788c237012bb7099cea23ba4c"
@@ -13725,10 +13809,9 @@
     {
       "upstreamSha": "6391be2729566a1fe1045ff8617f003580b37bfd",
       "subject": "fix(server): newer Codex models get T3 Code's instructions again (#13547)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): newer Codex models get T3 Code's instructions again (#13547).",
+      "reason": "Deferred, high priority: when a newer Codex model's catalog ships its own collaboration-mode text, Codex drops the client's developer_instructions. f5 sends its whole instruction payload (mode prompt, runtime info, project memories and resumed context) as collaborationMode.settings.developer_instructions (apps/server/src/codexAppServerManager.ts:986), so those models can lose all of it. The fix moves it to turn/start additionalContext, which needs a Codex version gate, keys sized under Codex's per-entry token cap and a restore after compaction, all of which need verifying against a live Codex. Upstream change: fix(server): newer Codex models get T3 Code's instructions again (#13547)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "63b61e647c8d973e4378a360cbf576d914f5564d",
@@ -13771,10 +13854,9 @@
     {
       "upstreamSha": "63f74e209dc27df1f8733535d6fd4a79d442add8",
       "subject": "fix(opencode): fill blank reasoning labels (#14978)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(opencode): fill blank reasoning labels (#14978).",
+      "reason": "Not applicable: upstream fills blank OpenCode 2 reasoning labels in its OpenCode 2 adapter, and the web half reads them from the v2 server projection's reported model selection. f5 has no OpenCode 2 adapter and no v2 projection. Upstream change: fix(opencode): fill blank reasoning labels (#14978)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "63ff33756c47f127391962458d8388a647e8ed44",
@@ -14543,7 +14625,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:274"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:279"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -14787,10 +14869,9 @@
     {
       "upstreamSha": "6ba6a0daf44333ba6615464118e36d79f6220731",
       "subject": "fix(provider-muse): run on Muse 1.4.6, with linked web search hits and workflow results (#18409)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(provider-muse): run on Muse 1.4.6, with linked web search hits and workflow results (#18409).",
+      "reason": "Deferred: f5 already pins @muse-code/sdk 1.4.8. The remaining change adds linked web search hits and Muse workflow results, and f5 has no web search hit model and does not project Muse workflow items (apps/server/src/provider/msp/MuseEventMapping.ts:285); port with a Muse presentation pass. Upstream change: fix(provider-muse): run on Muse 1.4.6, with linked web search hits and workflow results (#18409)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "6bbb72c61dfcbd3b7f9398ca8ce99b86c6bdefdb",
@@ -15395,10 +15476,14 @@
     {
       "upstreamSha": "6fa0dd8ccabfee961ba01ea92267eded7d07cc51",
       "subject": "fix(provider-cursor): a skill tree deeper than the scan limit no longer hides every skill (#17389)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(provider-cursor): a skill tree deeper than the scan limit no longer hides every skill (#17389).",
+      "reason": "Equivalent: f5's Cursor skill scan skips a directory past the depth limit and keeps scanning, so a deep tree never hides the other skills. Upstream change: fix(provider-cursor): a skill tree deeper than the scan limit no longer hides every skill (#17389)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"],
+      "evidence": [
+        "apps/server/src/provider/acp/CursorSkills.ts:62",
+        "apps/server/src/provider/acp/CursorSkills.ts:73"
+      ]
     },
     {
       "upstreamSha": "6fa457607886caf096e7871b67e447f76d3772f6",
@@ -15453,7 +15538,7 @@
       "subject": "fix(codex): avoid quadratic app-server input buffering (#8605)",
       "reason": "f5 reads Codex stdout through node:readline rather than the upstream accumulating protocol parser; the quadratic buffering fix is already avoided.",
       "reviewStatus": "reviewed",
-      "evidence": ["apps/server/src/codexAppServerManager.ts:852"],
+      "evidence": ["apps/server/src/codexAppServerManager.ts:862"],
       "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
       "disposition": "equivalent"
     },
@@ -16343,7 +16428,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/codexAppServerManager.ts:2168"],
+      "evidence": ["apps/server/src/codexAppServerManager.ts:2195"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -16432,10 +16517,9 @@
     {
       "upstreamSha": "76cb251da129579d13be333ffe89a8767f7a257a",
       "subject": "fix(providers): fall back to windows-x86_64 ACP binaries on Windows on ARM (#18521)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(providers): fall back to windows-x86_64 ACP binaries on Windows on ARM (#18521).",
+      "reason": "Not applicable: upstream installs ACP agents from the ACP registry and now falls back to windows-x86_64 binaries on Windows on ARM. f5 has no ACP registry installer; ACP agents run from binaries the user installs. Upstream change: fix(providers): fall back to windows-x86_64 ACP binaries on Windows on ARM (#18521)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "76cc9b08f19d89012f16d18f47478c4f7b9b0a6f",
@@ -16461,10 +16545,16 @@
     {
       "upstreamSha": "76fa23df2ef09c8d9624cc6ce1273d32452b3d1c",
       "subject": "fix(provider): mark OpenCode v2 incompatible (#14198)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(provider): mark OpenCode v2 incompatible (#14198).",
+      "reason": "Ported: a local OpenCode 2.x CLI is reported as unsupported with a request for a 1.x release, since f5 only speaks OpenCode 1.x's server protocol. Upstream marks the range broken in its model manifest; f5 enforces it in the provider check. Upstream change: fix(provider): mark OpenCode v2 incompatible (#14198)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["b35e4458e30f54787867b931de0cac36634182dc"],
+      "evidence": [
+        "apps/server/src/provider/Layers/OpenCodeProvider.ts:33",
+        "apps/server/src/provider/Layers/OpenCodeProvider.ts:387",
+        "apps/server/src/provider/Layers/OpenCodeProvider.test.ts:129"
+      ]
     },
     {
       "upstreamSha": "770946d026208359450bf94083ad807d469d9f07",
@@ -16700,10 +16790,9 @@
     {
       "upstreamSha": "789f60566f42323b4a14f2e4ba85027b0827d4da",
       "subject": "perf(web): the provider update pill compiles with the React Compiler (#20590)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider update pill compiles with the React Compiler (#20590).",
+      "reason": "Deferred: upstream changed the provider update pill for its React Compiler adoption (t3code#20590). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider update pill compiles with the React Compiler (#20590)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "78a0ea55c1d9edce8bcd2b3caff9510b4093e6d3",
@@ -16796,10 +16885,9 @@
     {
       "upstreamSha": "792c7dd127865fc542a453ad944b94ae85ead10a",
       "subject": "fix(web): show double bolts for Codex Ultrafast (#14479)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): show double bolts for Codex Ultrafast (#14479).",
+      "reason": "Not applicable: upstream draws a double bolt for the Ultrafast service tier in its composer control. f5's Codex traits picker does not draw service tier icons. Upstream change: fix(web): show double bolts for Codex Ultrafast (#14479)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7931227977ca3e6f3354a63467caa634ab79796f",
@@ -16933,7 +17021,7 @@
         "docs/reviews/upstream-october-review-response.md:941",
         "apps/server/src/provider/Layers/PiAdapter.test.ts:1",
         "apps/server/src/orchestration/rewind.test.ts:1",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:2200",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:2226",
         "apps/server/src/provider/ProviderNativeHistory.test.ts:1",
         "packages/shared/src/nativeHistoryReconciliation.test.ts:1"
       ]
@@ -17048,10 +17136,16 @@
     {
       "upstreamSha": "7b09ac7e0022769425471fad1c0d152c03d5954f",
       "subject": "fix(provider-opencode): tell OpenCode Zen and Go models apart (#17424)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(provider-opencode): tell OpenCode Zen and Go models apart (#17424).",
+      "reason": "Ported (web half): a model row shows a sub-provider whose name starts with the provider name, such as OpenCode Zen or OpenCode Go, on its own instead of \"OpenCode · OpenCode Zen\". f5's OpenCode 1.x provider already labels each model with its provider's name; the OpenCode 2 catalog half does not apply because f5 has no OpenCode 2 adapter. Upstream change: fix(provider-opencode): tell OpenCode Zen and Go models apart (#17424)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["3de46c6b1eed05a206ac6cb3d2b48563c4d2b939"],
+      "evidence": [
+        "apps/web/src/components/chat/providerIconUtils.ts:146",
+        "apps/web/src/components/chat/providerIconUtils.test.ts:8",
+        "apps/server/src/provider/Layers/OpenCodeProvider.ts:235"
+      ]
     },
     {
       "upstreamSha": "7b2cf4374f5d92cc01eff482ad1af92ab7a87f41",
@@ -17142,10 +17236,9 @@
     {
       "upstreamSha": "7bdfed98d733d1bcda99f43d43b24cd6913f2fce",
       "subject": "fix(web): keep vertical cursor stops outside styled markers (#19651)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keep vertical cursor stops outside styled markers (#19651).",
+      "reason": "Not applicable: upstream fixes vertical cursor stops in its Tiptap composer. f5's composer is built on Lexical (apps/web/src/components/ComposerPromptEditor.tsx:11). Upstream change: fix(web): keep vertical cursor stops outside styled markers (#19651)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7bee189dfb5cd6807457e98af0c2f95f5ed50edd",
@@ -17447,10 +17540,16 @@
     {
       "upstreamSha": "7ee2839cb58263742301895a6be826505daa64ea",
       "subject": "fix: Claude and Codex no longer time out behind mise wrappers (#19340)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix: Claude and Codex no longer time out behind mise wrappers (#19340).",
+      "reason": "Ported: the desktop and a standalone server copy __MISE_DIFF with the login shell's PATH, so a mise wrapper named like the CLI cannot re-run itself until Claude or Codex times out. Upstream change: fix: Claude and Codex no longer time out behind mise wrappers (#19340)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["81f6c24c3e7335120b14479cfa81620ef9bdd4e4"],
+      "evidence": [
+        "apps/desktop/src/syncShellEnvironment.ts:59",
+        "apps/server/src/os-jank.ts:25",
+        "apps/server/src/os-jank.test.ts:24"
+      ]
     },
     {
       "upstreamSha": "7ee52b077399463323e859f9451a65d31b96a27f",
@@ -17523,10 +17622,16 @@
     {
       "upstreamSha": "7fd2ba7526b94080810de575f5ab15fe96d2bb5d",
       "subject": "fix(server): failed Claude text generation shows the CLI's own error (#19394)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): failed Claude text generation shows the CLI's own error (#19394).",
+      "reason": "Ported: a failed Claude text generation reports the CLI's own is_error result from stdout ahead of stderr, which may hold only wrapper notices. Upstream change: fix(server): failed Claude text generation shows the CLI's own error (#19394)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["4fb709b0063a9368229ba5fec525d8c2b08260f5"],
+      "evidence": [
+        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:94",
+        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:265",
+        "apps/server/src/git/Layers/ClaudeTextGeneration.test.ts:524"
+      ]
     },
     {
       "upstreamSha": "7ff2eabf56d30af15a8ac86b0eb46013a9e910ee",
@@ -17539,10 +17644,9 @@
     {
       "upstreamSha": "7ffa2184a7cfc78d870bf6cbfa4064c51868aef2",
       "subject": "fix(prs): queue fast actions and close batches by dragging (#15851)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(prs): queue fast actions and close batches by dragging (#15851).",
+      "reason": "Not applicable: upstream queues pull request speed actions and closes batches by dragging, in its PullRequestService and pull request list components. f5's PR hub (apps/web/src/components/prHub) has no speed actions or batches. Upstream change: fix(prs): queue fast actions and close batches by dragging (#15851)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "801ca76ed6a5b9d5d6a40f6c1ba231d9ffb3757e",
@@ -17685,7 +17789,7 @@
       "reviewStatus": "reviewed",
       "disposition": "not-applicable",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:276"]
+      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:279"]
     },
     {
       "upstreamSha": "80c708a1fa8986bce0b2d1ba4d35e79d9e4094ba",
@@ -17812,7 +17916,7 @@
       "evidence": [
         "apps/server/src/provider/acp/CopilotAcpRouting.test.ts:1",
         "apps/server/src/provider/acp/CustomAcpSupport.test.ts:47",
-        "apps/server/src/provider/acp/AcpSessionRuntime.ts:408"
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:417"
       ]
     },
     {
@@ -17891,10 +17995,9 @@
     {
       "upstreamSha": "825450508452a60a0446378a67daa192be9d99f5",
       "subject": "perf(web): the provider update launch notification compiles with the React Compiler (#20577)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider update launch notification compiles with the React Compiler (#20577).",
+      "reason": "Deferred: upstream changed the provider update launch notification for its React Compiler adoption (t3code#20577). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider update launch notification compiles with the React Compiler (#20577)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "82689782eee0f0cf27d5601e1d533381587b64f8",
@@ -17913,10 +18016,11 @@
     {
       "upstreamSha": "8283b481a34f5cc6f984f290e7cb93cc35b4dc56",
       "subject": "fix(server): Claude V2 turns start on Windows with the default binary path (#15021)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude V2 turns start on Windows with the default binary path (#15021).",
+      "reason": "Equivalent: upstream's orchestration-v2 Claude adapter skipped the SDK executable resolution its v1 adapter does, so Windows turns failed with the default binary path. f5's Claude adapter resolves the executable, falling back to the bundled one, before every session. Upstream change: fix(server): Claude V2 turns start on Windows with the default binary path (#15021)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["ff590c2a1b9000195bcfc83aa87993ac5eff85d3"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:7719"]
     },
     {
       "upstreamSha": "8287f2c3a771f4a88f781e9c98830692b186c5c3",
@@ -18051,10 +18155,11 @@
     {
       "upstreamSha": "836098543c6ecdf66734596df0ea3a8f6513f2a6",
       "subject": "fix(server): discover Claude commands in each workspace (#15462)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): discover Claude commands in each workspace (#15462).",
+      "reason": "Equivalent: upstream probes Claude's commands in each workspace cwd because its composer listed commands from a machine-wide probe. f5 lists a thread's commands from its live Claude session's supportedCommands, and that session runs in the thread's workspace. Upstream change: fix(server): discover Claude commands in each workspace (#15462)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:2935"]
     },
     {
       "upstreamSha": "837f6b871a88db0986c98a5a5ebc6bd80b4f2546",
@@ -18600,10 +18705,9 @@
     {
       "upstreamSha": "87c366b1206b13701fbcc38e459d457f0f9da2df",
       "subject": "fix(server): a refused Claude turn no longer throws away its session (#16287)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): a refused Claude turn no longer throws away its session (#16287).",
+      "reason": "Not applicable: upstream keeps a provider session when a Claude turn start is refused, in its orchestration-v2 ProviderTurnStartService and context handoff delivery. f5 has neither. Upstream change: fix(server): a refused Claude turn no longer throws away its session (#16287)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "87ce906e4fba8e7a76426f6bda0553061affb7ab",
@@ -18801,10 +18905,9 @@
     {
       "upstreamSha": "895354e9fbf5be90cda4fdcd710dac96496181c4",
       "subject": "fix(server): Antigravity installs on Windows ARM (#18472)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Antigravity installs on Windows ARM (#18472).",
+      "reason": "Not applicable: upstream's Antigravity install validates the runtime by launching it with a temporary profile, which left DLLs locked on Windows ARM. f5 installs a pinned, sha256-verified native win32-arm64 archive (apps/server/src/provider/antigravityRelease.ts:66) without a validation launch. Upstream change: fix(server): Antigravity installs on Windows ARM (#18472)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "896fe82f2f191eb8ac0fd620e19c25dd48253592",
@@ -19125,18 +19228,18 @@
     {
       "upstreamSha": "8bf0a38873aed486a585b2cebd8dd577ae5656b3",
       "subject": "perf(web): switching project keeps Diagnostics and Providers mounted (#17122)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): switching project keeps Diagnostics and Providers mounted (#17122).",
+      "reason": "Not applicable: upstream keeps its project-scoped Diagnostics and Providers settings panes mounted across project switches. f5's settings have no per-project scope sentence or scoped panes. Upstream change: perf(web): switching project keeps Diagnostics and Providers mounted (#17122)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "8c027980eb61abd3b3d57bb61c3e9a55bf793be9",
       "subject": "fix(claude): default background text generation to haiku 5.5 (#18781)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(claude): default background text generation to haiku 5.5 (#18781).",
+      "reason": "Equivalent: f5's default Claude model for background text generation is already claude-haiku-5-5. Upstream change: fix(claude): default background text generation to haiku 5.5 (#18781)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["5295f26037c28dbb9d3910fbd63f436e8af98e9e"],
+      "evidence": ["packages/contracts/src/model.ts:312", "packages/contracts/src/model.ts:300"]
     },
     {
       "upstreamSha": "8c18b5bb21a5349fbadba8c77456ea34c41b7339",
@@ -19237,10 +19340,14 @@
     {
       "upstreamSha": "8d11fe1261f0dfd74f58a1b1ae8ad7e400905fcb",
       "subject": "fix(server): steered Claude turns no longer undercount token usage (#19314)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): steered Claude turns no longer undercount token usage (#19314).",
+      "reason": "Equivalent: f5 sums main-loop usage from every result segment of a logical Claude turn, including segments a steer ended, and resets only at a turn boundary, so a steered turn bills all of its segments. Upstream change: fix(server): steered Claude turns no longer undercount token usage (#19314)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["625cbd0368cd2cbae409582b18b9364a37e5bf7e"],
+      "evidence": [
+        "apps/server/src/provider/Layers/claudeTurnLifecycle.ts:56",
+        "apps/server/src/provider/Layers/claudeTurnLifecycle.test.ts:103"
+      ]
     },
     {
       "upstreamSha": "8d1858d9d608d78b67268cdc52bceb4302ae8870",
@@ -19823,10 +19930,16 @@
     {
       "upstreamSha": "90ca6a775843d226937b396e0af18e9664448508",
       "subject": "fix(server): new Codex threads no longer miss slow MCP servers' tools (#19368)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): new Codex threads no longer miss slow MCP servers' tools (#19368).",
+      "reason": "Ported: Codex thread start, resume and fork send a 10 s mcp_optional_startup_grace_ms override, so cold npx or uvx MCP servers are not left out of a new thread. Upstream change: fix(server): new Codex threads no longer miss slow MCP servers' tools (#19368)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["77c635c8ebfd3385c5d36b38d369caf257030b5d"],
+      "evidence": [
+        "apps/server/src/codexAppServerManager.ts:643",
+        "apps/server/src/codexAppServerManager.ts:658",
+        "apps/server/src/codexAppServerManager.test.ts:574"
+      ]
     },
     {
       "upstreamSha": "90e3778660690e4f00bdd4e237fc541725dc1427",
@@ -20128,10 +20241,16 @@
     {
       "upstreamSha": "9333509c918083cbfb7e66759ddbcbfa71a3a452",
       "subject": "fix(client-runtime): reconnects back off with jitter and keep healthy sockets (#14897)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(client-runtime): reconnects back off with jitter and keep healthy sockets (#14897).",
+      "reason": "Equivalent: reconnect delays follow a bounded ladder with jitter, and focus, online and visibility signals only reconnect a socket that is not open or connecting; a healthy socket gets a coalesced probe instead. Upstream change: fix(client-runtime): reconnects back off with jitter and keep healthy sockets (#14897)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["f57e2499596c4b9ee7c65bc4c0774000241d60dc"],
+      "evidence": [
+        "apps/web/src/wsTransport.ts:99",
+        "apps/web/src/wsTransport.ts:549",
+        "apps/web/src/wsTransport.test.ts:156",
+        "apps/web/src/wsTransport.test.ts:400"
+      ]
     },
     {
       "upstreamSha": "93349247008517663aa16a3ed145d5b0f3f044ff",
@@ -20369,10 +20488,9 @@
     {
       "upstreamSha": "94d1a8e93f0434d34fa894523a04fe6a6f6172f6",
       "subject": "fix(server): restore OpenCode adapter test typecheck (#17810)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): restore OpenCode adapter test typecheck (#17810).",
+      "reason": "Not applicable: upstream fixes a type error in its v2 OpenCode adapter test. Upstream change: fix(server): restore OpenCode adapter test typecheck (#17810)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "94d1fa7ff268e88476a341eb73f9f032e2af6a21",
@@ -20391,10 +20509,17 @@
     {
       "upstreamSha": "94f92a7a386a26c98892b24fabdd0ea9fa804ce3",
       "subject": "fix(server): let Claude abort turns before closing sessions (#13999)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): let Claude abort turns before closing sessions (#13999).",
+      "reason": "Ported: Stop asks the SDK to interrupt the running Claude turn and waits up to 3 seconds for its result before closing the query, so a first turn reaches the transcript and its resume cursor stays valid. Upstream change: fix(server): let Claude abort turns before closing sessions (#13999)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["e0767eb8e26896daf74104b0e19ecb603f42c10b"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:8446",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4117",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:12723",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:12767"
+      ]
     },
     {
       "upstreamSha": "95030dc674883f0f2a7fd034b32ce742c8cf55d0",
@@ -20433,7 +20558,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/codexAppServerManager.ts:2186"],
+      "evidence": ["apps/server/src/codexAppServerManager.ts:2213"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -20467,10 +20592,9 @@
     {
       "upstreamSha": "953edeec9dcddd7afc582926eb1b65cfd82dc784",
       "subject": "fix(server): Muse turns no longer fail on Windows (#17163)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Muse turns no longer fail on Windows (#17163).",
+      "reason": "Deferred: upstream passes Muse the verbatim canonical Windows path (\\\\?\\C:\\...) as its workspace root and launches muse.cmd through cmd.exe. f5 sends the plain cwd (apps/server/src/provider/Layers/MuseAdapter.ts:1138); this is Windows-only and needs verification on a Windows host with Muse before porting. Upstream change: fix(server): Muse turns no longer fail on Windows (#17163)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "9547cf24634ccafe5d381964449b722d33f812b8",
@@ -20513,7 +20637,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1c",
       "evidence": [
-        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:141",
+        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:161",
         "apps/server/integration/claudeMetadata.integration.test.ts:13",
         "apps/server/src/git/Layers/ClaudeTextGeneration.test.ts:375"
       ],
@@ -21034,7 +21158,7 @@
       "plannedWorkstream": "15r",
       "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13645",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13737",
         "apps/server/src/provider/claudeResumeState.test.ts:18"
       ]
     },
@@ -21157,7 +21281,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:159"],
+      "evidence": ["apps/server/src/provider/opencodeRuntime.ts:162"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -21288,10 +21412,9 @@
     {
       "upstreamSha": "9bd1d8009a6b7c50f9dd9458e2bf27d481ff3b43",
       "subject": "fix(server): OpenCode 2 threads get T3 Code's MCP tools (#16142)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): OpenCode 2 threads get T3 Code's MCP tools (#16142).",
+      "reason": "Not applicable: upstream gives OpenCode 2 threads its MCP tools in the orchestration-v2 OpenCode 2 adapter. f5 has no OpenCode 2 adapter. Upstream change: fix(server): OpenCode 2 threads get T3 Code's MCP tools (#16142)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9bd2a4c6886a4c20e0a0a937dc98dd118c645c8f",
@@ -21521,10 +21644,14 @@
     {
       "upstreamSha": "9da066dbe906310671b86290b09df0b56a88ffa5",
       "subject": "fix(server): Claude /compact no longer ends early and leaves the thread busy (#14497)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Claude /compact no longer ends early and leaves the thread busy (#14497).",
+      "reason": "Equivalent: a Claude result whose echoed user message ids, resume reason or non-human origin show it belongs to another turn is ignored, so a native continuation cannot complete the user's /compact or other queued turn early. Upstream change: fix(server): Claude /compact no longer ends early and leaves the thread busy (#14497)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["541464dd765f6ee51cf1f211791cd0e79a90c220"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4893",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:3757"
+      ]
     },
     {
       "upstreamSha": "9da0fab08e0ee444affdfb4916e294c579158bb6",
@@ -21786,10 +21913,9 @@
     {
       "upstreamSha": "9f48092ec95dd9eab78931601de95be0107a930c",
       "subject": "fix(server): Claude 5-series models always run 1M context (#16908)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Claude 5-series models always run 1M context (#16908).",
+      "reason": "Deferred: upstream removes the 200k/1M context choice from every Claude 5-series model on the premise that the CLI always runs them at 1M without the [1m] suffix. In f5 only Claude Fable 5 and Sonnet 5 still offer the choice (packages/shared/src/model.ts:95), and f5 deliberately routes the 1M choice through the [1m] suffix and a Fable 5 to Fable 5.1 switch, which 11 adapter and text-generation tests cover. Changing that needs the CLI behavior confirmed first. Upstream change: fix(server): Claude 5-series models always run 1M context (#16908)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "9f61ba674115f3ddb67a8a1fbe0a0ac8839551bf",
@@ -21831,10 +21957,9 @@
     {
       "upstreamSha": "9fa39677e16a339e9ed0e29a1d8e4cec3a500380",
       "subject": "perf(web): the queued runs control compiles with the React Compiler (#20475)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the queued runs control compiles with the React Compiler (#20475).",
+      "reason": "Deferred: upstream changed the queued runs control for its React Compiler adoption (t3code#20475). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the queued runs control compiles with the React Compiler (#20475)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "9fa54eeb4c481b444c68e38d00066d707af5f677",
@@ -21859,7 +21984,7 @@
       "disposition": "equivalent",
       "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
       "evidence": [
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:185",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:191",
         "apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts:64"
       ]
     },
@@ -22071,10 +22196,9 @@
     {
       "upstreamSha": "a143fa3c56be890346b8a7915a6a870529201dda",
       "subject": "fix(client): T3 Connect clients reconnect once a new tunnel is ready (#16554)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(client): T3 Connect clients reconnect once a new tunnel is ready (#16554).",
+      "reason": "Not applicable: upstream fixes T3 Connect relay clients reconnecting after a tunnel is replaced. f5 has no relay or tunnel client. Upstream change: fix(client): T3 Connect clients reconnect once a new tunnel is ready (#16554)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a148e08197fc38b24e59c10c7cd5ba06dd182dab",
@@ -22093,9 +22217,9 @@
       "f5Shas": ["2d5aee08dd6dfe25b0f57e3750103cab3539e63b"],
       "evidence": [
         "apps/server/src/provider/claudeGoal.ts:36",
-        "apps/server/src/provider/Layers/ClaudeAdapter.ts:3603",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:3608",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:612",
-        "apps/server/src/codexAppServerManager.ts:1883",
+        "apps/server/src/codexAppServerManager.ts:1910",
         "apps/web/src/components/ChatView.tsx:7207"
       ]
     },
@@ -22314,10 +22438,9 @@
     {
       "upstreamSha": "a37e0f3dba1bad00bdb8c11ad4f4ba4ff750ffab",
       "subject": "perf(web): the provider settings form compiles without manual memoization (#20618)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider settings form compiles without manual memoization (#20618).",
+      "reason": "Deferred: upstream changed the provider settings form for its React Compiler adoption (t3code#20618). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider settings form compiles without manual memoization (#20618)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "a38cac81d82b82a6967eaf8cb90ed2770c514f3c",
@@ -22472,10 +22595,9 @@
     {
       "upstreamSha": "a4a1a803a3a6d10d16e45f505a2b95e99430b1cb",
       "subject": "fix(server): delegated Muse tasks no longer ask approval for every command (#18065)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): delegated Muse tasks no longer ask approval for every command (#18065).",
+      "reason": "Not applicable: upstream narrows the runtime mode its orchestrator MCP gives a delegated Muse task. f5 has no delegated-task orchestration. Upstream change: fix(server): delegated Muse tasks no longer ask approval for every command (#18065)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a4bc7deb992cc3d48dd4a40ee1f84254f190f318",
@@ -22528,10 +22650,9 @@
     {
       "upstreamSha": "a4f6caf8cf43f33aa623ae03df6d6078546bbba2",
       "subject": "perf(web): the provider models section compiles with the React Compiler (#20617)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider models section compiles with the React Compiler (#20617).",
+      "reason": "Deferred: upstream changed the provider models section for its React Compiler adoption (t3code#20617). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider models section compiles with the React Compiler (#20617)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "a5331e4c2c0f0a7b85d912e487f5c97bbce921aa",
@@ -22549,10 +22670,17 @@
     {
       "upstreamSha": "a54a44c6693460ac5c2a8529bbe6f9d0931c6477",
       "subject": "fix(orchestration): queue follow-ups sent while a thread compacts (#20184)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(orchestration): queue follow-ups sent while a thread compacts (#20184).",
+      "reason": "Equivalent: every send goes through the durable queue, and the queue gate holds every item, steers included, while the thread compacts automatically. A manual compact pauses the queue. The new test pins the order so a steer cannot reach a compaction turn. Upstream change: fix(orchestration): queue follow-ups sent while a thread compacts (#20184)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "b4bec80827a1888003d44f8ee83872b97db4e067",
+        "573b57d3a4ca17ac369e41d04977aa1a39de6f32"
+      ],
+      "evidence": [
+        "apps/server/src/nextTurnQueue/gate.ts:140",
+        "apps/server/src/nextTurnQueue/gate.test.ts:100"
+      ]
     },
     {
       "upstreamSha": "a5539a6b0375968ba8f743b8cc364ef75971d089",
@@ -22620,7 +22748,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1c",
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.ts:3515",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:3520",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:3421"
       ],
       "f5Shas": ["5d48a79b409bf4790864f0112061877c5572d931"]
@@ -22635,10 +22763,9 @@
     {
       "upstreamSha": "a5d97921f6a2a310f55c481763248a313ed3dc17",
       "subject": "fix: command output streams live while it runs (#15094)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix: command output streams live while it runs (#15094).",
+      "reason": "Deferred: upstream adds an ephemeral command output hub that streams running command output, including a tail of Claude background task output files. f5 already streams Codex command output live into the command execution record (apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:4713); a live tail for Claude commands is new feature work for a dedicated block. Upstream change: fix: command output streams live while it runs (#15094)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "a5da32750125c3bedb959bf331e5e49e95b95e5d",
@@ -22693,7 +22820,7 @@
       "evidence": [
         "apps/server/src/orchestration/Layers/ProjectionPipeline.ts:2259",
         "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:110",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:371"
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:377"
       ],
       "f5Shas": ["ea0afa99e26887c9da2914b46a6d091b679cd47b"]
     },
@@ -22747,10 +22874,14 @@
     {
       "upstreamSha": "a7025639c0e16aad3081106c935bf3025f601a1e",
       "subject": "perf(web): the new-thread handler keeps its identity across provider pushes (#20731)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the new-thread handler keeps its identity across provider pushes (#20731).",
+      "reason": "Equivalent: upstream stopped its new-thread handler from subscribing to the environment config map, which every provider push replaced. f5's handler never reads server config, so its identity only follows the draft-creation callback. Upstream change: perf(web): the new-thread handler keeps its identity across provider pushes (#20731)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": [
+        "apps/web/src/hooks/useHandleNewThread.ts:15",
+        "apps/web/src/hooks/useHandleNewThread.ts:31"
+      ]
     },
     {
       "upstreamSha": "a7028f1399911e8ddfd8013914b100ee49b95595",
@@ -22853,10 +22984,9 @@
     {
       "upstreamSha": "a793011879c0c1f6a6cbf9d28e264534b2c3c3ba",
       "subject": "perf(web): the add provider dialog compiles without manual memoization (#20578)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the add provider dialog compiles without manual memoization (#20578).",
+      "reason": "Deferred: upstream changed the add provider dialog for its React Compiler adoption (t3code#20578). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the add provider dialog compiles without manual memoization (#20578)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "a7a2230c33fbec9d6616a5de26f09e1fa8856c05",
@@ -22940,10 +23070,9 @@
     {
       "upstreamSha": "a8927712f8b3338fa3c47a0c657b6e11d7e9aaec",
       "subject": "fix(server): Codex auth tokens are an omitted key, never undefined (#14908)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Codex auth tokens are an omitted key, never undefined (#14908).",
+      "reason": "Not applicable: upstream fixes how its telemetry identifier decodes the tokens key of Codex's auth.json. f5's telemetry identifier is a profile-local anonymous id and never reads Codex credentials (apps/server/src/telemetry/Identify.ts:37). Upstream change: fix(server): Codex auth tokens are an omitted key, never undefined (#14908)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a89a797f4245c64c3ff675c8b2855fb8349b75f1",
@@ -22955,10 +23084,9 @@
     {
       "upstreamSha": "a8bdfdb54181fb5c9d43f2747112c137a804d016",
       "subject": "fix(server): Claude 5 task lists reach the tasks drawer (#14964)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude 5 task lists reach the tasks drawer (#14964).",
+      "reason": "Deferred: upstream projects Claude 5's TaskCreate, TaskUpdate and TaskList calls into its tasks drawer. f5's Claude adapter does not project Claude todo lists into a plan at all (TodoWrite included); port with a Claude task-list feature. Upstream change: fix(server): Claude 5 task lists reach the tasks drawer (#14964)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "a8c480241836a7f6b79862e4504f37801cda6cde",
@@ -22978,10 +23106,9 @@
     {
       "upstreamSha": "a8dcb960d0d14c5750b25c0a04cd062b4cb0dc57",
       "subject": "perf(web): the provider accent color picker compiles without manual memoization (#20612)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider accent color picker compiles without manual memoization (#20612).",
+      "reason": "Deferred: upstream changed the provider accent color picker for its React Compiler adoption (t3code#20612). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider accent color picker compiles without manual memoization (#20612)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "a8e05cbb92633a1351529f2bc402071f615e5051",
@@ -23223,10 +23350,14 @@
     {
       "upstreamSha": "aad732901e4b7d485574eaef5a9c1fb388c4291a",
       "subject": "fix(server): Claude threads no longer stay stuck in plan mode Claude entered itself (#15224)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Claude threads no longer stay stuck in plan mode Claude entered itself (#15224).",
+      "reason": "Equivalent: upstream resets a reused Claude process to the thread's permission mode after Claude entered plan mode itself. f5 passes the thread's interaction mode on every turn and calls setPermissionMode for both plan and default before each prompt, so a mode Claude switched itself never carries into the next turn. Upstream change: fix(server): Claude threads no longer stay stuck in plan mode Claude entered itself (#15224)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:8235",
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts:1796"
+      ]
     },
     {
       "upstreamSha": "aade3a69a8536be98d2fe9b0fb9193289b70e90b",
@@ -23515,10 +23646,9 @@
     {
       "upstreamSha": "acb90279e2adad19a63586944543fe7346499467",
       "subject": "fix(provider-cursor): Cursor text generation no longer leaks SQLite file handles on every call (#19310)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(provider-cursor): Cursor text generation no longer leaks SQLite file handles on every call (#19310).",
+      "reason": "Not applicable: upstream's Cursor text generation runs the in-process Cursor Agent SDK, which leaked SQLite handles per call. f5 talks to Cursor over its ACP CLI and does not load @cursor/sdk. Upstream change: fix(provider-cursor): Cursor text generation no longer leaks SQLite file handles on every call (#19310)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "acf761b2f511e1918260a8043e151bbc2849e29a",
@@ -23570,10 +23700,16 @@
     {
       "upstreamSha": "adb04202b25c1c45255e76be9f03f0b346b9c5c4",
       "subject": "fix(clients): large pasted images no longer break later Claude image reads (#19364)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(clients): large pasted images no longer break later Claude image reads (#19364).",
+      "reason": "Ported: image attachments longer than 2000px on a side are re-encoded instead of passed through, and the first re-encode step is 2000px rather than 2048px, so later Claude requests in a thread with many images are not rejected. f5 re-encodes to WebP, which keeps transparency. Upstream change: fix(clients): large pasted images no longer break later Claude image reads (#19364)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["e175e8ac2358317cc52c79ed682288e26a2a940c"],
+      "evidence": [
+        "apps/web/src/lib/imageCompression.core.ts:9",
+        "apps/web/src/lib/imageCompression.core.ts:333",
+        "apps/web/src/lib/imageCompression.core.test.ts:107"
+      ]
     },
     {
       "upstreamSha": "adbecdac7b6f1a167cc389b3d5fe5be8ec70afdf",
@@ -23663,10 +23799,9 @@
     {
       "upstreamSha": "ae5fd184288aa600f5afbaaf53eeabc5610f9036",
       "subject": "fix(server): OpenCode 2 continuations replay only their own background reply (#14752)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): OpenCode 2 continuations replay only their own background reply (#14752).",
+      "reason": "Not applicable: upstream limits an OpenCode 2 continuation to replaying its own background reply in its orchestration-v2 continuation service and OpenCode 2 adapter. f5 has neither. Upstream change: fix(server): OpenCode 2 continuations replay only their own background reply (#14752)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ae67c5b8159cb49a68c16f96f7bb64a2e3c6b1c6",
@@ -23838,8 +23973,8 @@
       "plannedWorkstream": "15r",
       "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13799",
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:12998"
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13891",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13090"
       ]
     },
     {
@@ -24329,10 +24464,9 @@
     {
       "upstreamSha": "b3b6ae2cebbae39a706038911dbb8c85c7120be7",
       "subject": "fix(server): recover claude skill scalar frontmatter (#15452)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): recover claude skill scalar frontmatter (#15452).",
+      "reason": "Not applicable: upstream recovers scalar frontmatter in its own Claude skill file scanner (ClaudeSkills.ts). f5 does not scan skill files; it takes Claude's skills and commands from the CLI's supportedCommands. Upstream change: fix(server): recover claude skill scalar frontmatter (#15452)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b3d05640a4670bd34ec4950d2a60f0616dea6780",
@@ -24468,10 +24602,9 @@
     {
       "upstreamSha": "b467be4ea7bb9ba1d1664a77939473e2fda8ec4e",
       "subject": "perf(opencode): stop retaining every message of a loaded OpenCode thread (#17784)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(opencode): stop retaining every message of a loaded OpenCode thread (#17784).",
+      "reason": "Not applicable: upstream drops a per-thread message map from its v2 OpenCode adapter state. f5's OpenCode adapter keeps no such map of loaded messages. Upstream change: perf(opencode): stop retaining every message of a loaded OpenCode thread (#17784)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b4680cbfd064d59fdd2386a5ac6fc75e26e8c96b",
@@ -24513,10 +24646,14 @@
     {
       "upstreamSha": "b4d3d51ac99d4306d754afb5c78c49845bfac3c1",
       "subject": "fix(server): Claude model changes no longer kill running background agents (#14726)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Claude model changes no longer kill running background agents (#14726).",
+      "reason": "Equivalent: a model change is applied to the live query with setModel, without restarting the process, interrupting it or stopping tasks, and running background agents keep their turn ownership. Upstream change: fix(server): Claude model changes no longer kill running background agents (#14726)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:8165",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13816"
+      ]
     },
     {
       "upstreamSha": "b4f1f18b735679aedc4369190fc3f07ecaf8966c",
@@ -25441,10 +25578,11 @@
     {
       "upstreamSha": "bc5f754baabf62b5488cfb4007d3ab33b6957c03",
       "subject": "perf(client): a reconnect snapshot keeps unchanged skills and providers identical (#20855)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(client): a reconnect snapshot keeps unchanged skills and providers identical (#20855).",
+      "reason": "Equivalent: after a reconnect f5 refetches the server config through the same query, whose structural sharing keeps unchanged skills and providers identical. Upstream change: perf(client): a reconnect snapshot keeps unchanged skills and providers identical (#20855)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["553ee4c282c6a3e5e811903ef80abc1b659bf11a"],
+      "evidence": ["apps/web/src/routes/__root.tsx:1196", "apps/web/src/lib/serverReactQuery.ts:10"]
     },
     {
       "upstreamSha": "bc8584bf8e967ecc1cd215d42bd7a47faf51a862",
@@ -25487,10 +25625,14 @@
     {
       "upstreamSha": "bc95bbd790580ff22bf1351edfa84231493c4ecc",
       "subject": "fix(server): changing Claude effort no longer fails while background agents run (#19341)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): changing Claude effort no longer fails while background agents run (#19341).",
+      "reason": "Equivalent: an effort change is applied to the live query through flag settings, without a restart, while background agents run; the test changes effort with a background agent active and asserts no restart, interrupt or task stop. Upstream change: fix(server): changing Claude effort no longer fails while background agents run (#19341)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:8165",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13816"
+      ]
     },
     {
       "upstreamSha": "bcb855a633566c2dc70239155ddcd28f0fa736c4",
@@ -25634,10 +25776,16 @@
     {
       "upstreamSha": "bd89c1302026255c62cc09278207bfaf2664da4a",
       "subject": "fix(server): Grok CLIs older than 1.0.13 are marked broken (#14486)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Grok CLIs older than 1.0.13 are marked broken (#14486).",
+      "reason": "Ported: the Grok provider check reports a CLI older than 1.0.13 as an error asking for an upgrade, matching upstream's move of that range from unknown to broken. f5 has no model manifest, so the floor is enforced in the provider check. Upstream change: fix(server): Grok CLIs older than 1.0.13 are marked broken (#14486)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["31e7053250ca8196c068ed57c8119d3c51887059"],
+      "evidence": [
+        "apps/server/src/provider/Layers/GrokProvider.ts:22",
+        "apps/server/src/provider/Layers/GrokProvider.ts:217",
+        "apps/server/src/provider/Layers/GrokProvider.test.ts:64"
+      ]
     },
     {
       "upstreamSha": "bd9ed2b4bbda3dd6e468df1cb06233e29c4a9f5c",
@@ -25835,10 +25983,9 @@
     {
       "upstreamSha": "bf7121d7a25fe84d76561c3142b9433615a703a1",
       "subject": "fix(server): API-key Codex installs no longer warn on every start (#14903)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): API-key Codex installs no longer warn on every start (#14903).",
+      "reason": "Not applicable: upstream stops warning on every start when an API-key Codex auth.json has no tokens key. f5's telemetry identifier never reads Codex's auth.json (apps/server/src/telemetry/Identify.ts:37). Upstream change: fix(server): API-key Codex installs no longer warn on every start (#14903)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "bf725cb80d79334601c2833cb599524a3669e03b",
@@ -26035,10 +26182,9 @@
     {
       "upstreamSha": "c09c235129c1581f92a4f6e30470461cf7777f05",
       "subject": "fix(server): preserve ambient Cursor MCP servers (#15875)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): preserve ambient Cursor MCP servers (#15875).",
+      "reason": "Not applicable: upstream stopped passing MCP overrides to the Cursor Agent SDK's send call, which replaced the ambient servers. f5 runs Cursor over its ACP CLI and does not use the SDK send options. Upstream change: fix(server): preserve ambient Cursor MCP servers (#15875)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c0bb2373450231e3931937d2f703e35ce906ed85",
@@ -26200,10 +26346,9 @@
     {
       "upstreamSha": "c138163c8cc39d4a98b2d3d796bcef183013bac5",
       "subject": "perf: cheaper shell refreshes, one copy of Codex streaming text, no MCP wait polling (#15033)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf: cheaper shell refreshes, one copy of Codex streaming text, no MCP wait polling (#15033).",
+      "reason": "Not applicable: the server half trims orchestration-v2 shell stream refreshes, Codex v2 streaming text and orchestrator MCP wait polling, none of which f5 has. The web half removes the live-tool-shine animation, which f5 never added. Upstream change: perf: cheaper shell refreshes, one copy of Codex streaming text, no MCP wait polling (#15033)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c13a021e432e94728fe88ff983fb9601c6d6b943",
@@ -26522,10 +26667,9 @@
     {
       "upstreamSha": "c346fb679bac106c4c162ab145c27e3c8b9640bd",
       "subject": "fix(web): open provider update details from both icons (#15501)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): open provider update details from both icons (#15501).",
+      "reason": "Not applicable: upstream makes both of its version advisory icons open the update popover. f5 shows update details from a single ProviderUpdateDialog trigger (apps/web/src/components/settings/ProviderInstanceCard.tsx:645). Upstream change: fix(web): open provider update details from both icons (#15501)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c36880ea67221d81a1dcfedd462c483cd4400b1f",
@@ -26888,10 +27032,9 @@
     {
       "upstreamSha": "c727d1219f4ef10ad2a41f0e67df80ca51924673",
       "subject": "fix(web): Compact chip follows Claude's real prompt cache TTL (#17945)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): Compact chip follows Claude's real prompt cache TTL (#17945).",
+      "reason": "Not applicable: upstream times its Compact chip from the prompt cache TTL it infers from Claude usage. f5 has no client-side cache timer; its resume compaction prompt comes from Claude Code's own resume_return dialog (apps/server/src/provider/Layers/ClaudeAdapter.ts:7644), which knows the real TTL. Upstream change: fix(web): Compact chip follows Claude's real prompt cache TTL (#17945)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c73b45480fb79575a90794bfd1d45d538aacb108",
@@ -27450,10 +27593,9 @@
     {
       "upstreamSha": "cae6c6627a323d1d33a340842b0eb384807daedb",
       "subject": "fix(server): only Claude progress updates before a tool call show as text (#18923)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): only Claude progress updates before a tool call show as text (#18923).",
+      "reason": "Deferred: upstream re-introduced a narrower heuristic that shows the second of two thinking blocks before a tool call as assistant text on Claude 5.1+, after reverting a broader one (t3code#18364, t3code#18887). f5's reasoning pipeline differs; validate against real 5.1+ transcripts before adopting a heuristic that changed three times in two days. Upstream change: fix(server): only Claude progress updates before a tool call show as text (#18923)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "caf4981e32f4fd3c9adb8339b5bec2d95d09b7aa",
@@ -27568,10 +27710,9 @@
     {
       "upstreamSha": "cb7d0739389a602d81000bfb5aeb6ebea9e853bb",
       "subject": "fix(server): OpenCode 2 continuations end after a reconnect took a Stop's end (#14744)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): OpenCode 2 continuations end after a reconnect took a Stop's end (#14744).",
+      "reason": "Not applicable: upstream ends OpenCode 2 continuations whose Stop end a reconnect consumed, in its OpenCode 2 adapter. f5 has no OpenCode 2 adapter. Upstream change: fix(server): OpenCode 2 continuations end after a reconnect took a Stop's end (#14744)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cb97415948cc2c0662a5504ccfe7e97981825ed5",
@@ -27605,10 +27746,9 @@
     {
       "upstreamSha": "cbb731beb36db2330c9a2632b11354315658ea21",
       "subject": "fix(server): delegation sees a fixed provider without the app open (#16219)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): delegation sees a fixed provider without the app open (#16219).",
+      "reason": "Not applicable: upstream lets delegation see a fixed provider without the app open, in its orchestrator MCP service. f5 has no delegated-task orchestration. Upstream change: fix(server): delegation sees a fixed provider without the app open (#16219)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cbd55d637413f9fd0b688dc0bd9ee75eeb4f2d75",
@@ -27647,10 +27787,9 @@
     {
       "upstreamSha": "cc1e634bfa62edd56ff792eea666e436fdef788f",
       "subject": "fix(server): released builds keep the OpenCode policy for their own version (#14863)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): released builds keep the OpenCode policy for their own version (#14863).",
+      "reason": "Not applicable: upstream drops a preview-build stopgap from its fetched model manifest and pins OpenCode's compatibility policy per T3 Code version. f5 has no fetched model manifest; its OpenCode version gate is in code (apps/server/src/provider/Layers/OpenCodeProvider.ts:32). Upstream change: fix(server): released builds keep the OpenCode policy for their own version (#14863)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cc39ec1008ce584e088e79210b69d3359357463b",
@@ -27795,10 +27934,11 @@
     {
       "upstreamSha": "cdb26fe63549df633751ab0eed145b9357b30a21",
       "subject": "fix(antigravity): let Stop end commands that outlived their turn (#13388)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(antigravity): let Stop end commands that outlived their turn (#13388).",
+      "reason": "Equivalent: upstream's dedicated Antigravity adapter skipped session/cancel when no turn was active, so Stop could not end commands that outlived their turn. f5 runs Antigravity through its ACP adapter, whose interruptTurn always sends session/cancel. Upstream change: fix(antigravity): let Stop end commands that outlived their turn (#13388)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["c0e97fadf4a6820ca0f670bbc2b88e8a1823d763"],
+      "evidence": ["apps/server/src/provider/Layers/CursorAdapter.ts:1552"]
     },
     {
       "upstreamSha": "cdba9a038e41c6c807a2b58bd43e83dcf98d74b7",
@@ -27901,10 +28041,9 @@
     {
       "upstreamSha": "ce90eec1ffc2087395227a610843091f4b260cf7",
       "subject": "fix(server): a Claude command you stop shows as interrupted (#14896)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): a Claude command you stop shows as interrupted (#14896).",
+      "reason": "Deferred: upstream marks a stopped turn's open tools interrupted instead of failed. f5 also completes them as failed (apps/server/src/provider/Layers/ClaudeAdapter.ts:4015), but its runtime item status has no interrupted value (packages/contracts/src/providerRuntime.ts:87), so the fix needs that status added to the contract and carried through ingestion and the timeline. Upstream change: fix(server): a Claude command you stop shows as interrupted (#14896)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "ce91284f832fc71bf46ff2a8ffc290e20db4e83d",
@@ -28002,7 +28141,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/server/src/provider/Layers/OpenCodeAdapter.ts:1411",
+        "apps/server/src/provider/Layers/OpenCodeAdapter.ts:1412",
         "apps/web/src/components/ChatView.logic.ts:80"
       ],
       "f5Shas": [
@@ -28076,10 +28215,9 @@
     {
       "upstreamSha": "cfafb4bb54d244e4612f5681aad3832ea64cb0fb",
       "subject": "fix(codex): a slow but healthy Codex no longer shows as Unavailable (#15945)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(codex): a slow but healthy Codex no longer shows as Unavailable (#15945).",
+      "reason": "Not applicable: upstream's Codex status probe ran a full app-server handshake plus account, models and skills requests under a 10 s budget. f5's Codex health check runs `codex --version` and `codex login status` (apps/server/src/provider/Layers/ProviderHealth.ts:381), and a slow model catalog probe falls back to built-in models instead of marking Codex unavailable. Upstream change: fix(codex): a slow but healthy Codex no longer shows as Unavailable (#15945)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cfbd1457ad093b1cd7f6c53851009a62b676b203",
@@ -28120,10 +28258,9 @@
     {
       "upstreamSha": "cffabdbb5935c33d1e3e2937b35957e35853a2e4",
       "subject": "perf(web): Codex setup compiles with the React Compiler (#20674)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): Codex setup compiles with the React Compiler (#20674).",
+      "reason": "Deferred: upstream changed Codex setup for its React Compiler adoption (t3code#20674). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): Codex setup compiles with the React Compiler (#20674)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "d01febb509a376d93af2d298a7787449792b5fcb",
@@ -28220,7 +28357,7 @@
       "disposition": "ported",
       "plannedWorkstream": "7c",
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.ts:708",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:713",
         "docs/reviews/phase-seven-media-validation.md:1"
       ],
       "f5Shas": ["d4d6991e764631bc825a3e4061651d6ff1ab484f"]
@@ -28388,10 +28525,9 @@
     {
       "upstreamSha": "d1e56e79ff6a4886366292f1424a5e4560b5fab7",
       "subject": "fix(web): selected provider ring no longer clipped during panel resize (#17534)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): selected provider ring no longer clipped during panel resize (#17534).",
+      "reason": "Not applicable: upstream stops its AnimatedHeight wrapper clipping the selected provider ring. f5 has no AnimatedHeight component. Upstream change: fix(web): selected provider ring no longer clipped during panel resize (#17534)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d1eeb16247a0bd2eca8bbbfa5ab777e096af949c",
@@ -28439,10 +28575,9 @@
     {
       "upstreamSha": "d23ac516c4372ddb1e01c0e6f3b98c715c023b29",
       "subject": "perf(web): ACP session management compile with the React Compiler (#20510)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): ACP session management compile with the React Compiler (#20510).",
+      "reason": "Deferred: upstream changed ACP session management for its React Compiler adoption (t3code#20510). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): ACP session management compile with the React Compiler (#20510)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "d23b181da0cee78bcc327b6673218b776a3cb023",
@@ -28507,7 +28642,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:349"],
+      "evidence": ["apps/server/src/provider/Layers/OpenCodeAdapter.test.ts:352"],
       "f5Shas": [
         "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f",
         "ea2cf9a1fb07a26788c237012bb7099cea23ba4c"
@@ -28741,7 +28876,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/server/src/provider/acp/AcpSessionRuntime.ts:686",
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:699",
         "apps/server/src/provider/acp/AntigravityAcpSupport.ts:83"
       ],
       "f5Shas": [
@@ -28787,10 +28922,9 @@
     {
       "upstreamSha": "d4cd7d5c33122473da22ae118c93477ef7e38310",
       "subject": "fix(providers): restore compatibility ranges for every harness (#13328)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(providers): restore compatibility ranges for every harness (#13328).",
+      "reason": "Not applicable: upstream restores per-harness compatibility ranges in its model manifest and compatibility resolver. f5 has no model manifest; its version gates live in each provider check (Codex, OpenCode and now Grok). Upstream change: fix(providers): restore compatibility ranges for every harness (#13328)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d4d5d12e8ba086cfbf79ca3adeb4156b46ead665",
@@ -28967,7 +29101,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/provider/codexErrors.ts:35",
-        "apps/server/src/provider/usageLimitMessages.test.ts:58"
+        "apps/server/src/provider/usageLimitMessages.test.ts:90"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -28978,10 +29112,9 @@
     {
       "upstreamSha": "d65cd33a03983751598f6bdce76b402ac7bf2cca",
       "subject": "fix(server): Stop ends a dev server left running before a provider switch (#15355)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Stop ends a dev server left running before a provider switch (#15355).",
+      "reason": "Not applicable: upstream makes Stop end a dev server left running before a provider switch, in its orchestration-v2 orchestrator and thread settlement service. f5 has neither. Upstream change: fix(server): Stop ends a dev server left running before a provider switch (#15355)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d668ffcd64d74daba16520cbbfb0fdb431983eac",
@@ -29086,10 +29219,15 @@
     {
       "upstreamSha": "d765d03cb7f980794c409c38e6ea5e25d89fde33",
       "subject": "fix(server): a Claude 403 no longer tells you to log in again (#15872)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): a Claude 403 no longer tells you to log in again (#15872).",
+      "reason": "Ported: a failed Claude result with API status 403 shows the CLI's own error text instead of the expired-login hint, since logging in again cannot grant a missing permission. Upstream change: fix(server): a Claude 403 no longer tells you to log in again (#15872)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["943bd0355b7c89615ab1098012a2d67b83d17b30"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts:4952",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:6753"
+      ]
     },
     {
       "upstreamSha": "d76b24dd15a219666941ab1b4967d8f738adcda0",
@@ -29641,7 +29779,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1c",
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeProvider.ts:419",
+        "apps/server/src/provider/Layers/ClaudeProvider.ts:420",
         "apps/server/src/provider/Layers/ClaudeUsageProbe.test.ts:27"
       ],
       "f5Shas": ["5d48a79b409bf4790864f0112061877c5572d931"]
@@ -29663,10 +29801,9 @@
     {
       "upstreamSha": "db2d0eb9f3fd9956d487ef80ad01261d99b2fab7",
       "subject": "perf(web): the provider update dismissal hook compiles without manual memoization (#20649)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the provider update dismissal hook compiles without manual memoization (#20649).",
+      "reason": "Deferred: upstream changed the provider update dismissal hook for its React Compiler adoption (t3code#20649). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the provider update dismissal hook compiles without manual memoization (#20649)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "db3278f97721f89b8b11a28bf59e59ce1fb68598",
@@ -29714,10 +29851,9 @@
     {
       "upstreamSha": "db5919d87daffd2d2db16e72602a586feb002adb",
       "subject": "perf(web): a provider status push no longer re-renders every provider card and model row (#20851)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): a provider status push no longer re-renders every provider card and model row (#20851).",
+      "reason": "Deferred: upstream memoized its provider card and model rows against client-runtime's server config projection so one provider's push re-renders only that card. f5's settings cards read the shared config query; unchanged providers keep their identity, but the cards are not memoized per provider. A render-cost change, deferred with the React Compiler work. Upstream change: perf(web): a provider status push no longer re-renders every provider card and model row (#20851)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "db6e0531e4faac0fc5ac0e12088b01bed6e7b851",
@@ -29773,7 +29909,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/OpenCodeProvider.ts:197"],
+      "evidence": ["apps/server/src/provider/Layers/OpenCodeProvider.ts:198"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -29818,10 +29954,17 @@
     {
       "upstreamSha": "dc192851f0abfd812ffadc5b3eb1c5c152171cc5",
       "subject": "fix(server): Codex titles and branch names no longer start the user's MCP servers (#17058)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Codex titles and branch names no longer start the user's MCP servers (#17058).",
+      "reason": "Ported: Codex text generation lists the user's enabled MCP servers with `codex mcp list --json` (10 s budget) and turns each off by name for the run, so titles, branch names and commit messages no longer start them. A failed listing leaves generation unchanged. Upstream change: fix(server): Codex titles and branch names no longer start the user's MCP servers (#17058)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["42439665c5b2d542e771305b234ebe11362c5027"],
+      "evidence": [
+        "apps/server/src/git/Layers/CodexTextGeneration.ts:64",
+        "apps/server/src/git/Layers/CodexTextGeneration.ts:259",
+        "apps/server/src/git/Layers/CodexTextGeneration.ts:390",
+        "apps/server/src/git/Layers/CodexTextGeneration.test.ts:327"
+      ]
     },
     {
       "upstreamSha": "dc39615aec702ea6d402168f80b4d1613f4f2e0f",
@@ -30209,10 +30352,14 @@
     {
       "upstreamSha": "def34c28b8841002bb97a3238b82ac758cbdaa0f",
       "subject": "fix(server): let Antigravity inspect unsupported files by path (#13339)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): let Antigravity inspect unsupported files by path (#13339).",
+      "reason": "Equivalent: upstream gives Antigravity every unsupported file by its saved path instead of dropping it. f5's ACP adapter, which runs Antigravity, sends images natively and lists every attachment's saved path in its attachment context block. Upstream change: fix(server): let Antigravity inspect unsupported files by path (#13339)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["0923e58f814bda78988b107c5a9fac8538a54313"],
+      "evidence": [
+        "apps/server/src/provider/attachmentRuntimeContext.ts:23",
+        "apps/server/src/provider/Layers/CursorAdapter.ts:1364"
+      ]
     },
     {
       "upstreamSha": "df19f6cfe3046dbbeb4073a3aac4c12f991b8fc7",
@@ -30527,10 +30674,17 @@
     {
       "upstreamSha": "e0db2a5e58bcbe7d738bca7667d2440ddb83e30f",
       "subject": "fix(server): stop a second server from resending Claude turns (#13295)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): stop a second server from resending Claude turns (#13295).",
+      "reason": "Ported: after a failed dispatch, the orchestration engine still projects every persisted event but republishes only the events that dispatch appended, so events another server on the same state directory already handled no longer start a second provider turn. Upstream change: fix(server): stop a second server from resending Claude turns (#13295)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["f9a01f3180429760094eec94dd27130e7de66183"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:154",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:176",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts:563",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:1875"
+      ]
     },
     {
       "upstreamSha": "e0e0bcb115fa29a2afc670b817fcb4463b620923",
@@ -30619,10 +30773,9 @@
     {
       "upstreamSha": "e1ad595e0f10cc16d66fe54b4ee195435dd3cc0d",
       "subject": "fix(opencode): name OpenCode 2 sessions after their thread (#17414)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(opencode): name OpenCode 2 sessions after their thread (#17414).",
+      "reason": "Not applicable: upstream names OpenCode 2 sessions after their thread in its orchestration-v2 OpenCode 2 adapter. f5 has neither; its OpenCode 1.x adapter creates sessions without a title so OpenCode generates one (apps/server/src/provider/Layers/OpenCodeAdapter.ts:1308). Upstream change: fix(opencode): name OpenCode 2 sessions after their thread (#17414)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e1c94f703f05b43f2935d09ed1ef882d0ee13ff8",
@@ -30653,7 +30806,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "1d",
-      "evidence": ["apps/desktop/src/syncShellEnvironment.ts:41"],
+      "evidence": ["apps/desktop/src/syncShellEnvironment.ts:42"],
       "f5Shas": ["56e880d36d6d31977f2b16a695eb8dac61137e7d"]
     },
     {
@@ -30975,10 +31128,17 @@
     {
       "upstreamSha": "e47bfe4617f6fdca2c6513bd0afe0f6b8d24688a",
       "subject": "fix(server): Claude works next to an enterprise managed-mcp.json (#18706)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude works next to an enterprise managed-mcp.json (#18706).",
+      "reason": "Ported: the Claude capability probe and text generation leave out --strict-mcp-config when an administrator's managed-mcp.json exists, since Claude refuses the flag there and the managed file already excludes other MCP sources. Upstream change: fix(server): Claude works next to an enterprise managed-mcp.json (#18706)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["d214a3312bb7f14c7f04ec5b14d930573c007c93"],
+      "evidence": [
+        "apps/server/src/provider/claudeInventory.ts:83",
+        "apps/server/src/provider/Layers/ClaudeProvider.ts:423",
+        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:207",
+        "apps/server/src/provider/claudeInventory.test.ts:39"
+      ]
     },
     {
       "upstreamSha": "e4829603ff70bdeac96780e1512ac2c09638e5a3",
@@ -31012,10 +31172,11 @@
     {
       "upstreamSha": "e4ef8d36bad346e0b8c38da276329cc54a1cce6f",
       "subject": "fix(server): keep Claude workflows alive while they report progress (#17715)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): keep Claude workflows alive while they report progress (#17715).",
+      "reason": "Equivalent: f5's session reaper protects threads whose background work reported activity within the inactivity window, so a long Claude workflow that keeps reporting progress is not released; only work gone silent expires. Upstream change: fix(server): keep Claude workflows alive while they report progress (#17715)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["3737bf895e3000e695b37d9790557953f5d7bdf4"],
+      "evidence": ["apps/server/src/provider/Layers/ProviderSessionReaper.ts:107"]
     },
     {
       "upstreamSha": "e4f7b14fab0850bff134a3f6bfaf5b71cc8ac9fc",
@@ -31041,10 +31202,9 @@
     {
       "upstreamSha": "e518866d28603da273a9357516dd1aef919f1353",
       "subject": "fix(server): OpenCode stop no longer hangs when a turn is interrupted before submission (#12003)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): OpenCode stop no longer hangs when a turn is interrupted before submission (#12003).",
+      "reason": "Not applicable: upstream's OpenCode stopSession waited on a prompt-admission barrier that an interrupted sendTurn could leave pending. f5's OpenCode adapter has no admission barrier; stopSession settles pending requests and stops the context without waiting on a submission (apps/server/src/provider/Layers/OpenCodeAdapter.ts:1713). Upstream change: fix(server): OpenCode stop no longer hangs when a turn is interrupted before submission (#12003)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e536bfd33bc3c351997141d93790df75eeded7b9",
@@ -31304,10 +31464,9 @@
     {
       "upstreamSha": "e6bbfdb9ffe8334bed1c9b992f828f04d30db7ea",
       "subject": "fix(web,mobile): sent queued messages say \"from queue\", not \"queued\" (#19849)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web,mobile): sent queued messages say \"from queue\", not \"queued\" (#19849).",
+      "reason": "Not applicable: upstream relabels the badge on sent messages that came from the queue. f5's timeline does not badge sent messages by queue origin; queued items appear only in the queue panel. Upstream change: fix(web,mobile): sent queued messages say \"from queue\", not \"queued\" (#19849)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e6c0c5e8b8504d9f4921d4d332d1bcc9b1ea4cf3",
@@ -31377,10 +31536,16 @@
     {
       "upstreamSha": "e759847f932c0de08261ec98a5fac3bae037120f",
       "subject": "fix(acp): keep one answer when a running tool reports progress (#13386)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(acp): keep one answer when a running tool reports progress (#13386).",
+      "reason": "Ported: only a tool call the answer has not shown yet closes the open ACP assistant message, so progress or a repeated completion from an earlier command no longer splits one answer, such as a markdown table, into several messages. Upstream change: fix(acp): keep one answer when a running tool reports progress (#13386)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["243ac086ea4e1cecf07c85e5aaee36cf5c039c5c"],
+      "evidence": [
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:308",
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:1134",
+        "apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts:444"
+      ]
     },
     {
       "upstreamSha": "e77a48e81a6aaea575b0c7672ac2134cd6ee04aa",
@@ -31391,7 +31556,7 @@
       "plannedWorkstream": "15a",
       "f5Shas": ["60efcb2f360989c98dcf4da8eee95e3107ba511a"],
       "evidence": [
-        "apps/server/src/provider/acp/AcpSessionRuntime.ts:170",
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:176",
         "apps/server/src/provider/Layers/CursorAdapter.ts:621",
         "apps/server/src/provider/Layers/GrokAdapter.ts:540",
         "apps/server/src/provider/Layers/CursorAdapter.test.ts:1611",
@@ -31453,7 +31618,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/provider/Layers/OpenCodeProvider.ts:263"],
+      "evidence": ["apps/server/src/provider/Layers/OpenCodeProvider.ts:264"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -31928,10 +32093,9 @@
     {
       "upstreamSha": "eba0521563946a0834af881465d3e1ff7a4ca2f1",
       "subject": "fix(server): unload Codex threads left idle on the shared app-server (#16917)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): unload Codex threads left idle on the shared app-server (#16917).",
+      "reason": "Not applicable: upstream unloads idle Codex threads from the app-server its orchestration-v2 ProviderSessionManager shares across threads. f5 runs one Codex app-server per session through codexAppServerManager and has no shared session manager. Upstream change: fix(server): unload Codex threads left idle on the shared app-server (#16917)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ebb9b9fda03d33a81cad3ce7f4d1106adba3044b",
@@ -31987,10 +32151,9 @@
     {
       "upstreamSha": "ec20db4a5a27de45f69f64ca05d17ec1bd96644d",
       "subject": "fix(server): share MCP tool presentation across providers (#15475)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): share MCP tool presentation across providers (#15475).",
+      "reason": "Not applicable: upstream shares one MCP tool presentation across its orchestration-v2 adapters, and reworks the T3 branding of ACP MCP calls in AcpRuntimeModel. f5 has no v2 adapters and no ACP MCP branding code. Upstream change: fix(server): share MCP tool presentation across providers (#15475)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ec28eefa0d017e2b0cb65ba4269cee1adddb0e98",
@@ -32140,10 +32303,9 @@
     {
       "upstreamSha": "ed0f7b908b2e7b3a22e6fd82a73794c2fe6ee06e",
       "subject": "fix(server): Sol Ultrafast stops vanishing from the Codex model picker (#18200)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Sol Ultrafast stops vanishing from the Codex model picker (#18200).",
+      "reason": "Deferred: upstream sets CODEX_INTERNAL_ORIGINATOR_OVERRIDE to its own client name so Codex keeps Sol Ultrafast in model/list. f5 identifies to Codex as t3code_desktop (apps/server/src/codexAppServerManager.ts:907), and how Codex gates that tier for f5's originator is unverified; check with an eligible account before changing the originator. Upstream change: fix(server): Sol Ultrafast stops vanishing from the Codex model picker (#18200)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "ed123897943e9175d4a0e92a5a8a09d200573336",
@@ -32207,10 +32369,9 @@
     {
       "upstreamSha": "ed809f7ad274ebccdfbf029ccfd7ff2582fd486a",
       "subject": "fix(web): restore compact provider instance badges (#13700)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): restore compact provider instance badges (#13700).",
+      "reason": "Not applicable: upstream shrinks the text initials on its provider instance badges. f5's badge is a text-free accent swatch, since initials do not fit at icon scale above its 11px type floor (apps/web/src/components/chat/ProviderInstanceIcon.tsx:58). Upstream change: fix(web): restore compact provider instance badges (#13700)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ed856946c63e51861a8153d264856db0dbb677a4",
@@ -32277,10 +32438,9 @@
     {
       "upstreamSha": "edc703b60a6b4b0800b64017004199f94de4219c",
       "subject": "fix(server): a running Claude workflow member shows its answer so far (#20786)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): a running Claude workflow member shows its answer so far (#20786).",
+      "reason": "Not applicable: upstream re-reads a running Claude workflow member's transcript to show its answer so far. f5's Claude adapter does not project native workflow members or read their transcripts. Upstream change: fix(server): a running Claude workflow member shows its answer so far (#20786)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "eddc8fb817dbdb6c9ce34a30a2781c02ae8be9e0",
@@ -32293,10 +32453,9 @@
     {
       "upstreamSha": "ede009e762a77bb96eb9db118deb76996c91cd8e",
       "subject": "perf(web): the diff worker pool provider compiles without manual memoization (#20584)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the diff worker pool provider compiles without manual memoization (#20584).",
+      "reason": "Deferred: upstream changed the diff worker pool provider for its React Compiler adoption (t3code#20584). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the diff worker pool provider compiles without manual memoization (#20584)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "ede3f2d6ba4943ba0a14aa4af656cfa537a1efe6",
@@ -32414,7 +32573,7 @@
       "disposition": "ported",
       "plannedWorkstream": "15a",
       "f5Shas": ["80914920b4f0d04ae77db533285a56506ed3b4af"],
-      "evidence": ["apps/server/src/os-jank.ts:14", "apps/server/src/os-jank.test.ts:20"]
+      "evidence": ["apps/server/src/os-jank.ts:14", "apps/server/src/os-jank.test.ts:35"]
     },
     {
       "upstreamSha": "eef36a67c37fa74905fc7feaa836e5a81daa8685",
@@ -32556,10 +32715,9 @@
     {
       "upstreamSha": "efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448",
       "subject": "fix(server): Claude threads no longer get stuck after background commands (#15770)",
-      "reason": "Planned: implement and verify the explicitly approved 15t scenario. Upstream change: fix(server): Claude threads no longer get stuck after background commands (#15770).",
+      "reason": "Not applicable: upstream unsticks Claude threads after background commands in its orchestration-v2 orchestrator, run execution and turn start services. f5 has none of these. Upstream change: fix(server): Claude threads no longer get stuck after background commands (#15770)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "efeeb7737bed89bbfc6dc81662058f8ce7fba2ea",
@@ -32705,10 +32863,14 @@
     {
       "upstreamSha": "f0a47b3172c4a73e1932b23d37c3345481c5a67e",
       "subject": "fix(server): ACP reapplies a model after a switch away from it failed partway (#14723)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): ACP reapplies a model after a switch away from it failed partway (#14723).",
+      "reason": "Equivalent: f5's ACP adapters apply a model with one setSessionModel call and record it as current only after that call succeeds, so a failed switch leaves the previous model to be reapplied on the next turn. f5 applies no separate mode step that could fail partway. Upstream change: fix(server): ACP reapplies a model after a switch away from it failed partway (#14723)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["44ff9666a13a5ec7e93669d5d18e0b58a32c8d96"],
+      "evidence": [
+        "apps/server/src/provider/Layers/GrokAdapter.ts:1339",
+        "apps/server/src/provider/acp/GrokAcpSupport.ts:95"
+      ]
     },
     {
       "upstreamSha": "f0b57ca2313bd7971cefb366d3b3808152b014fc",
@@ -33100,10 +33262,9 @@
     {
       "upstreamSha": "f31850cd2aa972d5c22c58f4038dfc25a24bf619",
       "subject": "perf(web): provider update rows compile with the React Compiler (#20481)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): provider update rows compile with the React Compiler (#20481).",
+      "reason": "Deferred: upstream changed provider update rows for its React Compiler adoption (t3code#20481). f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): provider update rows compile with the React Compiler (#20481)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "f3280793fa50765a6181609d746e756179d839f1",
@@ -33237,10 +33398,9 @@
     {
       "upstreamSha": "f3cb2a1fee65a55a4083c4cfe9317ca0d1e7c1d5",
       "subject": "fix(antigravity): keep Windows runtime unpacking under MAX_PATH (#13389)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(antigravity): keep Windows runtime unpacking under MAX_PATH (#13389).",
+      "reason": "Not applicable: upstream moves the Antigravity runtime it unpacks per profile to a shallow temp root to stay under Windows' MAX_PATH. f5 does not unpack an Antigravity runtime per profile; it installs the ACP agent once into a staging directory (apps/server/src/provider/AntigravityInstallation.ts:83). Upstream change: fix(antigravity): keep Windows runtime unpacking under MAX_PATH (#13389)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f3cb7f509595d304c6e2ccc7afe05c95ec45a7d8",
@@ -33494,10 +33654,11 @@
     {
       "upstreamSha": "f570bd21663f56ce94c41829d3b7d72886e25a34",
       "subject": "fix(server): Claude prompts no longer hang on a uuid the session already holds (#16897)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Claude prompts no longer hang on a uuid the session already holds (#16897).",
+      "reason": "Equivalent: upstream's v2 adapter derived each prompt uuid from the run attempt, so a resumed or copied session could already hold it and Claude would ack the prompt without a turn; the fix makes every uuid random. f5 has always given each prompt a fresh randomUUID(). Upstream change: fix(server): Claude prompts no longer hang on a uuid the session already holds (#16897)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["4b285ad28c757ba6b3647cc71725bbe27059339e"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.ts:1763"]
     },
     {
       "upstreamSha": "f57d3832c0219b4f6fbe2e86f824fedd232492c0",
@@ -33524,10 +33685,9 @@
     {
       "upstreamSha": "f5bd2fddbf00021b29c1dbe32210240886806718",
       "subject": "fix(server): load Cursor keyring with createRequire (#13678)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): load Cursor keyring with createRequire (#13678).",
+      "reason": "Not applicable: upstream loads the Cursor SDK's keyring module with createRequire in its Cursor credential store. f5 talks to Cursor over its ACP CLI and has no Cursor credential store. Upstream change: fix(server): load Cursor keyring with createRequire (#13678)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f5cb328aac19302a45a3fe9f7e6864a198cdb1ad",
@@ -33594,10 +33754,12 @@
     {
       "upstreamSha": "f61f979c7387d9f20d7609dbf8322ca570f3f63b",
       "subject": "fix(web,mobile): drop the baked-in tile from the Antigravity icon (#13373)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web,mobile): drop the baked-in tile from the Antigravity icon (#13373).",
+      "reason": "Ported (web half): the Antigravity icon is the official mark on a transparent background instead of an image with a baked-in tile. The mobile half does not apply; f5 has no mobile app. Upstream change: fix(web,mobile): drop the baked-in tile from the Antigravity icon (#13373)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["96329828080ddf09749e78b42f9ebabc2897e5a5"],
+      "evidence": ["apps/web/src/components/Icons.tsx:317"]
     },
     {
       "upstreamSha": "f63f0261d1223cf59f58a288cefc2cb1f91e53f0",
@@ -33816,10 +33978,11 @@
     {
       "upstreamSha": "f82796a16abb707c1e2c41301ad8d6e3153668c5",
       "subject": "fix(server): send Claude MCP servers over the control channel (#17898)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): send Claude MCP servers over the control channel (#17898).",
+      "reason": "Equivalent: f5 sends Claude MCP servers that carry headers or env over the SDK control channel with setMcpServers before admitting a prompt, instead of putting them in --mcp-config argv. Upstream change: fix(server): send Claude MCP servers over the control channel (#17898)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["aaff30384947534dfdd2634ced62f0e3cc797b5c"],
+      "evidence": ["apps/server/src/provider/claudeMcpStartup.ts:13"]
     },
     {
       "upstreamSha": "f8458952710cc70894bdeb5853d700524a1c7c49",
@@ -33852,7 +34015,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1c",
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeProvider.ts:423",
+        "apps/server/src/provider/Layers/ClaudeProvider.ts:426",
         "apps/server/src/provider/Layers/ClaudeUsageProbe.test.ts:27"
       ],
       "f5Shas": ["5d48a79b409bf4790864f0112061877c5572d931"]
@@ -33868,10 +34031,16 @@
     {
       "upstreamSha": "f87dd14dafdeecd962f7da24da79324842983e00",
       "subject": "fix(muse): Supervised threads ask before commands again (#19558)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(muse): Supervised threads ask before commands again (#19558).",
+      "reason": "Ported: Muse session start and resume select :ask-me for supervised threads and :unrestricted for full access, so Muse's own default (possibly :auto-review) cannot answer approvals for the user. The profile is omitted for ephemeral hosts, which refuse any profile id. Upstream change: fix(muse): Supervised threads ask before commands again (#19558)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "ported",
+      "plannedWorkstream": "15t",
+      "f5Shas": ["b8f5e28f3dadb43fa205fb694bf74cf1fa39b141"],
+      "evidence": [
+        "apps/server/src/provider/Layers/MuseAdapter.ts:1131",
+        "apps/server/src/provider/Layers/MuseAdapter.ts:1199",
+        "apps/server/src/provider/Layers/MuseAdapter.test.ts:518"
+      ]
     },
     {
       "upstreamSha": "f87ecf0cc307f974745da8eea856fab5711023f3",
@@ -33974,7 +34143,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "1c",
-      "evidence": ["apps/server/src/codexAppServerManager.ts:1708"],
+      "evidence": ["apps/server/src/codexAppServerManager.ts:1735"],
       "f5Shas": ["abdf16fd7cdcbb8c1ffaec2b512c19c70609572f"]
     },
     {
@@ -34546,10 +34715,9 @@
     {
       "upstreamSha": "fded2cac5f83e8aea0a4bccd5545e724da33eb0f",
       "subject": "fix(web): provider Runtime controls follow the settings row layout (#18190)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): provider Runtime controls follow the settings row layout (#18190).",
+      "reason": "Not applicable: upstream adjusts the layout of its ProviderSetupSection runtime controls. f5's provider settings do not have that component. Upstream change: fix(web): provider Runtime controls follow the settings row layout (#18190)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "fdf34c4018352df41aa22fbaa774c25c6c1ff7da",
@@ -34612,10 +34780,9 @@
     {
       "upstreamSha": "fe93a5dbdd3c4496f402f71d232597c391c4973b",
       "subject": "fix(server): offer one-click provider updates for every install (#15416)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): offer one-click provider updates for every install (#15416).",
+      "reason": "Deferred: upstream falls back to each CLI's own updater (claude update, codex update and so on) when no package manager is proven to own the install, and adds Yarn and Volta detection. f5's install-channel resolver keeps unproven installs manual-only (apps/server/src/provider/providerInstallChannel.ts:33); running self-updaters there is an update-policy change to make deliberately. Upstream change: fix(server): offer one-click provider updates for every install (#15416)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "fea1af81fdab64a19353224d60b4efa60f929740",
@@ -34723,10 +34890,9 @@
     {
       "upstreamSha": "ff3a04a8ebaaf6bb74b8b5b996013b82e044c700",
       "subject": "fix(settings): provider updates show live progress instead of a bare spinner (#16958)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(settings): provider updates show live progress instead of a bare spinner (#16958).",
+      "reason": "Deferred: upstream samples installer output once a second and publishes it through the provider list so Settings shows live update progress. f5's server.runProviderUpdate is a single request/response RPC (apps/web/src/components/settings/ProviderInstanceCard.tsx:470), so showing progress needs a new streamed or published progress channel. Upstream change: fix(settings): provider updates show live progress instead of a bare spinner (#16958)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "ff5843410d44796676b06627788d94354849c4d7",
@@ -34775,10 +34941,11 @@
     {
       "upstreamSha": "ffb5fcce7336f9b3d5bde3a5f496a816907663af",
       "subject": "fix(server): keep Codex's reset answer when the re-probe fails (#13363)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): keep Codex's reset answer when the re-probe fails (#13363).",
+      "reason": "Equivalent: upstream stops reporting an unconfirmed refresh when a failed re-probe follows a redemption that reset nothing. f5's redemption route acts on the refreshed limits only for a reset or alreadyRedeemed outcome and never reports an unconfirmed refresh. Upstream change: fix(server): keep Codex's reset answer when the re-probe fails (#13363)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15t"
+      "disposition": "equivalent",
+      "f5Shas": ["3fa56a94d9cf5857b0ae8f976c50cd4c1ed083cf"],
+      "evidence": ["apps/server/src/wsServer.ts:3993"]
     },
     {
       "upstreamSha": "ffceb61fcbbdc7ac5268812a1cc5dfedd7a6f7b9",
