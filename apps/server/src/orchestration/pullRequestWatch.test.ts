@@ -93,6 +93,17 @@ describe("evaluatePullRequestWatch", () => {
     assert.deepEqual(evaluatePullRequestWatch(watch(), plain, noRemarks).changes, []);
   });
 
+  it("does not report passed while a second run of a check is still going", () => {
+    // A workflow on both push and pull_request runs the same check twice on one commit.
+    const twice = detail({ checks: [check("test", "success"), check("test", "pending")] });
+    const first = evaluatePullRequestWatch(watch(), twice, noRemarks);
+    assert.deepEqual(first.changes, []);
+    const done = detail({ checks: [check("test", "success"), check("test", "success")] });
+    assert.deepEqual(evaluatePullRequestWatch(first.next, done, noRemarks).changes, [
+      { kind: "checks-passed", count: 2, required: false },
+    ]);
+  });
+
   it("reports passed again when a required check shows up already passed", () => {
     const required = (name: string, status: PullRequestCheck["status"]) => ({
       ...check(name, status),
