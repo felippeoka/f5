@@ -4,7 +4,6 @@ import { ChatAssetImage } from "./ChatAssetImage";
 import { useContext } from "react";
 import { RepositoryLinks } from "../repositoryLinkContext";
 import { remarkIssueReferences } from "../lib/remarkIssueReferences";
-import { remarkUnclosedFileLinks } from "../lib/remarkUnclosedFileLinks";
 import { GitHubIcon } from "./Icons";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { CheckIcon, CopyIcon } from "lucide-react";
@@ -700,11 +699,7 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
 
   return (
     <ReactMarkdown
-      remarkPlugins={[
-        remarkGfm,
-        [remarkUnclosedFileLinks, cwd],
-        [remarkIssueReferences, repositoryLinks],
-      ]}
+      remarkPlugins={[remarkGfm, [remarkIssueReferences, repositoryLinks]]}
       components={markdownComponents}
     >
       {text}

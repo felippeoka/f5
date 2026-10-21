@@ -105,31 +105,17 @@ it("links repository references in rendered chat without changing code or existi
   expect(html).not.toContain("/issues/789");
 });
 
-describe("ChatMarkdown unclosed local file links", () => {
-  const render = async (text: string) => {
-    const { default: ChatMarkdown } = await import("./ChatMarkdown");
-    return renderToStaticMarkup(<ChatMarkdown text={text} cwd="/tmp/project" />);
-  };
-
-  it("closes a local file destination whose angle bracket never closed", async () => {
-    const html = await render("See [notes](</tmp/project/my notes.md) and [app](<./app.ts).");
-    expect(html.match(/chat-markdown-file-link"/g)).toHaveLength(2);
-    expect(html).toContain("my notes.md");
-    expect(html).not.toContain("](&lt;");
-  });
-
-  it("leaves code, escapes, images, URLs and unfinished text alone", async () => {
-    for (const text of [
-      "`[app](<./app.ts)`",
-      "\\[app](<./app.ts)",
-      "![app](<./app.png)",
-      "[site](<https://example.com)",
-      "[app](<./app.ts)x",
-      "[app](<./app.ts",
-    ]) {
-      expect(await render(text)).not.toContain("chat-markdown-file-link");
-    }
-  });
+it("leaves a file link with an unclosed angle-bracket destination as literal text", async () => {
+  const { default: ChatMarkdown } = await import("./ChatMarkdown");
+  const html = renderToStaticMarkup(
+    <ChatMarkdown
+      text="See [notes](</tmp/project/my notes.md) and [app](<./app.ts>)."
+      cwd="/tmp/project"
+    />,
+  );
+  // Upstream reverted automatic repair (t3code#15824); only the valid link becomes a chip.
+  expect(html.match(/chat-markdown-file-link"/g)).toHaveLength(1);
+  expect(html).toContain("[notes](&lt;/tmp/project/my notes.md)");
 });
 
 describe("ChatMarkdown external-bot policy", () => {
