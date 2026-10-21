@@ -7,7 +7,9 @@ The Usage page shows two things. **Activity** covers the tokens, cost and turns 
 
 ## How to
 
-1. Open **Usage** from the sidebar, or type `/usage-limits` in the composer for a quick read.
+1. Open **Usage** from the sidebar or the command palette, or press `mod+U` outside the terminal
+   (`usage.open` in **Settings → Keybindings**). Type `/usage-limits` in the composer for a quick
+   read.
 2. Choose **Activity** or **Limits**.
 3. Pick a range (**24h**, **7d**, **30d**, **90d**) and, optionally, a provider or project.
 4. Switch the chart between tokens, cost and turns.

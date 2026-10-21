@@ -954,6 +954,20 @@ describe("Phase 3 shortcut contexts", () => {
       command,
     );
   });
+  it("maps mod+U to the Usage page unless the terminal has focus", () => {
+    const pressed = event({ key: "u", metaKey: true });
+    assert.equal(
+      resolveShortcutCommand(pressed, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "MacIntel" }),
+      "usage.open",
+    );
+    assert.notEqual(
+      resolveShortcutCommand(pressed, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
+      "usage.open",
+    );
+  });
   it("maps mod+/ to the shortcuts reference unless the terminal has focus", () => {
     const slash = event({ key: "/", ctrlKey: true });
     assert.equal(

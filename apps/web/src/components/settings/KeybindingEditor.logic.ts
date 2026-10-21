@@ -20,6 +20,7 @@ const KEYBINDING_GROUPS = [
       "projectContentSearch",
       "editor",
       "help",
+      "usage",
     ],
   },
   { id: "threads", title: "Threads", prefixes: ["thread", "chat", "prHub", "workflow"] },

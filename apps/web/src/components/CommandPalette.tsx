@@ -146,6 +146,7 @@ function getLocalFileManagerName(platform: string): string {
 }
 
 export function CommandPalette({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const open = useCommandPaletteStore((store) => store.open);
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
   const toggleOpen = useCommandPaletteStore((store) => store.toggleOpen);
@@ -197,13 +198,19 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           event.stopPropagation();
           toggleMode("content");
           return;
+        case "usage.open":
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          void navigate({ to: "/usage" });
+          return;
         default:
           return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, setOpen, terminalOpen, toggleMode, toggleOpen, toggleShortcuts]);
+  }, [keybindings, navigate, setOpen, terminalOpen, toggleMode, toggleOpen, toggleShortcuts]);
 
   // Close the palette when this container unmounts (e.g. on route change).
   // Hoisted here so the cleanup fires once at unmount rather than every time
@@ -1036,6 +1043,7 @@ function OpenCommandPaletteDialog(props: {
       value: "action:usage",
       title: "Open Usage",
       searchTerms: ["usage", "cost", "tokens", "limits"],
+      shortcutCommand: "usage.open",
       icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         await navigate({ to: "/usage" });

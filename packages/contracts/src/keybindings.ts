@@ -77,6 +77,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "palette.files",
   "projectContentSearch.toggle",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
+  "usage.open",
   "commandPalette.toggle",
   "help.shortcuts",
 ] as const;

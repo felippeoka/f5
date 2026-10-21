@@ -121,6 +121,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   })),
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+/", command: "help.shortcuts", when: "!terminalFocus" },
+  { key: "mod+u", command: "usage.open", when: "!terminalFocus" },
   { key: "mod+enter", command: "chat.newBackground", when: "newThreadComposer && !dialogFocus" },
 ];
 

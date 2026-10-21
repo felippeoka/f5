@@ -277,6 +277,8 @@ export function formatKeybindingCommandLabel(
       return "Steer the active turn";
     case "composer.pasteAsText":
       return "Paste as text without folding";
+    case "usage.open":
+      return "Open Usage";
     case "commandPalette.toggle":
       return "Toggle command palette";
     case "help.shortcuts":

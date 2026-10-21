@@ -71,6 +71,7 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
       "projectContentSearch.toggle",
       "sidebar.toggle",
       "prHub.open",
+      "usage.open",
       "editor.openFavorite",
       "dialog.primaryAction",
     ],
