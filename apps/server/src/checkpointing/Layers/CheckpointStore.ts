@@ -466,16 +466,30 @@ const makeCheckpointStore = Effect.gen(function* () {
         return false;
       }
 
+      // Restoring away the last tracked file removes a nested workspace directory, and on
+      // Windows the clean can remove './' and still exit 0. Recreate it after each step.
+      const recreateWorkspace = fs.makeDirectory(input.cwd, { recursive: true }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new CheckpointInvariantError({
+              operation,
+              detail: "Could not recreate the checkpoint workspace directory.",
+              cause,
+            }),
+        ),
+      );
       yield* git.execute({
         operation,
         cwd: input.cwd,
         args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
       });
+      yield* recreateWorkspace;
       yield* git.execute({
         operation,
         cwd: input.cwd,
         args: ["clean", "-fd", "--", "."],
       });
+      yield* recreateWorkspace;
 
       const headExists = yield* hasHeadCommit(input.cwd);
       if (headExists) {

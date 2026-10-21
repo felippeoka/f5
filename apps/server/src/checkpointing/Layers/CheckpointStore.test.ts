@@ -356,6 +356,39 @@ describe("CheckpointStoreLive", () => {
       expect(changedFiles(filtered)).toEqual(["upstream.txt"]);
     });
 
+    it("keeps a nested workspace when restoring removes its last tracked file", async () => {
+      const root = mkdtempSync(path.join(os.tmpdir(), "f5-checkpoint-nested-"));
+      try {
+        run(root, "init", "-q", "-b", "main");
+        run(root, "config", "user.email", "test@example.com");
+        run(root, "config", "user.name", "Test");
+        writeFileSync(path.join(root, "root.txt"), "root\n");
+        run(root, "add", ".");
+        run(root, "commit", "-q", "-m", "base");
+        const cwd = path.join(root, "pkg");
+        mkdirSync(cwd);
+        const checkpointRef = CheckpointRef.makeUnsafe("refs/t3/checkpoints/nested/0");
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const store = yield* CheckpointStore;
+            yield* store.captureCheckpoint({ cwd, checkpointRef });
+            writeFileSync(path.join(cwd, "added.txt"), "added\n");
+            run(cwd, "add", "added.txt");
+            yield* store.restoreCheckpoint({ cwd, checkpointRef });
+          }).pipe(
+            Effect.provide(
+              CheckpointStoreLiveWithoutCredentials.pipe(Layer.provideMerge(NodeServices.layer)),
+            ),
+          ),
+        );
+        expect(existsSync(cwd)).toBe(true);
+        expect(existsSync(path.join(cwd, "added.txt"))).toBe(false);
+        expect(existsSync(path.join(root, "root.txt"))).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it("keeps every file when HEAD did not move", async () => {
       const { filtered, full } = await scenario((cwd) => {
         writeFileSync(path.join(cwd, "mine.txt"), "two\n");
