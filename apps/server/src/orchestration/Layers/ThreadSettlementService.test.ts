@@ -689,16 +689,14 @@ it.effect("settles as soon as branch status sees the PR merge, without waiting f
       const pr = yield* prFixture(f, { branch: true, noLink: true });
       // Starting runs one sweep while merge settlement is still off; the clock never advances.
       yield* pr.service.start;
-      const settledAfter = (yieldsLeft: number): Effect.Effect<boolean, unknown> =>
-        f
-          .thread()
-          .pipe(
-            Effect.flatMap((thread) =>
-              thread.settledAt !== null || yieldsLeft === 0
-                ? Effect.succeed(thread.settledAt !== null)
-                : Effect.yieldNow.pipe(Effect.andThen(settledAfter(yieldsLeft - 1))),
-            ),
-          );
+      const settledAfter = (yields: number) =>
+        Effect.gen(function* () {
+          for (let left = yields; left > 0; left--) {
+            if ((yield* f.thread()).settledAt !== null) return true;
+            yield* Effect.yieldNow;
+          }
+          return (yield* f.thread()).settledAt !== null;
+        });
       assert.isFalse(yield* settledAfter(50));
       yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
       assert.isFalse(yield* settledAfter(50));
