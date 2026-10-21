@@ -3671,6 +3671,28 @@ describe("MessagesTimeline row stability", () => {
     expect(externalsAfter.get("user-between")).toBe(externalsBefore.get("user-between"));
   });
 
+  it("keeps an earlier work group open while a subagent in it is still running", () => {
+    const agent = (status: string): TimelineEntry => {
+      const base = makeReadWorkEntry("agent-work", "src/a.ts", 1);
+      if (base.kind !== "work") throw new Error("expected a work entry");
+      return {
+        ...base,
+        entry: { ...base.entry, label: "Agent", subagentType: "Explore", status },
+      } as TimelineEntry;
+    };
+    const rows = (status: string) =>
+      buildRows(
+        [
+          makeUserEntry("agent-user", "first", 0),
+          agent(status),
+          makeUserEntry("agent-steer", "also check b", 2),
+        ],
+        createTimelineRowCache(),
+      ).find((row) => row.id === "agent-work");
+    expect(rows("inProgress")).toMatchObject({ kind: "work", isPriorTurn: false });
+    expect(rows("completed")).toMatchObject({ kind: "work", isPriorTurn: true });
+  });
+
   it("prunes cached rows that a rewind removed", () => {
     const cache = createTimelineRowCache();
     const user = makeUserEntry("rewind-user", "first", 0);

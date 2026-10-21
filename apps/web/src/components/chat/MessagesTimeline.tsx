@@ -4213,7 +4213,10 @@ export function buildTimelineRows(input: {
           cursor += 1;
         }
       }
-      const isPriorTurn = index < lastUserMessageEntryIndex;
+      // A steer leaves a running subagent working, so its group stays open until it ends.
+      const isPriorTurn =
+        index < lastUserMessageEntryIndex &&
+        !groupedEntries.some((entry) => entry.subagentType && entry.status === "inProgress");
       nextRows.push(
         reuse(timelineEntry.id, ["work", isPriorTurn, ...groupedEntries], () => ({
           kind: "work",
