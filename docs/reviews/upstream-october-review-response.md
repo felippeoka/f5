@@ -1797,6 +1797,7 @@ clamped search highlight, which f5's settings search already does. Four are
 compiler-motivated refactors or compiler workarounds that f5 does not need: its
 settings are not compiled, and none of the four changes behavior. Twelve change
 upstream pieces f5 does not have:
+
 - the `preview.focusUrl` label
 - the licenses page
 - the project-group settings hook
@@ -1811,6 +1812,7 @@ upstream pieces f5 does not have:
 - the shortcut recorder (f5 takes shortcuts as typed text)
 
 **Batch 10 (web behavior fixes, 14 records).** Six ports, each with a test:
+
 - [t3code#19722](https://github.com/pingdotgg/t3code/pull/19722): when the
   saved text generation model left the catalog, f5 fell back to the flagship
   chat model. It now tries the driver's cheap text generation default first.
@@ -1854,6 +1856,7 @@ token, an equal provider snapshot, an unrelated settings write, typing in the
 composer and a right panel toggle. They also count zero timeline commits when
 an image preview or a dialog opens. Five ports, each with a test that failed on
 the old code:
+
 - [t3code#20848](https://github.com/pingdotgg/t3code/pull/20848): a settings
   write re-renders only readers whose selected value changed. The conversation,
   root route, sidebar, command palette, diff panel and always-mounted
@@ -1898,3 +1901,59 @@ multi-environment atom session layer),
 ticking "checked" labels) and
 [t3code#16033](https://github.com/pingdotgg/t3code/pull/16033) (f5 loads the
 whole diff patch at once).
+
+## 15u triage log: Git, worktree and checkpoint correctness
+
+All 39 open 15u records are classified. Eight are ported:
+
+- [t3code#17161](https://github.com/pingdotgg/t3code/pull/17161) (15u-3):
+  checkpoint diffs drop paths that a merge, pull or checkout imported after
+  the capture. This follows upstream's parent-commit provenance instead of the
+  plan's event and projection fields. When HEAD moves during staging, the
+  capture falls back to a parentless commit rather than retrying once.
+- [t3code#19411](https://github.com/pingdotgg/t3code/pull/19411): a base
+  fetch that loses a ref-lock race retries once.
+- [t3code#15615](https://github.com/pingdotgg/t3code/pull/15615): generated
+  branch names keep their own namespace.
+- [t3code#14874](https://github.com/pingdotgg/t3code/pull/14874): a
+  checkpoint restore recreates the workspace directory. The Windows failure
+  this targets is untested: on macOS the new test passes before the fix too.
+- [t3code#17376](https://github.com/pingdotgg/t3code/pull/17376): a
+  fast-forward pull whose output passes the 1 MB cap is reported as pulled.
+- [t3code#17707](https://github.com/pingdotgg/t3code/pull/17707): on Windows,
+  Git runs through Git for Windows' own `git.exe`, not its launcher. The tests
+  simulate the Windows layout and have not run on Windows.
+- [t3code#14847](https://github.com/pingdotgg/t3code/pull/14847): merge
+  cleanup also removes worktrees merged by squash or rebase, when the merged
+  pull request names the worktree's exact HEAD.
+- [t3code#13590](https://github.com/pingdotgg/t3code/pull/13590): the toolbar
+  reads "New worktree", not "Local", while a thread's worktree is being
+  created.
+
+Thirteen are equivalent, each with f5 evidence in the ledger, including
+[t3code#17563](https://github.com/pingdotgg/t3code/pull/17563) (the cleanup
+preview already names each skip reason; upstream's `worktreeKeepWhen` setting
+has no f5 counterpart) and
+[t3code#15594](https://github.com/pingdotgg/t3code/pull/15594) (every creation
+path resolves the project's submodule setting).
+
+Four stay planned. [t3code#17371](https://github.com/pingdotgg/t3code/pull/17371)
+moves to 15m, which adds the `newProjectsRoot` it depends on. Three remain
+open in 15u:
+
+- [t3code#16231](https://github.com/pingdotgg/t3code/pull/16231) (15u-4, the
+  worktree location setting) needs ownership records and a verified backfill
+  before cleanup can act outside the managed root.
+- [t3code#15625](https://github.com/pingdotgg/t3code/pull/15625) needs a
+  commit-less PR action, because f5's Create PR would otherwise commit a dirty
+  worktree.
+- [t3code#16167](https://github.com/pingdotgg/t3code/pull/16167) affects f5
+  too, but four callers reserve the temporary branch name before the worktree
+  exists.
+
+[t3code#15005](https://github.com/pingdotgg/t3code/pull/15005) (diff panel
+default scope) is declined as a product choice. Six React Compiler preparation
+refactors are deferred with the earlier compiler-allowlist records. Seven are
+not applicable. Their subsystems are upstream-only: the thread-launch tool,
+branch naming settings, orchestration v2, the worktree setup script (two
+records), the previous-worktree option, and mobile.

@@ -1718,10 +1718,14 @@
     {
       "upstreamSha": "0caa95d6eb471ab033ea670914d61070c65be806",
       "subject": "fix(storage): make worktree cleanup work and show why it skipped (#17563)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(storage): make worktree cleanup work and show why it skipped (#17563).",
+      "reason": "Equivalent: upstream added a manual cleanup run and a report naming why each worktree was kept. f5's cleanup worker already has a read-only preview listing every matched target with its action or exact skip reason, and records runs in the automation audit. Upstream's worktreeKeepWhen setting has no f5 counterpart; f5 always keeps worktrees with uncommitted or protected files. Upstream change: fix(storage): make worktree cleanup work and show why it skipped (#17563)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["3228773cd3bb602c81b219716c1f440b5db3f792"],
+      "evidence": [
+        "apps/server/src/storage/StorageCleanupWorker.ts:90",
+        "apps/server/src/storage/automationAudit.ts:56"
+      ]
     },
     {
       "upstreamSha": "0cab7d5ab978a8adaee6827f81693249d0dfeee5",
@@ -2164,7 +2168,7 @@
     {
       "upstreamSha": "1024941575067f68d909c6b98f56b02edac25b37",
       "subject": "feat(server,web): choose where new worktrees are created (#16231)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: feat(server,web): choose where new worktrees are created (#16231).",
+      "reason": "Still planned (15u-4): a worktreesDirectory setting changes where f5 creates and removes worktree directories. The plan requires ownership records, a verified backfill and pre-removal revalidation, so it lands as its own change rather than in this triage batch. Upstream change: feat(server,web): choose where new worktrees are created (#16231)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
       "plannedWorkstream": "15u"
@@ -2271,10 +2275,9 @@
     {
       "upstreamSha": "10d4fab2941f89707f08d441fac1b9b24f48d80c",
       "subject": "perf(web): branch toolbar label measuring reads its state through useEffectEvent (#20467)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): branch toolbar label measuring reads its state through useEffectEvent (#20467).",
+      "reason": "Deferred: upstream moved branch toolbar label measuring to useEffectEvent so the React Compiler can compile it. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): branch toolbar label measuring reads its state through useEffectEvent (#20467)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "10da67b9da3e366acf827518423978e4d762a337",
@@ -2734,10 +2737,16 @@
     {
       "upstreamSha": "13d6b30515e9d44bb4cc2d223b8b3179c2ba4c79",
       "subject": "fix(web): new worktree threads no longer say \"checkout\" during setup (#13590)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): new worktree threads no longer say \"checkout\" during setup (#13590).",
+      "reason": "Ported: while a new thread's worktree is still being created, the toolbar treats it as a worktree thread and the chip reads New worktree instead of Local, without the local-only move actions. Upstream change: fix(web): new worktree threads no longer say \"checkout\" during setup (#13590)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["60cd53d6a3a64baf889f2daaf3643a5092675d18"],
+      "evidence": [
+        "apps/web/src/components/BranchToolbar.tsx:82",
+        "apps/web/src/components/WorktreeChip.tsx:52",
+        "apps/web/src/components/BranchToolbar.logic.test.ts:14"
+      ]
     },
     {
       "upstreamSha": "140ee145ac33653ac2c36f7940e4f54f6e92497f",
@@ -5337,10 +5346,12 @@
     {
       "upstreamSha": "27839622efccb65982fd297847973fdedf6365aa",
       "subject": "fix(shared): preserve generated branch namespaces (#15615)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(shared): preserve generated branch namespaces (#15615).",
+      "reason": "Ported: generated branch names keep their own namespace (fix/, team/name/) instead of being forced under feature/, and collision suffixes go on the path component a ref blocks. Upstream change: fix(shared): preserve generated branch namespaces (#15615)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["45bf134ddf4388449d010066da970a83b32918fb"],
+      "evidence": ["packages/shared/src/git.ts:27", "packages/shared/src/git.test.ts:50"]
     },
     {
       "upstreamSha": "27ab45593fdcaffe718c1fa54dcbb2df4bd769a2",
@@ -7967,10 +7978,11 @@
     {
       "upstreamSha": "3a7058da50c91906158c89fc3f845e6c04379414",
       "subject": "fix(web): new worktree threads no longer flicker while starting (#15019)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): new worktree threads no longer flicker while starting (#15019).",
+      "reason": "Equivalent: upstream stopped new worktree threads flickering while starting. f5's setup card already shows the script output box only once output exists; the rest of the upstream change keeps the card in its timeline working slot and survives a draft-route promotion, neither of which f5's layout has. Upstream change: fix(web): new worktree threads no longer flicker while starting (#15019)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["3228773cd3bb602c81b219716c1f440b5db3f792"],
+      "evidence": ["apps/web/src/components/chat/WorktreeSetupCard.tsx:265"]
     },
     {
       "upstreamSha": "3a9c1a6df1b71d8ba73d287be90443e8e874802f",
@@ -8548,10 +8560,15 @@
     {
       "upstreamSha": "3e6b45028ceec5820dacb37dc3852470ebdc9411",
       "subject": "fix(server): honor submodule settings when creating worktrees (#15594)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): honor submodule settings when creating worktrees (#15594).",
+      "reason": "Equivalent: upstream made worktree creation honor project-scoped submodule settings. f5 resolves the project's worktreeSubmodules at each creation path, and moves initialize submodules through WorktreePreparation with the resolved project settings. Upstream change: fix(server): honor submodule settings when creating worktrees (#15594)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["e1394e9e0a99ef818348bdf0cf4ec588cfd4c033"],
+      "evidence": [
+        "apps/server/src/project/Layers/WorktreePreparation.ts:240",
+        "apps/server/src/wsServer.ts:2562",
+        "apps/server/src/project/Layers/WorktreeSetup.ts:456"
+      ]
     },
     {
       "upstreamSha": "3e6f856f2359421958a3aa046f2c393e00f3dc6a",
@@ -8996,10 +9013,11 @@
     {
       "upstreamSha": "4258c8f14ddf6affe67c4e1d5d85ec834e6c4346",
       "subject": "perf(server): storage cleanup no longer runs a full status or size walk for worktrees it keeps (#17911)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): storage cleanup no longer runs a full status or size walk for worktrees it keeps (#17911).",
+      "reason": "Equivalent: upstream ran the expensive worktree safety checks only for worktrees a cleanup rule matches. f5 runs safetyBlock only after matchWorktreeCleanupRule returns a rule. Upstream change: perf(server): storage cleanup no longer runs a full status or size walk for worktrees it keeps (#17911)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["3228773cd3bb602c81b219716c1f440b5db3f792"],
+      "evidence": ["apps/server/src/storage/StorageCleanupWorker.ts:325"]
     },
     {
       "upstreamSha": "426706cbcec497054c688ecc4e45e6d1bbc2a8c2",
@@ -11500,10 +11518,9 @@
     {
       "upstreamSha": "546c67f443765cebcecbc5db96999ac36aafbadc",
       "subject": "perf(web): sidebar retained git status lives in state (#20462)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): sidebar retained git status lives in state (#20462).",
+      "reason": "Deferred: upstream moved the sidebar's retained Git status from a ref into state so the React Compiler can compile Sidebar.logic, and added it to its allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): sidebar retained git status lives in state (#20462)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "549201fcfd3baa6cf92f09e5d868c536c80d2d55",
@@ -11808,10 +11825,11 @@
     {
       "upstreamSha": "570542662a3f9f3fb44f88778cb24753072f78aa",
       "subject": "fix(server): enforce one database owner and guard update rollback (#16102)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): enforce one database owner and guard update rollback (#16102).",
+      "reason": "Equivalent: upstream kept a second server from running against the same state. f5 takes an exclusive per-profile instance lock at startup; the update-rollback half of the upstream change targets its service launcher, which f5 does not have. Upstream change: fix(server): enforce one database owner and guard update rollback (#16102)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["a69b3fa1f4d04dff3c600f7d92f6fda65ce47684"],
+      "evidence": ["apps/server/src/main.ts:258"]
     },
     {
       "upstreamSha": "570b72d83978f718a5e677002bde3abe55a6d797",
@@ -13360,10 +13378,9 @@
     {
       "upstreamSha": "6266af3f1f688497ef9717b87b82eafc5240418c",
       "subject": "fix(server): t3_thread_launch refuses a new worktree whose base ref has no commit (#17791)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): t3_thread_launch refuses a new worktree whose base ref has no commit (#17791).",
+      "reason": "Not applicable: the fix guards upstream's t3_thread_launch agent tool; f5 has no agent thread-launch MCP tool. Upstream change: fix(server): t3_thread_launch refuses a new worktree whose base ref has no commit (#17791)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6270a6f88bea4c2fe07a43e69693a918cf94a353",
@@ -13502,10 +13519,9 @@
     {
       "upstreamSha": "6308db4ff500b89821e22605f964b1701cead8ee",
       "subject": "fix(web): semantic branch naming hint lines up with its setting (#16972)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): semantic branch naming hint lines up with its setting (#16972).",
+      "reason": "Not applicable: the fix moves a hint in upstream's branch naming settings; f5 has no branch naming mode setting. Upstream change: fix(web): semantic branch naming hint lines up with its setting (#16972)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6319a9714881a1d25549f797c468fabebae92813",
@@ -14963,7 +14979,7 @@
     {
       "upstreamSha": "6e4ca6ce9d04009af290412b77a0acb9be9f8a18",
       "subject": "fix(git): allow creating prs from dirty worktrees (#15625)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(git): allow creating prs from dirty worktrees (#15625).",
+      "reason": "Still planned: f5's Create PR runs commit_push_pr, which commits a dirty worktree, so removing the clean-tree check alone would commit local changes. Porting needs a commit-less PR action across contracts, server and web. Upstream change: fix(git): allow creating prs from dirty worktrees (#15625)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
       "plannedWorkstream": "15u"
@@ -15749,10 +15765,10 @@
     {
       "upstreamSha": "72fbad7b1ad303a5e0a896e1de5c6489f8d10fc8",
       "subject": "fix: new projects start their first thread in the project folder, not a worktree (#17371)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix: new projects start their first thread in the project folder, not a worktree (#17371).",
+      "reason": "Reassigned to 15m: upstream starts a project created from just a name in local mode, keyed on ServerConfig.newProjectsRoot. f5 has no newProjectsRoot until 15m adds new projects from a name. Upstream change: fix: new projects start their first thread in the project folder, not a worktree (#17371)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "plannedWorkstream": "15m"
     },
     {
       "upstreamSha": "730ce9edd9873144c1d2b01e5f1c85414c3760ad",
@@ -15813,10 +15829,9 @@
     {
       "upstreamSha": "7383cce7fc07a2dce9fa8d907f82f2acd69e5c37",
       "subject": "perf(web): the branch toolbar selector compiles without manual memoization (#20567)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the branch toolbar selector compiles without manual memoization (#20567).",
+      "reason": "Deferred: upstream removed manual memoization from the branch toolbar selector for the React Compiler allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the branch toolbar selector compiles without manual memoization (#20567)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "73af712275f7969774012f8404cea722c8988839",
@@ -16547,10 +16562,9 @@
     {
       "upstreamSha": "78c0d7df69e193ca5e8ecde0cbea6be6050a3366",
       "subject": "perf(web): the branch picker compiles without manual memoization (#20557)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the branch picker compiles without manual memoization (#20557).",
+      "reason": "Deferred: upstream removed manual memoization from the branch picker for the React Compiler allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the branch picker compiles without manual memoization (#20557)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "78c9fcaafcbee9e2b941d8b0129a9f968373c6b2",
@@ -16849,10 +16863,11 @@
     {
       "upstreamSha": "7ac952c630ef8a60d14ca8f6a0c7adce33db4bae",
       "subject": "fix(server): worktree cleanup no longer runs sweeps back to back (#19418)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): worktree cleanup no longer runs sweeps back to back (#19418).",
+      "reason": "Equivalent: upstream evaluated worktree cleanup from the in-memory read model instead of re-reading threads from the database. f5's cleanup worker reads the engine's in-memory read model. Upstream change: fix(server): worktree cleanup no longer runs sweeps back to back (#19418)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["3228773cd3bb602c81b219716c1f440b5db3f792"],
+      "evidence": ["apps/server/src/storage/StorageCleanupWorker.ts:354"]
     },
     {
       "upstreamSha": "7ade2d2c6b37df6f1bc879bfcbf64658b7af2554",
@@ -18074,10 +18089,9 @@
     {
       "upstreamSha": "84c436bcf714076572804d005eb7123ca1588188",
       "subject": "fix(mobile): branch search finds remote and space-typed branches (#13454)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(mobile): branch search finds remote and space-typed branches (#13454).",
+      "reason": "Not applicable: the fix is in the mobile branch search; its web part only moves sanitizeNewRefName into the shared package. Upstream change: fix(mobile): branch search finds remote and space-typed branches (#13454)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "84cb13412ebebd6533e8a3de1579c40ae001573e",
@@ -20045,10 +20059,16 @@
     {
       "upstreamSha": "93e864042cf066f4cdb3efe65dbefaaf0d168894",
       "subject": "fix(server): merged-worktree cleanup removes worktrees after squash merges (#14847)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): merged-worktree cleanup removes worktrees after squash merges (#14847).",
+      "reason": "Ported: Git status carries the pull request's head commit, and the merge cleanup rule also matches a merged pull request that names the worktree's exact HEAD, so worktrees merged by squash or rebase are cleaned up. Upstream change: fix(server): merged-worktree cleanup removes worktrees after squash merges (#14847)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["f42f2618cb722c6c3ecf1597bc5533938a699b07"],
+      "evidence": [
+        "apps/server/src/storage/StorageCleanupWorker.ts:171",
+        "apps/server/src/git/Layers/GitManager.ts:226",
+        "apps/server/src/storage/StorageCleanupWorker.test.ts:58"
+      ]
     },
     {
       "upstreamSha": "9409dd20a9fbce491d49d09c79b289d8fb8bfe3e",
@@ -21198,10 +21218,16 @@
     {
       "upstreamSha": "9cc57680cb5f762f553acd1fa5f3efcf17d8fc67",
       "subject": "perf(server): run Git for Windows' real git.exe, not its launcher (#17707)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): run Git for Windows' real git.exe, not its launcher (#17707).",
+      "reason": "Ported: on Windows, GitService spawns Git for Windows' own git.exe instead of its cmd or bin launcher unless MSYSTEM is set, and leaves git.cmd wrappers to Node's lookup. Tests simulate the Windows layout; not run on Windows. Upstream change: perf(server): run Git for Windows' real git.exe, not its launcher (#17707)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["235c4ae2b720b1f06b51ddd770b1d01591ebbf56"],
+      "evidence": [
+        "apps/server/src/spawn/resolveCommand.ts:257",
+        "apps/server/src/git/Layers/GitService.ts:179",
+        "apps/server/src/spawn/resolveCommand.test.ts:76"
+      ]
     },
     {
       "upstreamSha": "9cc9839545c05c998fc97f2323f691043a1a3686",
@@ -22313,10 +22339,15 @@
     {
       "upstreamSha": "a5331e4c2c0f0a7b85d912e487f5c97bbce921aa",
       "subject": "fix(server): checkpoint restore keeps a nested workspace on Windows (#14874)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): checkpoint restore keeps a nested workspace on Windows (#14874).",
+      "reason": "Ported: restoring a checkpoint recreates the workspace directory after the restore and after the clean, so a nested workspace whose last tracked file the restore removed survives. The regression test passes on macOS before the fix too (Git 2.36+ will not remove its own cwd), so the Windows failure this targets is untested. Upstream change: fix(server): checkpoint restore keeps a nested workspace on Windows (#14874)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["8b09fce331505e190811443e80892df30fc9806a"],
+      "evidence": [
+        "apps/server/src/checkpointing/Layers/CheckpointStore.ts:471",
+        "apps/server/src/checkpointing/Layers/CheckpointStore.test.ts:359"
+      ]
     },
     {
       "upstreamSha": "a54a44c6693460ac5c2a8529bbe6f9d0931c6477",
@@ -23340,10 +23371,15 @@
     {
       "upstreamSha": "adbecdac7b6f1a167cc389b3d5fe5be8ec70afdf",
       "subject": "fix(server): a pull that fast-forwards no longer fails on large Git output (#17376)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): a pull that fast-forwards no longer fails on large Git output (#17376).",
+      "reason": "Ported: pullCurrentBranch streams the pull's output with a bounded tail, so a fast-forward whose diffstat passes the 1 MB output cap is reported as pulled instead of failing after Git applied it; a rejected pull still fails with Git's own detail. Upstream change: fix(server): a pull that fast-forwards no longer fails on large Git output (#17376)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["1e4bafe5924dcfd037e33fa2507c762c968159cd"],
+      "evidence": [
+        "apps/server/src/git/Layers/GitCore.ts:1834",
+        "apps/server/src/git/Layers/GitCore.test.ts:992"
+      ]
     },
     {
       "upstreamSha": "adc3c9327abedda6a36694e2344e620fe0d62ae4",
@@ -23462,10 +23498,14 @@
     {
       "upstreamSha": "aef0e9ca401acb40057a286a19de8768809db960",
       "subject": "fix(git): preserve whitespace in file paths (#12464) (#12465)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(git): preserve whitespace in file paths (#12464) (#12465).",
+      "reason": "Equivalent: upstream stopped trimming file paths in Git contracts so paths with leading or trailing spaces survive. f5's Git contracts already use the non-trimming FilesystemPath schema. Upstream change: fix(git): preserve whitespace in file paths (#12464) (#12465)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["e28193337638ecb2e702e803f96442eccc803eca"],
+      "evidence": [
+        "packages/contracts/src/git.ts:59",
+        "packages/contracts/src/gitInspectionResults.ts:56"
+      ]
     },
     {
       "upstreamSha": "aefef95ffc34eb76c8e2db9a219b86681f644576",
@@ -23629,10 +23669,11 @@
     {
       "upstreamSha": "b03534fa7b847e8403322e416189c6293e6846e0",
       "subject": "fix(web): Git actions follow the selected thread (#18862)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): Git actions follow the selected thread (#18862).",
+      "reason": "Equivalent: upstream replaced useEffectEvent in the Git actions control, which broke under its compiler setup. f5's control uses useCallback and never used useEffectEvent. Upstream change: fix(web): Git actions follow the selected thread (#18862)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/web/src/components/GitActionsControl.tsx:423"]
     },
     {
       "upstreamSha": "b037b9a535ff30f3f390da682dabeffe4c439044",
@@ -23740,7 +23781,7 @@
     {
       "upstreamSha": "b12b3f706d1257b79c69c34699babb6834a72b34",
       "subject": "fix(server): worktree threads survive a local branch named t3code (#16167)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): worktree threads survive a local branch named t3code (#16167).",
+      "reason": "Still planned: f5 has the same bug (a local branch named t3code blocks every t3code/<hex> temporary branch), but four callers reserve and persist the temporary name before createWorktree, so the flattened name has to be chosen before each reservation. Upstream change: fix(server): worktree threads survive a local branch named t3code (#16167)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
       "plannedWorkstream": "15u"
@@ -23946,10 +23987,11 @@
     {
       "upstreamSha": "b2b43bef73447c483ceae486890cb79f01c369cb",
       "subject": "fix(server): preserve racy edits in review diff previews (#12613)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): preserve racy edits in review diff previews (#12613).",
+      "reason": "Equivalent: upstream rebuilt the review diff index from HEAD so stale stat data cannot hide changes. f5's review diff already builds a fresh temporary index with read-tree HEAD for every read. Upstream change: fix(server): preserve racy edits in review diff previews (#12613)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["2b3a2a981edc3b0f46d6f986d0ecdf70f78ca654"],
+      "evidence": ["apps/server/src/git/ReviewDiffService.ts:177"]
     },
     {
       "upstreamSha": "b2e15185aee22bfdee78806f2734b0a4de9c2c77",
@@ -24046,10 +24088,9 @@
     {
       "upstreamSha": "b38aa027dcb47717a55aafb1ef6a423b5194a50b",
       "subject": "perf(web): Git actions control compiles without manual memoization (#20777)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): Git actions control compiles without manual memoization (#20777).",
+      "reason": "Deferred: upstream removed manual memoization from the Git actions control so the React Compiler can compile it, and added it to its compiled-files allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): Git actions control compiles without manual memoization (#20777)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "b38aa18365fe314e079d99670932bedfc7407e5a",
@@ -24740,10 +24781,9 @@
     {
       "upstreamSha": "b8e829dc8cbeb9c83968e961996a3614dc1a056f",
       "subject": "fix(dev): freeze the worktree setup lockfile (#19747)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(dev): freeze the worktree setup lockfile (#19747).",
+      "reason": "Not applicable: the fix changes upstream's scripts/setup-worktree.ts developer script, which f5 does not have. Upstream change: fix(dev): freeze the worktree setup lockfile (#19747)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b900fc94ebe630155783c07324c58af7e6387a03",
@@ -26156,10 +26196,9 @@
     {
       "upstreamSha": "c28cd905572e2a28934a6229d88bcf2975963032",
       "subject": "fix(server): a message sent during a rollback no longer undoes it (#17079)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): a message sent during a rollback no longer undoes it (#17079).",
+      "reason": "Not applicable: the fix takes the v2 ThreadCommandExecutor lock around provider-thread row writes in CheckpointRollbackServiceV2; f5 has no v2 provider-thread rows. f5's own revert and turn-start interleaving was not separately audited here. Upstream change: fix(server): a message sent during a rollback no longer undoes it (#17079)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c299308a832db382fce61233bd10a4bd13bbc60c",
@@ -27977,10 +28016,9 @@
     {
       "upstreamSha": "d1034d62b28e19c19240085566a39a92c5f9b466",
       "subject": "fix(web): diff panel opens on all branch changes, not just uncommitted (#15005)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): diff panel opens on all branch changes, not just uncommitted (#15005).",
+      "reason": "Declined: upstream made its diff panel open on branch changes instead of uncommitted changes. f5's diff panel opens on the thread's turn diffs with Working tree and Branch range toggles; changing that default is a product choice f5 has not made. Upstream change: fix(web): diff panel opens on all branch changes, not just uncommitted (#15005)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "declined"
     },
     {
       "upstreamSha": "d10621de5f8f7e3af4831be04c0564a4ae65eade",
@@ -29620,10 +29658,16 @@
     {
       "upstreamSha": "dd5c7bd09e83bbeb7c3f63aa787e6ffdd3cc6221",
       "subject": "fix(server): new worktrees no longer fail when a background fetch runs at the same time (#19411)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): new worktrees no longer fail when a background fetch runs at the same time (#19411).",
+      "reason": "Ported: a base-branch fetch that loses a ref-lock race (including Git 2.53's incorrect-old-value wording) retries once; other failures report the sanitized command and network detail without retrying. Upstream change: fix(server): new worktrees no longer fail when a background fetch runs at the same time (#19411)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["3491f31bfc374d743309d23eba3409ca7e4ef4e8"],
+      "evidence": [
+        "apps/server/src/git/networkFailureDetail.ts:44",
+        "apps/server/src/git/Layers/GitCore.ts:2835",
+        "apps/server/src/git/Layers/GitCore.test.ts:217"
+      ]
     },
     {
       "upstreamSha": "dd5ea324885aea4980a49bb42d28f83023c40ea7",
@@ -30116,10 +30160,11 @@
     {
       "upstreamSha": "e0201d3ab51b4593eff3c41d03ab9c9b2dc07471",
       "subject": "fix(server): free worktrees for terminal thread statuses (#15150)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): free worktrees for terminal thread statuses (#15150).",
+      "reason": "Equivalent: upstream stopped a status whitelist from letting cleanup remove a worktree another thread still uses. f5's foreignClaims reports every claim held by another owner, with no status whitelist. Upstream change: fix(server): free worktrees for terminal thread statuses (#15150)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["3228773cd3bb602c81b219716c1f440b5db3f792"],
+      "evidence": ["apps/server/src/project/worktreeClaims.ts:310"]
     },
     {
       "upstreamSha": "e022fa430edbf8d448efe0f34303ff290ebb3dc0",
@@ -30914,10 +30959,11 @@
     {
       "upstreamSha": "e65063ccf6ce83aa33d10521aeaf929210f0ff04",
       "subject": "fix(server): end clone options before the repository URL (#14781)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): end clone options before the repository URL (#14781).",
+      "reason": "Equivalent: upstream ended clone options before the repository URL. f5's clone already passes -- before the URL. Upstream change: fix(server): end clone options before the repository URL (#14781)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"],
+      "evidence": ["apps/server/src/git/Layers/GitCore.ts:3425"]
     },
     {
       "upstreamSha": "e65bc1c73e5e922216415b8e553bc74682d6810d",
@@ -32296,10 +32342,9 @@
     {
       "upstreamSha": "effaab94e36992ea9712c2a56d5ff602a3cead04",
       "subject": "fix(web): show previous worktree branch on second line (#13314)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): show previous worktree branch on second line (#13314).",
+      "reason": "Not applicable: the fix lays out upstream's Use previous worktree option, which f5's env mode selector does not have. Upstream change: fix(web): show previous worktree branch on second line (#13314)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f0121f31d0e7c069f4007480fc13907c28efd4d5",
@@ -32922,10 +32967,15 @@
     {
       "upstreamSha": "f3a69c70c6a5bc624e1b5eb80901d8b7c901ad6f",
       "subject": "fix(checkpoint): pulls and rebases no longer flood a turn's changed files (#17161)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(checkpoint): pulls and rebases no longer flood a turn's changed files (#17161).",
+      "reason": "Ported: checkpoint captures record the captured HEAD as the commit's parent only when HEAD did not move during staging, and checkpoint diffs for the reactor and diff query drop paths that arrived through Git imports (merges, pulls, checkouts) after the capture. This follows upstream's parent-commit provenance rather than the plan's event and projection fields, and falls back to a parentless commit instead of retrying once. Upstream change: fix(checkpoint): pulls and rebases no longer flood a turn's changed files (#17161)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "ported",
+      "plannedWorkstream": "15u",
+      "f5Shas": ["1c14d1ad2ee12a5ae8036ed2fc70d5afd410b656"],
+      "evidence": [
+        "apps/server/src/checkpointing/Layers/CheckpointStore.ts:553",
+        "apps/server/src/checkpointing/Layers/CheckpointStore.test.ts:322"
+      ]
     },
     {
       "upstreamSha": "f3cb2a1fee65a55a4083c4cfe9317ca0d1e7c1d5",
@@ -33573,10 +33623,9 @@
     {
       "upstreamSha": "f8a308fbc90e89cd5f8d41b7fb169a03343bd9b5",
       "subject": "fix(dev): worktree setup never deletes a real env file (#15845)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(dev): worktree setup never deletes a real env file (#15845).",
+      "reason": "Not applicable: the fix changes upstream's scripts/setup-worktree.ts developer script, which f5 does not have. Upstream change: fix(dev): worktree setup never deletes a real env file (#15845)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f8b4c464b4760d73e0ece7e68011c738803d8b69",
@@ -33710,10 +33759,14 @@
     {
       "upstreamSha": "f973b1d7d5cd7ffb4dd3c1c61cc0caece09fd1a6",
       "subject": "fix(server): name the cause of a failed git command (#8645)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): name the cause of a failed git command (#8645).",
+      "reason": "Equivalent: upstream classified Git's stderr into fixed failure reasons because its errors never carried stderr. f5's Git errors already carry Git's own stderr, and network commands report a sanitized networkFailureDetail. Upstream change: fix(server): name the cause of a failed git command (#8645)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": [
+        "apps/server/src/git/Layers/GitCore.ts:335",
+        "apps/server/src/git/Layers/GitCore.ts:324"
+      ]
     },
     {
       "upstreamSha": "f993fa1c5fe51dfae78ec8869c9694b7cb97115f",
@@ -33746,10 +33799,9 @@
     {
       "upstreamSha": "f99d12b5e5776a9bd7c629ec72dbe8764607a6d0",
       "subject": "perf(web): the worktree base branch picker compiles without manual memoization (#20634)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the worktree base branch picker compiles without manual memoization (#20634).",
+      "reason": "Deferred: upstream removed manual memoization from the worktree base branch picker for the React Compiler allowlist. f5 runs the compiler in annotation mode (apps/web/vite.config.ts:34) and stages adoption by \"use memo\". Upstream change: perf(web): the worktree base branch picker compiles without manual memoization (#20634)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "f9a726e6231d76124e7210492745a40380c74df3",
@@ -33805,10 +33857,11 @@
     {
       "upstreamSha": "fa1184d29eb0ecad789129118c592d3c8303ee97",
       "subject": "fix(server): report orphaned managed worktrees (#19749)",
-      "reason": "Planned: implement and verify the explicitly approved 15u scenario. Upstream change: fix(server): report orphaned managed worktrees (#19749).",
+      "reason": "Equivalent: upstream made storage maintenance find managed worktrees no thread references. f5's storage maintenance already lists them as orphaned F5 worktrees. Upstream change: fix(server): report orphaned managed worktrees (#19749)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15u"
+      "disposition": "equivalent",
+      "f5Shas": ["babf86c0a2d749f44640ed018092893b4060d5f6"],
+      "evidence": ["apps/server/src/storage/StorageMaintenance.ts:1347"]
     },
     {
       "upstreamSha": "fa1e1715538f6f8ac076761f7821f68479f616ab",
