@@ -892,6 +892,43 @@ function coalesceCodexCollaborationEntries(entries: ReadonlyArray<WorkLogEntry>)
   return result;
 }
 
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** Each user-input request's question text, joined with " · " when it asked several. */
+function userInputQuestionTextByRequestId(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyMap<string, string> {
+  const questions = new Map<string, string>();
+  for (const activity of activities) {
+    if (activity.kind !== "user-input.requested") continue;
+    const payload = workLogPayload(activity);
+    if (typeof payload?.requestId !== "string") continue;
+    const text = (parseUserInputQuestions(payload) ?? [])
+      .map((question) => collapseWhitespace(question.question))
+      .filter(Boolean)
+      .join(" · ");
+    if (text) questions.set(payload.requestId, text);
+  }
+  return questions;
+}
+
+/** The submitted answers as one line; empty when nothing was answered. */
+function userInputAnswerPreview(answers: unknown): string {
+  if (!answers || typeof answers !== "object") return "";
+  const values = Object.values(answers as Record<string, unknown>).flatMap((value) => {
+    const answer =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as { answers?: unknown }).answers
+        : value;
+    return (Array.isArray(answer) ? answer : [answer]).filter(
+      (item): item is string => typeof item === "string",
+    );
+  });
+  return values.map(collapseWhitespace).filter(Boolean).join(" · ");
+}
+
 function workLogPayload(activity: OrchestrationThreadActivity): Record<string, unknown> | null {
   return activity.payload && typeof activity.payload === "object"
     ? (activity.payload as Record<string, unknown>)
@@ -1458,6 +1495,7 @@ export function deriveWorkLogEntries(
       usageLimitRowByTurn.set(activity.turnId, activity);
     }
   }
+  const userInputQuestionByRequestId = userInputQuestionTextByRequestId(ordered);
   const entries = ordered
     .filter((activity) =>
       shouldKeepHistoricalWorkEntry(activity, latestTurnId, terminalCodexProviderItemIds),
@@ -1530,12 +1568,20 @@ export function deriveWorkLogEntries(
                 ? payload.message
                 : activity.summary
               : activity.summary;
+      // "User input submitted" buries what was asked: lead with the question and keep the
+      // answer as the row's detail.
+      const answeredQuestion =
+        activity.kind === "user-input.resolved" && typeof payload?.requestId === "string"
+          ? userInputQuestionByRequestId.get(payload.requestId)
+          : undefined;
+      const answerPreview = answeredQuestion ? userInputAnswerPreview(payload?.answers) : "";
       const entry: WorkLogEntry = {
         id: activity.id,
         createdAt: activity.createdAt,
-        label,
+        label: answeredQuestion && answerPreview ? answeredQuestion : label,
         tone: usageLimit || activity.tone === "approval" ? "info" : activity.tone,
         activityKind: activity.kind,
+        ...(answeredQuestion && answerPreview ? { detail: answerPreview } : {}),
       };
       if (activity.kind === "mcpApp") {
         const app = readMcpAppView(payload);

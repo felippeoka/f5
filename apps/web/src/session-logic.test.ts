@@ -1050,6 +1050,60 @@ describe("hasActionableProposedPlan", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
+  it("leads an answered user-input row with the question and shows the answer", () => {
+    const question = (id: string, text: string) => ({
+      id,
+      header: id,
+      question: text,
+      options: [{ label: "Yes", description: "Proceed" }],
+    });
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "input-requested",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          turnId: "turn-1",
+          kind: "user-input.requested",
+          summary: "User input requested",
+          tone: "info",
+          payload: {
+            requestId: "req-1",
+            questions: [
+              question("scope", "Which  package\nshould move?"),
+              question("tests", "Keep tests?"),
+            ],
+          },
+        }),
+        makeActivity({
+          id: "input-resolved",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          turnId: "turn-1",
+          kind: "user-input.resolved",
+          summary: "User input submitted",
+          tone: "info",
+          payload: { requestId: "req-1", answers: { scope: "apps/web", tests: ["Yes"] } },
+        }),
+        makeActivity({
+          id: "receipt",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          turnId: "turn-1",
+          kind: "user-input.resolved",
+          summary: "Provider received the requested input",
+          tone: "info",
+          payload: { requestId: "req-1", receipt: "resolved" },
+        }),
+      ],
+      TurnId.makeUnsafe("turn-1"),
+    );
+    const resolved = entries.find((entry) => entry.id === "input-resolved");
+    expect(resolved?.label).toBe("Which package should move? · Keep tests?");
+    expect(resolved?.detail).toBe("apps/web · Yes");
+    // A value-free receipt keeps its own summary.
+    expect(entries.find((entry) => entry.id === "receipt")?.label).toBe(
+      "Provider received the requested input",
+    );
+  });
+
   it("coalesces a Codex collaboration lifecycle into one stable retained row", () => {
     const lifecycle = [
       makeActivity({
