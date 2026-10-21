@@ -434,3 +434,92 @@ it.layer(GrokAdapterExitingAgentTestLayer)("GrokAdapterLive agent exit", (it) =>
     }),
   );
 });
+
+const grokApprovalTestLayer = (env: Record<string, string>) =>
+  Layer.effect(
+    GrokAdapter,
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() =>
+        mkdtemp(path.join(os.tmpdir(), "grok-acp-approval-")),
+      );
+      const wrapperPath = writeAcpWrapper(path.join(dir, "fake-grok"), mockAgentPath, {
+        env: {
+          T3_ACP_EMIT_TOOL_CALLS: "1",
+          T3_ACP_OMIT_ALLOW_ALWAYS: "1",
+          T3_ACP_PERMISSION_REQUEST_COUNT: "2",
+          ...env,
+        },
+      });
+      const settings = Schema.decodeSync(GrokSettings)({ binaryPath: wrapperPath });
+      return yield* makeGrokAdapter(settings);
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3code-grok-adapter-approval-test-" }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+/** Runs one supervised turn, answering every approval prompt with "Always allow this session". */
+const runAlwaysAllowTurn = (threadId: ThreadId) =>
+  Effect.gen(function* () {
+    const adapter = yield* GrokAdapter;
+    const events: ProviderRuntimeEvent[] = [];
+    const answered = new Set<string>();
+    const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      Effect.gen(function* () {
+        events.push(event);
+        if (event.type === "request.opened" && event.requestId && !answered.has(event.requestId)) {
+          answered.add(event.requestId);
+          yield* adapter.respondToRequest(
+            threadId,
+            ApprovalRequestId.make(event.requestId),
+            "acceptForSession",
+          );
+        }
+      }),
+    ).pipe(Effect.forkChild);
+    yield* adapter.startSession({
+      threadId,
+      provider: "grok",
+      cwd: process.cwd(),
+      runtimeMode: "approval-required",
+    });
+    yield* adapter.sendTurn({ threadId, input: "Read the package", attachments: [] });
+    const completed = (event: ProviderRuntimeEvent) => event.type === "turn.completed";
+    for (let attempt = 0; attempt < 200 && !events.some(completed); attempt += 1)
+      yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+    yield* adapter.stopSession(threadId);
+    yield* Fiber.interrupt(eventFiber);
+    return {
+      prompts: events.filter((event) => event.type === "request.opened").length,
+      completion: events.find(completed),
+    };
+  });
+
+it.layer(grokApprovalTestLayer({}))("GrokAdapterLive always allow", (it) => {
+  it.effect("keeps the turn running and stops asking when Grok has no allow_always", () =>
+    Effect.gen(function* () {
+      const { prompts, completion } = yield* runAlwaysAllowTurn(
+        ThreadId.make("grok-always-allow-once"),
+      );
+      assert.deepInclude(completion?.payload, { state: "completed" });
+      assert.equal(prompts, 1);
+    }),
+  );
+});
+
+it.layer(grokApprovalTestLayer({ T3_ACP_SECOND_PERMISSION_COMMAND: "rm -rf build" }))(
+  "GrokAdapterLive always allow scope",
+  (it) => {
+    it.effect("asks again before a different command", () =>
+      Effect.gen(function* () {
+        const { prompts, completion } = yield* runAlwaysAllowTurn(
+          ThreadId.make("grok-always-allow-scope"),
+        );
+        assert.deepInclude(completion?.payload, { state: "completed" });
+        assert.equal(prompts, 2);
+      }),
+    );
+  },
+);

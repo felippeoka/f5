@@ -78,6 +78,7 @@ import {
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
+import { canonicalJson } from "../../canonicalJsonHash.ts";
 import { makeAcpNativeLoggers, redactAcpLogPayload } from "../acp/AcpNativeLogging.ts";
 import {
   applyGrokAcpModelSelection,
@@ -211,7 +212,29 @@ function selectPermissionOptionId(
       : decision === "accept"
         ? "allow_once"
         : "reject_once";
-  return request.options.find((entry) => entry.kind === kind)?.optionId.trim() || undefined;
+  const optionId = (entryKind: string) =>
+    request.options.find((entry) => entry.kind === entryKind)?.optionId.trim() || undefined;
+  // Grok often omits allow_always. "Always allow this session" then approves this request once,
+  // and the adapter remembers the operation for the rest of the session.
+  return optionId(kind) ?? (decision === "acceptForSession" ? optionId("allow_once") : undefined);
+}
+
+/**
+ * Identifies an operation for "Always allow this session": the same command, or the same tool
+ * with the same input, never every future call of a tool. A generic title with no input cannot
+ * identify an operation, so it is not remembered.
+ */
+function sessionApprovalKey(request: EffectAcpSchema.RequestPermissionRequest): string | undefined {
+  const { kind, title, rawInput, locations } = request.toolCall;
+  const command = parsePermissionRequest(request).toolCall?.command;
+  let input = rawInput;
+  if (isRecord(rawInput) && rawInput.variant === "Bash") {
+    const { description: _description, ...shellInput } = rawInput;
+    input = shellInput;
+  }
+  return command || (isRecord(rawInput) && Object.keys(rawInput).length > 0)
+    ? canonicalJson({ kind, title, command, input, locations })
+    : undefined;
 }
 
 function selectAutoApprovedPermissionOption(
@@ -579,6 +602,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           }
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
+          const sessionApprovedOperations = new Set<string>();
           const pendingUserInputs = getOrCreateStartupPendingUserInputs(input.threadId);
           yield* settlePendingUserInputsAsCancelled(pendingUserInputs);
           pendingUserInputs.clear();
@@ -637,6 +661,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
           const acp = yield* (options?.makeRuntime ?? makeGrokAcpRuntime)({
             grokSettings,
+            runtimeMode: input.runtimeMode,
             ...(options?.environment ? { environment: options.environment } : {}),
             childProcessSpawner,
             cwd,
@@ -792,6 +817,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return { outcome: { outcome: "cancelled" as const } };
                   yield* logNative(input.threadId, "session/request_permission", params);
                   const computerRequest = catalogs.classify(params.toolCall);
+                  const approvalKey = computerRequest ? undefined : sessionApprovalKey(params);
                   if (computerRequest)
                     params = {
                       ...params,
@@ -840,6 +866,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       }
                     );
                   }
+                  const sessionApprovedOptionId =
+                    approvalKey !== undefined && sessionApprovedOperations.has(approvalKey)
+                      ? selectPermissionOptionId(params, "accept")
+                      : undefined;
+                  if (sessionApprovedOptionId !== undefined)
+                    return {
+                      outcome: { outcome: "selected" as const, optionId: sessionApprovedOptionId },
+                    };
                   const runtimeMode: RuntimeMode = input.runtimeMode;
                   switch (runtimeMode) {
                     case "full-access": {
@@ -911,6 +945,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   );
                   const selectedOptionId =
                     resolved === "cancel" ? undefined : selectPermissionOptionId(params, resolved);
+                  if (resolved === "acceptForSession" && selectedOptionId && approvalKey)
+                    sessionApprovedOperations.add(approvalKey);
                   return {
                     outcome: selectedOptionId
                       ? {
