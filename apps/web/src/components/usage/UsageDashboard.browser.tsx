@@ -53,7 +53,10 @@ const connection = vi.hoisted(() => ({
   },
 }));
 const settings = vi.hoisted(() => ({
-  current: { usagePriceOverrides: [] as Array<Record<string, unknown>> },
+  current: {
+    usagePriceOverrides: [] as Array<Record<string, unknown>>,
+    usageModelAliases: {} as Record<string, string>,
+  },
 }));
 vi.mock("../../hooks/useSettings", () => ({
   useSettings: (select: (value: typeof settings.current) => unknown) => select(settings.current),
@@ -306,7 +309,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetAllMocks();
-  settings.current = { usagePriceOverrides: [] };
+  settings.current = { usagePriceOverrides: [], usageModelAliases: {} };
   focusManager.setFocused(undefined);
   onlineManager.setOnline(true);
   document.body.innerHTML = "";
@@ -1222,7 +1225,9 @@ describe("query-connected usage dashboard", () => {
     const screen = await renderDashboard(queryClient);
     try {
       await page.getByRole("button", { name: "Set price for cursor-agent" }).click();
-      await expect.element(page.getByLabelText("Model")).toHaveValue("cursor-agent");
+      await expect
+        .element(page.getByLabelText("Model", { exact: true }))
+        .toHaveValue("cursor-agent");
       await expect.element(page.getByRole("combobox", { name: /^Provider/ })).toHaveValue("cursor");
       await expect.element(page.getByLabelText("Input price")).toHaveFocus();
     } finally {
@@ -1243,6 +1248,7 @@ describe("query-connected usage dashboard", () => {
           cacheWriteUsdPerMillion: null,
         },
       ],
+      usageModelAliases: {},
     };
     api.getSummary.mockResolvedValue(summary());
     api.getAccounts.mockResolvedValue(accounts());

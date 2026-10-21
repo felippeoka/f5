@@ -1,4 +1,4 @@
-import { UsagePriceOverride } from "./usage";
+import { UsageModelAliases, UsagePriceOverride } from "./usage";
 import { AgentBridgeSettings, AgentBridgeSettingsPatch } from "./agentBridge";
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
@@ -435,6 +435,7 @@ export const ServerSettings = Schema.Struct({
   autoSettleAfterDays: AutoSettleAfterDays.pipe(Schema.withDecodingDefault(() => null)),
   autoSettleKeepPullRequests: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   usagePriceOverrides: Schema.Array(UsagePriceOverride).pipe(Schema.withDecodingDefault(() => [])),
+  usageModelAliases: UsageModelAliases.pipe(Schema.withDecodingDefault(() => ({}))),
   /** Background account-limit sampling for quota history and forecasts. */
   usageBackgroundSampling: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   autoResumeUsageLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
@@ -629,6 +630,8 @@ export const ServerSettingsPatch = Schema.Struct({
   autoSettleAfterDays: Schema.optionalKey(AutoSettleAfterDays),
   autoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   usagePriceOverrides: Schema.optionalKey(Schema.Array(UsagePriceOverride)),
+  /** Replaces every mapping. */
+  usageModelAliases: Schema.optionalKey(UsageModelAliases),
   usageBackgroundSampling: Schema.optionalKey(Schema.Boolean),
   autoResumeUsageLimitedThreads: Schema.optionalKey(Schema.Boolean),
   resumeActiveTurnsAfterRestart: Schema.optionalKey(Schema.Boolean),

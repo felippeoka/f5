@@ -23,6 +23,8 @@ import { UsageQueryError, UsageService, type UsageServiceShape } from "../Servic
 import { planUsageBuckets, UsageTimeZoneError, type UsageBucketPlan } from "../usageBuckets.ts";
 import {
   aggregateUsageMetrics,
+  applyModelAliases,
+  resolveModelAliases,
   aggregateUsageScope,
   buildUsageProjectScope,
   buildUsageSummary,
@@ -169,6 +171,7 @@ const make = Effect.gen(function* () {
         Effect.mapError(() => new UsageQueryError({ message: "Usage prices are unavailable." })),
       );
       const priceOverrides = settings.usagePriceOverrides;
+      const modelAliases = resolveModelAliases(settings.usageModelAliases);
       const filters = {
         ...(request.provider ? { provider: request.provider } : {}),
         ...(request.hiddenProviders?.length ? { hiddenProviders: request.hiddenProviders } : {}),
@@ -176,13 +179,19 @@ const make = Effect.gen(function* () {
       };
       // SQLite executes synchronously, so these reads run sequentially.
       const metadata = yield* repository.readUsageMetadata;
-      const rows = yield* repository.summarizeBuckets({ buckets: plan.buckets, ...filters });
-      const scopeRows = yield* repository.summarizeByScope({
-        startedAt: plan.startedAt,
-        endedAt: plan.endedAt,
-        ...(request.provider ? { provider: request.provider } : {}),
-        ...(request.hiddenProviders?.length ? { hiddenProviders: request.hiddenProviders } : {}),
-      });
+      const rows = applyModelAliases(
+        yield* repository.summarizeBuckets({ buckets: plan.buckets, ...filters }),
+        modelAliases,
+      );
+      const scopeRows = applyModelAliases(
+        yield* repository.summarizeByScope({
+          startedAt: plan.startedAt,
+          endedAt: plan.endedAt,
+          ...(request.provider ? { provider: request.provider } : {}),
+          ...(request.hiddenProviders?.length ? { hiddenProviders: request.hiddenProviders } : {}),
+        }),
+        modelAliases,
+      );
       const selectedProjectId = request.projectId ?? null;
       const aggregation = aggregateUsageScope({
         rows: scopeRows,
@@ -196,10 +205,15 @@ const make = Effect.gen(function* () {
       });
       const previousMetrics = previous
         ? aggregateUsageMetrics(
-            yield* repository.summarizeBuckets({
-              buckets: [{ key: "previous", startAt: previous.startedAt, endAt: previous.endedAt }],
-              ...filters,
-            }),
+            applyModelAliases(
+              yield* repository.summarizeBuckets({
+                buckets: [
+                  { key: "previous", startAt: previous.startedAt, endAt: previous.endedAt },
+                ],
+                ...filters,
+              }),
+              modelAliases,
+            ),
             priceOverrides,
           )
         : null;

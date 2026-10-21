@@ -53,6 +53,11 @@ provider reports no cost, set a price in **Usage prices** (USD per million token
 provider and model. **Set price** next to an unpriced model opens the editor with that model
 filled in. Provider-reported costs, including zero, always win.
 
+To count one model as another, such as a preview model under its released name, add it under
+**Model mappings** with the target model ID in **Map to**. The mapped model no longer appears on
+Usage: its tokens and cost move to the target and use the target's price. Remove the mapping to
+show the model on its own again.
+
 ## Limits
 
 Each account gets meters showing the allowance left, when it resets and when it was last read.
