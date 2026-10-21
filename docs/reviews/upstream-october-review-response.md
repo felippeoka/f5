@@ -2047,3 +2047,36 @@ viewer instead.
 [t3code#20688](https://github.com/pingdotgg/t3code/pull/20688) is a React
 Compiler memoization cleanup and is deferred with the other compiler
 refactors.
+
+## 15h triage log: PR watches
+
+All 11 open 15h records are classified, and none needed new code. f5's
+durable PR watches already cover them. Ten are equivalent:
+
+- The 1-point GitHub fingerprint, with the full reads skipped while it is unchanged
+  ([t3code#16270](https://github.com/pingdotgg/t3code/pull/16270)). Each
+  skipped check logs how long the watch has been quiet
+  ([t3code#16262](https://github.com/pingdotgg/t3code/pull/16262)).
+- Rate limits pause a watch without counting as failures
+  ([t3code#16208](https://github.com/pingdotgg/t3code/pull/16208)), and
+  remark reads page through every review thread's replies
+  ([t3code#15427](https://github.com/pingdotgg/t3code/pull/15427)).
+- A required check that appears already passed reports passed
+  ([t3code#15804](https://github.com/pingdotgg/t3code/pull/15804)), and an
+  edited bot comment wakes the agent
+  ([t3code#15415](https://github.com/pingdotgg/t3code/pull/15415)).
+- Stop and settle end the thread's watches and cancel queued wakes
+  ([t3code#16002](https://github.com/pingdotgg/t3code/pull/16002),
+  [t3code#16095](https://github.com/pingdotgg/t3code/pull/16095)). The
+  delegated-task half of #16002 belongs to upstream's orchestrator MCP, which
+  f5 does not have.
+- The thread's PR links show and stop watches
+  ([t3code#16235](https://github.com/pingdotgg/t3code/pull/16235)).
+- [t3code#17344](https://github.com/pingdotgg/t3code/pull/17344) fixed
+  upstream's check deduper, which let a finished run hide a second run of the
+  same check. f5 keeps every rollup entry, so the run still going holds back
+  the passed report. A test now pins that.
+
+[t3code#17635](https://github.com/pingdotgg/t3code/pull/17635) shortens a
+client-runtime background-work title that f5 does not show, so it is not
+applicable.

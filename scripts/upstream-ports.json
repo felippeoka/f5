@@ -1653,10 +1653,9 @@
     {
       "upstreamSha": "0c4012055deacd43876b80902caad6dd7d6a2eef",
       "subject": "fix(clients): remove redundant prefix from PR watch status (#17635)",
-      "reason": "Planned: reconcile the approved 15h feature and its follow-ups. Upstream change: fix(clients): remove redundant prefix from PR watch status (#17635).",
+      "reason": "Not applicable: upstream shortened the pending background work title for monitors in client-runtime's threadExecution. f5 shows PR watches as an eye icon on the thread's PR links, not as a waiting background-work title. Upstream change: fix(clients): remove redundant prefix from PR watch status (#17635)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0c48f62705df3568d6dcb7abee9361c6ecaad855",
@@ -4620,10 +4619,15 @@
     {
       "upstreamSha": "21eb9a421aff7a8fbe044b1a34bb3e364fb94a68",
       "subject": "fix(server): PR watch wakes the agent when a bot edits its review comment (#15415)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: fix(server): PR watch wakes the agent when a bot edits its review comment (#15415).",
+      "reason": "Equivalent: remarks are ordered by their edit time when present, and the fingerprint tracks edits, so a bot editing its review comment wakes the agent once. Upstream change: fix(server): PR watch wakes the agent when a bot edits its review comment (#15415)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/server/src/orchestration/pullRequestWatch.ts:91",
+        "apps/server/src/orchestration/pullRequestWatch.test.ts:177",
+        "apps/server/src/orchestration/pullRequestWatchFingerprint.test.ts:59"
+      ]
     },
     {
       "upstreamSha": "220e573b14cea84b6662a7d69047129047433b63",
@@ -8492,10 +8496,14 @@
     {
       "upstreamSha": "3da82d5d384a5f45e3e4a9c5bdb8336eb54e49ff",
       "subject": "feat(web): see and stop pull request watches in the thread details card (#16235)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: feat(web): see and stop pull request watches in the thread details card (#16235).",
+      "reason": "Equivalent: the thread's PR links show which PRs are watched, with a stop button and a watch toggle in each row's menu, and update from server pushes. Upstream change: feat(web): see and stop pull request watches in the thread details card (#16235)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/web/src/components/prHub/ThreadPrLinks.tsx:106",
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:104"
+      ]
     },
     {
       "upstreamSha": "3da9399b1ac4e015f8db29c49718a74c57e62e83",
@@ -8799,10 +8807,14 @@
     {
       "upstreamSha": "404e229f22ef2dc7e42074d5379d5c554dd2c083",
       "subject": "fix(server): PR watch reports a required check that first appears already passed (#15804)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: fix(server): PR watch reports a required check that first appears already passed (#15804).",
+      "reason": "Equivalent: the watch remembers which required checks it reported as passed, so a required check that appears already passed reports passed again. Upstream change: fix(server): PR watch reports a required check that first appears already passed (#15804)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/server/src/orchestration/pullRequestWatch.ts:81",
+        "apps/server/src/orchestration/pullRequestWatch.test.ts:107"
+      ]
     },
     {
       "upstreamSha": "40596072ebabf045414f54ca6ffec3911543d8ff",
@@ -11229,10 +11241,17 @@
     {
       "upstreamSha": "51f7f77f87318a5329d3bab15d513fda5654200b",
       "subject": "fix(threads): stop pull request watches when settling (#16095)",
-      "reason": "Planned: reconcile the approved 15h feature and its follow-ups. Upstream change: fix(threads): stop pull request watches when settling (#16095).",
+      "reason": "Equivalent: settling a thread stops its watches, and a watched thread is not auto-settled. Upstream change: fix(threads): stop pull request watches when settling (#16095)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "fc5e96ff556aae3cb5b0c839246d4f63fc92adb8",
+        "8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"
+      ],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.ts:568",
+        "apps/server/src/orchestration/threadSettlement.test.ts:53"
+      ]
     },
     {
       "upstreamSha": "5208bdeb0db95063091a29f97af3548436c5f291",
@@ -16213,10 +16232,15 @@
     {
       "upstreamSha": "758dc290e900e35958d37fec41fed4a357ad60fa",
       "subject": "perf(server): PR watches spend ~90% fewer GitHub points by checking a 1-point fingerprint first (#16270)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: perf(server): PR watches spend ~90% fewer GitHub points by checking a 1-point fingerprint first (#16270).",
+      "reason": "Equivalent: f5 reads a small GitHub fingerprint of check status and remark activity first and skips the full detail and remark reads while it is unchanged, refreshing at least every 30 minutes. Upstream change: perf(server): PR watches spend ~90% fewer GitHub points by checking a 1-point fingerprint first (#16270)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.ts:391",
+        "apps/server/src/orchestration/pullRequestWatchFingerprint.test.ts:46",
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.test.ts:412"
+      ]
     },
     {
       "upstreamSha": "758decaa565f021f85af756669b18bd9f80cacf5",
@@ -21501,10 +21525,14 @@
     {
       "upstreamSha": "9e5229b47f7af66e2f88447a49f8ea7f00c734c6",
       "subject": "fix(server): PR watches stop burning GitHub's rate limit and giving up (#16208)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: fix(server): PR watches stop burning GitHub's rate limit and giving up (#16208).",
+      "reason": "Equivalent: a rate-limited read pauses the watch until the reset time without counting as a failure; eight other failed reads in a row stop the watch with a notice. Watches run at cold GitHub priority and threads watching one PR share a read. Upstream change: fix(server): PR watches stop burning GitHub's rate limit and giving up (#16208)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.ts:261",
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.test.ts:334"
+      ]
     },
     {
       "upstreamSha": "9e552285bae9c9b0707e7ebeb77bf126f0c0a16b",
@@ -22294,10 +22322,17 @@
     {
       "upstreamSha": "a418075154d1d4f4263d5fa55804b9288f61d3dd",
       "subject": "fix(server): PR watch no longer reports passed while a second run of a check is still going (#17344)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: fix(server): PR watch no longer reports passed while a second run of a check is still going (#17344).",
+      "reason": "Equivalent: upstream's check deduper let a finished run hide a second run of the same check that was still going. f5 keeps every rollup entry, so the pending run holds back the passed report until both finish. Upstream change: fix(server): PR watch no longer reports passed while a second run of a check is still going (#17344)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": [
+        "fc5e96ff556aae3cb5b0c839246d4f63fc92adb8",
+        "912c687120429c064dbe6befb2d42e2e5c95bb66"
+      ],
+      "evidence": [
+        "apps/server/src/orchestration/pullRequestWatch.ts:76",
+        "apps/server/src/orchestration/pullRequestWatch.test.ts:96"
+      ]
     },
     {
       "upstreamSha": "a434677eca737771dd64703545c13eb11ba92ce2",
@@ -32970,10 +33005,15 @@
     {
       "upstreamSha": "f32c23cf1aa9ff177224e93c239165adc67798c0",
       "subject": "fix(server): Stop also stops delegated tasks and pull request watches (#16002)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: fix(server): Stop also stops delegated tasks and pull request watches (#16002).",
+      "reason": "Equivalent for watches: Stop, session stop, archive and delete stop the thread's watches and cancel undispatched wakes in one transaction, keeping work already admitted. The delegated-task half belongs to upstream's orchestrator MCP, which f5 does not have. Upstream change: fix(server): Stop also stops delegated tasks and pull request watches (#16002)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.ts:566",
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.test.ts:312",
+        "apps/server/src/orchestration/stopThreadPullRequestWatches.test.ts:19"
+      ]
     },
     {
       "upstreamSha": "f32f9a2f41342bf8a1a109d6ebe9b70044c5311b",
@@ -33281,10 +33321,14 @@
     {
       "upstreamSha": "f4f3abf71e98361918e360a89d48780cc65cafd1",
       "subject": "fix(server): read paginated review replies when watching PRs (#15427)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: fix(server): read paginated review replies when watching PRs (#15427).",
+      "reason": "Equivalent: remark reads page through the timeline, every review thread and each thread's reply tail, and keep the watermark when a page is missing or a cursor repeats. Upstream change: fix(server): read paginated review replies when watching PRs (#15427)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/server/src/orchestration/pullRequestWatchRemarks.ts:47",
+        "apps/server/src/orchestration/pullRequestWatchRemarks.test.ts:45"
+      ]
     },
     {
       "upstreamSha": "f530d7b618c12332774c0d79d3747c468369e648",
@@ -34152,10 +34196,14 @@
     {
       "upstreamSha": "fc4ecc835e6d54eb411c333d737f2c4881884338",
       "subject": "feat(server): log how long PR watches stay quiet before they end (#16262)",
-      "reason": "Planned: implement and verify the explicitly approved 15h scenario. Upstream change: feat(server): log how long PR watches stay quiet before they end (#16262).",
+      "reason": "Equivalent: each skipped quiet check logs the PR key and how long the watch has been quiet. Upstream change: feat(server): log how long PR watches stay quiet before they end (#16262)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15h"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.ts:428",
+        "apps/server/src/orchestration/Layers/PullRequestWatchService.test.ts:412"
+      ]
     },
     {
       "upstreamSha": "fc53b273039cf5e0a932582b1fbb56e7223ad4ab",
