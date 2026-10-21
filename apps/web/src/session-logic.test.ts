@@ -87,6 +87,20 @@ describe("deriveLiveWorkActivity", () => {
     expect(deriveLiveWorkActivity([reasoning("idle", 1)], turnId)).toEqual({ kind: "idle" });
   });
 
+  it("keeps the latest thought on a tool that runs after it", () => {
+    expect(
+      deriveLiveWorkActivity(
+        [reasoning("idle", 1, "Found the cause"), tool("tool.started", "A", 2, "rg cause")],
+        turnId,
+      ),
+    ).toEqual({ kind: "tool", providerItemId: "A", title: "rg cause", thought: "Found the cause" });
+    expect(deriveLiveWorkActivity([tool("tool.started", "A", 1)], turnId)).toEqual({
+      kind: "tool",
+      providerItemId: "A",
+      title: "A",
+    });
+  });
+
   it("keeps the newer tool when an older one completes", () => {
     expect(
       deriveLiveWorkActivity(

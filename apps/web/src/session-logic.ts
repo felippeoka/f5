@@ -1164,7 +1164,13 @@ function correlateSubagentActivities(entries: ReadonlyArray<WorkLogEntry>): Work
 
 export type LiveWorkActivity =
   | { kind: "thinking"; detail: string | null }
-  | { kind: "tool"; providerItemId: string | null; title: string }
+  | {
+      kind: "tool";
+      providerItemId: string | null;
+      title: string;
+      /** The turn's latest reasoning heading, kept in view while a later tool runs. */
+      thought?: string;
+    }
   /** The provider is retrying a dropped model stream; `attempt` reads like "2/5". */
   | { kind: "reconnecting"; attempt: string | null }
   /**
@@ -1371,7 +1377,23 @@ export function deriveLiveWorkActivity(
     if (item.status !== "inProgress") continue;
     if (!live || item.startIndex > live.startIndex) live = item;
   }
-  if (live) return live.activity;
+  if (live) {
+    if (live.activity.kind !== "tool") return live.activity;
+    // A thought is often a finding; without this, the next tool call hides it.
+    let thought: string | null = null;
+    let thoughtIndex = -1;
+    for (const item of items.values()) {
+      if (
+        item.activity.kind === "thinking" &&
+        item.activity.detail &&
+        item.startIndex > thoughtIndex
+      ) {
+        thought = item.activity.detail;
+        thoughtIndex = item.startIndex;
+      }
+    }
+    return thought ? { ...live.activity, thought } : live.activity;
+  }
   if (options?.awaitingUser) return null;
   const retryIndex = ordered.findLastIndex(isRetryingWarning);
   const retry = ordered[retryIndex];

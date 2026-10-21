@@ -47,6 +47,7 @@ import { changedLineCount, summarizeTurnDiffStats } from "../../lib/turnDiffTree
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
+  BrainIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -1573,7 +1574,14 @@ type TimelineRow =
       commandExecution: TimelineCommandExecution;
       nestedDiagnostics?: ReadonlyArray<TimelineWorkEntry>;
     }
-  | { kind: "working"; id: string; createdAt: string | null; activity: string | null };
+  | {
+      kind: "working";
+      id: string;
+      createdAt: string | null;
+      activity: string | null;
+      /** The latest thought while a later tool runs. */
+      thought: string | null;
+    };
 
 /** Label for the working row: what the running turn is doing right now. */
 function workingActivityLabel(
@@ -4123,6 +4131,15 @@ function WorkingRowContent(props: {
   const { actions, grabButtonRef, reducedMotion } = useTimelineRowContext();
   return (
     <div className="py-0.5 pl-1.5">
+      {row.thought ? (
+        <div
+          data-working-thought=""
+          className="flex min-w-0 items-start gap-2 pt-1 text-ui text-muted-foreground"
+        >
+          <BrainIcon aria-hidden className="mt-[0.2em] size-3.5 shrink-0 text-faint-foreground" />
+          <span className="min-w-0 line-clamp-4 wrap-break-word">{row.thought}</span>
+        </div>
+      ) : null}
       <div className="flex min-w-0 items-center gap-2 pt-1 text-ui text-muted-foreground">
         <span aria-hidden="true" className="inline-flex shrink-0 items-center gap-0.5">
           <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse" />
@@ -4344,13 +4361,20 @@ export function buildTimelineRows(input: {
 
   if (input.isWorking) {
     const activity = workingActivityLabel(nextRows, input.liveActivity);
+    const thought =
+      input.liveActivity?.kind === "tool" ? (input.liveActivity.thought ?? null) : null;
     nextRows.push(
-      reuse("working-indicator-row", ["working", input.activeTurnStartedAt, activity], () => ({
-        kind: "working",
-        id: "working-indicator-row",
-        createdAt: input.activeTurnStartedAt,
-        activity,
-      })),
+      reuse(
+        "working-indicator-row",
+        ["working", input.activeTurnStartedAt, activity, thought],
+        () => ({
+          kind: "working",
+          id: "working-indicator-row",
+          createdAt: input.activeTurnStartedAt,
+          activity,
+          thought,
+        }),
+      ),
     );
   }
 
