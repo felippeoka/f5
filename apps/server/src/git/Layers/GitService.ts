@@ -7,6 +7,7 @@ import { ServerSettingsService } from "../../serverSettings";
 import { ServerSecretStore } from "../../auth/Services/ServerSecretStore";
 import { profileGitEnvironment } from "../profileGitEnvironment";
 import { managedGitProcessEnvironment } from "../gitProcessEnvironment.ts";
+import { resolveGitExecutable } from "../../spawn/resolveCommand.ts";
 /**
  * Git process helpers - Effect-native git execution with typed errors.
  *
@@ -175,7 +176,7 @@ const makeGitService = Effect.gen(function* () {
 
       const child = yield* commandSpawner
         .spawn(
-          ChildProcess.make("git", commandInput.args, {
+          ChildProcess.make(resolveGitExecutable(environment), commandInput.args, {
             cwd: commandInput.cwd,
             env: environment,
             ...(input.stdin === undefined
