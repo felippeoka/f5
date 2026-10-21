@@ -259,5 +259,6 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
       );
       assert.isTrue(liveOnly.includes(live));
       assert.isFalse(liveOnly.includes(stopped));
-    }));
+    }),
+  );
 });

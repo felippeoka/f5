@@ -19,7 +19,9 @@ const paths = [
 describe("file path collators", () => {
   it("order paths exactly like localeCompare with the same options", () => {
     expect(paths.toSorted(compareFilePaths)).toEqual(
-      paths.toSorted((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })),
+      paths.toSorted((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+      ),
     );
     expect(paths.toSorted(compareFilePathsCaseSensitive)).toEqual(
       paths.toSorted((a, b) => a.localeCompare(b, undefined, { numeric: true })),
