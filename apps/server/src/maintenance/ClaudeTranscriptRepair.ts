@@ -42,7 +42,10 @@ export async function repairClaudeResumePoint(input: {
   });
   // Quarantine deletes by line number, so a reader that splits lines differently
   // from split("\n") would delete valid records. Refuse instead of guessing.
-  const originalLines = original.split("\n");
+  // The reader's UTF-8 decoder drops a leading BOM, which JSON.parse rejects.
+  const originalLines = (original.charCodeAt(0) === 0xfeff ? original.slice(1) : original).split(
+    "\n",
+  );
   for (const line of malformed) {
     let parsed = false;
     try {

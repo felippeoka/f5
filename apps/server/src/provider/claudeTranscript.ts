@@ -73,8 +73,9 @@ export async function readClaudeTranscript(
 /**
  * Yield JSONL lines split on "\n" only, including an unterminated final line.
  * node:readline also ends lines at U+2028, U+2029 and a lone "\r", which
- * JSON.stringify leaves unescaped inside strings. Line N here always matches
- * `text.split("\n")[N - 1]`, which repair relies on to quarantine by line number.
+ * JSON.stringify leaves unescaped inside strings. Line N here is always line N
+ * of `text.split("\n")`, which repair relies on to quarantine by line number.
+ * Content can differ only by a leading BOM and a trailing "\r", both removed.
  */
 export async function* readClaudeTranscriptLines(
   file: string,

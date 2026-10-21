@@ -295,6 +295,17 @@ describe("Claude transcript recovery", () => {
       ).quarantinedLines,
     ).toEqual([2]);
   });
+  it("rebuilds a missing target in a transcript that starts with a BOM", async () => {
+    const input = await fixture();
+    await writeFile(input.file, String.fromCharCode(0xfeff) + (await readFile(input.file, "utf8")));
+    await writeFile(
+      path.join(input.providerLogsDir, "thread.log"),
+      logged("target", [{ type: "text", text: "recovered" }]),
+    );
+    const result = await repairClaudeResumePoint(input);
+    expect(result.status).toBe("repaired");
+    expect(hasClaudeParentChain(await readClaudeTranscript(input.file), "target")).toBe(true);
+  });
   it("revalidates an intact target without requiring an assistant envelope or rewriting bytes", async () => {
     const input = await fixture([{ uuid: "target", parentUuid: null, type: "user" }]);
     const original = await readFile(input.file, "utf8");
