@@ -779,6 +779,50 @@ describe("startSession", () => {
     }
   });
 
+  it("unarchives an archived Codex session and resumes it instead of starting fresh", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "codex-archived-resume-"));
+    const binaryPath = path.join(directory, "codex.cjs");
+    writeFileSync(binaryPath, "#!/usr/bin/env node\nprocess.stdin.resume();\n", { mode: 0o755 });
+    const manager = new CodexAppServerManager();
+    vi.spyOn(
+      manager as unknown as { assertSupportedCodexCliVersion: () => string },
+      "assertSupportedCodexCliVersion",
+    ).mockReturnValue("0.162.0");
+    let resumes = 0;
+    const requests = vi
+      .spyOn(
+        manager as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> },
+        "sendRequest",
+      )
+      .mockImplementation(async (_context, method) => {
+        if (method === "thread/resume" && resumes++ === 0)
+          throw new Error(
+            "thread/resume failed: session archived-thread is archived. Run `codex unarchive archived-thread`.",
+          );
+        if (method === "thread/resume") return { thread: { id: "archived-thread" } };
+        return {};
+      });
+    try {
+      await manager.startSession({
+        threadId: asThreadId("archived"),
+        cwd: directory,
+        runtimeMode: "full-access",
+        providerOptions: { codex: { binaryPath } },
+        resumeCursor: { threadId: "archived-thread" },
+      });
+      const methods = requests.mock.calls.map((call) => call[1]);
+      expect(methods).toContain("thread/unarchive");
+      expect(methods).not.toContain("thread/start");
+      expect(methods.filter((method) => method === "thread/resume")).toHaveLength(2);
+      expect(requests.mock.calls.find((call) => call[1] === "thread/unarchive")?.[2]).toEqual({
+        threadId: "archived-thread",
+      });
+    } finally {
+      manager.stopAll();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each(["empty", "failed"])(
     "isolates the catalog when a second session has %s model/list",
     async (response) => {

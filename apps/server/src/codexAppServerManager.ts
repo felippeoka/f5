@@ -1113,6 +1113,12 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
   return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
 }
 
+/** Codex refuses to resume a session the user archived until it is unarchived. */
+export function isArchivedThreadResumeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\bsession \S+ is archived\b|\bcodex unarchive\b/i.test(message);
+}
+
 export interface CodexAppServerManagerEvents {
   event: [event: ProviderEvent];
 }
@@ -1337,11 +1343,22 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       if (resumeThreadId) {
         try {
           threadOpenMethod = "thread/resume";
-          threadOpenResponse = await this.sendRequest(
-            context,
-            "thread/resume",
-            threadOpenParams.resume!,
-          );
+          try {
+            threadOpenResponse = await this.sendRequest(
+              context,
+              "thread/resume",
+              threadOpenParams.resume!,
+            );
+          } catch (error) {
+            if (!isArchivedThreadResumeError(error)) throw error;
+            // An archived session keeps its history; unarchive it and resume again.
+            await this.sendRequest(context, "thread/unarchive", { threadId: resumeThreadId });
+            threadOpenResponse = await this.sendRequest(
+              context,
+              "thread/resume",
+              threadOpenParams.resume!,
+            );
+          }
         } catch (error) {
           if (!isRecoverableThreadResumeError(error)) {
             this.emitErrorEvent(
