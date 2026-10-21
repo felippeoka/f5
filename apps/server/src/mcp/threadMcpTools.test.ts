@@ -3,7 +3,19 @@ import { ThreadId } from "@t3tools/contracts";
 import { Effect, Exit, Scope } from "effect";
 import { makePreviewAutomationBroker, PreviewAutomationBroker } from "./PreviewAutomationBroker.ts";
 import { makePreviewMcpHttpServer } from "./PreviewMcpHttpServer.ts";
-import { callThreadTool, makeThreadMcpBroker, ThreadMcpBroker } from "./threadMcpTools.ts";
+import {
+  callThreadTool,
+  makeThreadMcpBroker,
+  THREAD_TOOL_DEFINITIONS,
+  ThreadMcpBroker,
+} from "./threadMcpTools.ts";
+
+it("tells agents to leave a rendered page on the thread's own background", () => {
+  const description =
+    THREAD_TOOL_DEFINITIONS.find((tool) => tool.name === "html_render")?.description ?? "";
+  assert.include(description, "leave html, body and the outermost element without a background");
+  assert.include(description, "at least 16px of padding");
+});
 
 it.effect(
   "binds calls to the transport thread, validates inputs and retires runtime ownership",

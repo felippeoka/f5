@@ -157,7 +157,7 @@ export const THREAD_TOOL_DEFINITIONS = [
     name: "html_render",
     title: "Render HTML in thread",
     description:
-      "Save an HTML page in this thread. Local absolute image paths must stay inside the project, worktree or attachments. JavaScript runs in a sandboxed frame.",
+      "Save an HTML page in this thread. Local absolute image paths must stay inside the project, worktree or attachments. JavaScript runs in a sandboxed frame. The page sits on the thread's background, so leave html, body and the outermost element without a background color; a box that needs its own background gets at least 16px of padding and rounded corners.",
     shape: {
       html: z.string().max(512 * 1024),
       title: z.string().min(1).max(80),
