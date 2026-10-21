@@ -53,13 +53,10 @@
     },
     {
       "upstreamSha": "2fae0f9841448e6edb93d0ebe4cbaf2d546bb38c",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): opening an image preview no longer re-renders the chat view (#20845).",
+      "classification": "equivalent:apps/web/src/components/ChatView.browser.tsx:8557",
+      "reason": "Equivalent: upstream stops an image preview from re-rendering the chat view. F5's render-commit test already pins that opening an image preview does not commit the timeline. Upstream change: perf(web): opening an image preview no longer re-renders the chat view (#20845)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20845"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["0897adf7a814e288b530b695538bf867c7e66fc4"]
     },
     {
       "upstreamSha": "efef7cbb19941fb6cdb245cfdeba3525b1a77d7b",
@@ -263,13 +260,9 @@
     },
     {
       "upstreamSha": "f03378f70ac37f56276210e193769c970a759047",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the hosted browser webview keeps its caching without \"use memo\" (#20824).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20824"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the hosted browser webview keeps its caching without \"use memo\" (#20824)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8c67f77af6b4ca8a34a48f0ea87c684f99e8fa83",
@@ -480,13 +473,9 @@
     },
     {
       "upstreamSha": "3f480b84a52f04a7b6a8cfbd1554ff730a7a5c03",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the attachment preview keeps its caching without \"use memo\" hooks (#20757).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20757"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the attachment preview keeps its caching without \"use memo\" hooks (#20757)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "583ad66c525b188367f3e70aeed96f32f9b01790",
@@ -512,13 +501,9 @@
     },
     {
       "upstreamSha": "8dbfd927f9c46502472d5a62199d0f2f7f8b0a49",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the preview bridge keeps its stable thread ref without \"use memo\" hooks (#20746).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20746"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the preview bridge keeps its stable thread ref without \"use memo\" hooks (#20746)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d4314e8e1627e2ea46ddea20de9e9deda40b1dcc",
@@ -631,13 +616,9 @@
     },
     {
       "upstreamSha": "3af41edb71e73075a475a445681e3e3ce778cc67",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the file browser keeps its caching without \"use memo\" hooks (#20784).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20784"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the file browser keeps its caching without \"use memo\" hooks (#20784)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "68ed8d35bf38c9755805195ccb6731ba096d230f",
@@ -797,23 +778,15 @@
     },
     {
       "upstreamSha": "7a08cdf5f2852fc82978a50cd2d53095b0393f2f",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the browser surface slot compiles with the React Compiler (#20542).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20542"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the browser surface slot compiles with the React Compiler (#20542)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4576827f4189a780e4dab131e4b974e1d1cb76cc",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the browser favicon store compiles without manual memoization (#20546).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20546"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the browser favicon store compiles without manual memoization (#20546)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "16e6a6ab50c39206108f3bf6f9e3d9be6d87ba4b",
@@ -894,13 +867,9 @@
     },
     {
       "upstreamSha": "095fdac93f6cb9b62bc21ed3d45bcde3ccbf7ce9",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the hosted browser webview compiles with the React Compiler (#20558).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20558"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the hosted browser webview compiles with the React Compiler (#20558)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "74920122f6477cb32dec149742c2b06d0643482b",
@@ -1164,13 +1133,9 @@
     },
     {
       "upstreamSha": "7591b64ec0deb9be51e504b48ddb24d4c47ed7db",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the font previews compile with the React Compiler (#20601).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20601"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the font previews compile with the React Compiler (#20601)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ed16d9f2416951366ecc20607df125912420d558",
@@ -1425,13 +1390,9 @@
     },
     {
       "upstreamSha": "9578a59abd28d6fe67138641bdae7864861055d9",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): usePreviewBridge compiles with the React Compiler (#20644).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20644"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): usePreviewBridge compiles with the React Compiler (#20644)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0ed3ae8a2d6e2fc3173fd3e0dec6caedcbcbee58",
@@ -1674,23 +1635,15 @@
     },
     {
       "upstreamSha": "d859445528aa951c383644d0afcd5d4a3ce0f006",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the CSV table preview compiles without manual memoization (#20680).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20680"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the CSV table preview compiles without manual memoization (#20680)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "26438213b50946fc02d58065f8886924dc13c166",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the Electron browser host compiles with the React Compiler (#20548).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20548"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the Electron browser host compiles with the React Compiler (#20548)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "dc060b113288753c0900911a97c0911899d265d1",
@@ -1791,13 +1744,9 @@
     },
     {
       "upstreamSha": "06299ff56ad6ead52e94c9a8cc44e63c76a3b5b7",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the file preview panel compiles with the React Compiler (#20692).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20692"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the file preview panel compiles with the React Compiler (#20692)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c712852d96ddc896cc347453916d134c3fdeeeb5",
@@ -1868,13 +1817,9 @@
     },
     {
       "upstreamSha": "40b325bca0d61d9764a22a1df316e27011f2b923",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the preview mini player compiles without manual memoization (#20704).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20704"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the preview mini player compiles without manual memoization (#20704)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ce29ba9cd774ae996d51ca444d1e0165e5d7d527",
@@ -2347,13 +2292,9 @@
     },
     {
       "upstreamSha": "a77cbf0d5ed91bdb067f69e45714ed0346d404a4",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the file browser panel compiles with the React Compiler (#20483).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20483"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the file browser panel compiles with the React Compiler (#20483)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1144a7ecc4b7f437de9c5caaa88524c057c9a8b4",
@@ -2375,13 +2316,9 @@
     },
     {
       "upstreamSha": "426706cbcec497054c688ecc4e45e6d1bbc2a8c2",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the attachment file preview compiles with the React Compiler (#20479).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20479"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the attachment file preview compiles with the React Compiler (#20479)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b27c686298becb3d63218ec221d1a819dfb00b72",
@@ -2397,13 +2334,9 @@
     },
     {
       "upstreamSha": "e96db6f0c36bd38a079843fa316d2cca0b11306d",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the browser preview view compiles with the React Compiler (#20476).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20476"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the browser preview view compiles with the React Compiler (#20476)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9fa39677e16a339e9ed0e29a1d8e4cec3a500380",
@@ -2473,13 +2406,9 @@
     },
     {
       "upstreamSha": "635396ca3cdc858f7d829e3b31dd498cda2a8cab",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): browser viewport resize checks its source through a stable callback (#20465).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20465"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): browser viewport resize checks its source through a stable callback (#20465)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "de89a7a76dfae79c1defbd7baa9cd7abd5154a6f",
@@ -2569,13 +2498,9 @@
     },
     {
       "upstreamSha": "fd3420f3805aed83326ec40a6a6663681a44ef27",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the server browser surface compiles with the React Compiler (#20451).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20451"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the server browser surface compiles with the React Compiler (#20451)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "777cd68c6aa0b816f39d1e0dc79ad34590635755",
@@ -2699,13 +2624,9 @@
     },
     {
       "upstreamSha": "a5539a6b0375968ba8f743b8cc364ef75971d089",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): move agent-opened browser and device surfacing out of ChatView (#20312).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-20312"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): move agent-opened browser and device surfacing out of ChatView (#20312)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4283e23392f272fe69a4387d9768af9ed69883a4",
@@ -3023,13 +2944,10 @@
     },
     {
       "upstreamSha": "bb4e4e7eca1d0de27efbc9fb9eab69e5463b9374",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(desktop): agent typing in a preview tab no longer lands in the app (#18556).",
+      "classification": "equivalent:apps/desktop/src/main.ts:1830",
+      "reason": "Equivalent: upstream stops agent typing landing in the app by sending text through Electron's direct input when the preview lacks focus. F5 always types through the guest's own insertText and sendInputEvent, never CDP Input.insertText, so input stays in the page. Upstream change: fix(desktop): agent typing in a preview tab no longer lands in the app (#18556)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-18556"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["530136028fe8af450670a0fb2dca634545cc52b4"]
     },
     {
       "upstreamSha": "1550058056ba660b8581c8eda990c9d40c493a4b",
@@ -3731,13 +3649,9 @@
     },
     {
       "upstreamSha": "40a7908df54d5069c93835032c9e955b56b55f1d",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): Reveal in File Explorer and browser launches work on Windows again (#19656).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-19656"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:powershell-launcher",
+      "reason": "Not applicable: upstream fixes its PowerShell-based Windows launcher. F5 reveals files with explorer /select and opens browsers through the open package (apps/server/src/open.ts:47). Upstream change: fix(server): Reveal in File Explorer and browser launches work on Windows again (#19656)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5a4e9980533705774dc3f45b35cacf76c3d78dbc",
@@ -3792,13 +3706,9 @@
     },
     {
       "upstreamSha": "78f4b69a1fc6c37e2bdbb3f8d02717a49d4ccacd",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): preview copy only forwards text from the viewer's copy keys (#19561).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-19561"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:server-browser",
+      "reason": "Not applicable: upstream runs a headless browser on the environment server and streams it to clients. F5's preview is an Electron webview in the desktop app; there is no server browser. The agent attachment and device toolkits in t3code#16956 do not exist in F5 either. Upstream change: fix(server): preview copy only forwards text from the viewer's copy keys (#19561)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "aa81d1203ea43c3b6cc09c5442559fa0cf18db63",
@@ -5014,13 +4924,9 @@
     },
     {
       "upstreamSha": "511d20c6f20c2ed6ff787aba068d7d673e2949b9",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(mobile): hide Claude Read image placeholders when previews exist (#18761).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-18761"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: fix(mobile): hide Claude Read image placeholders when previews exist (#18761)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0e7346ccd9427c06161e222319e718e6bd70887f",
@@ -5131,13 +5037,10 @@
     },
     {
       "upstreamSha": "48595c787cf5ffe3fcc089ce36754d7c601e4007",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): consolidate browser credential handling (#18509).",
+      "classification": "equivalent:apps/server/src/serverAuth.ts:102",
+      "reason": "Equivalent: upstream checks Origin before honoring a cookie credential. F5's session cookie is SameSite=Strict and HttpOnly, and WebSocket upgrades are checked against allowed origins. Upstream change: fix(server): consolidate browser credential handling (#18509)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-18509"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["960265d87b312f0803a4577aeedcf4deede473e0"]
     },
     {
       "upstreamSha": "abc80c80a73fdda78600184276da9e36cca89703",
@@ -5892,13 +5795,9 @@
     },
     {
       "upstreamSha": "0cb38403feb8f2bbc29dc78dea1649af696b6f08",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): unpin preview dragging on narrow chat canvases (#15556).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-15556"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:floating-preview",
+      "reason": "Not applicable: upstream's floating picture-in-picture browser preview (mini player). F5 shows the preview only as a right-panel tab and has no floating preview. Upstream change: fix(web): unpin preview dragging on narrow chat canvases (#15556)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5047ee78858bfdeb254c7386e2d427d3bccb8430",
@@ -6227,13 +6126,9 @@
     },
     {
       "upstreamSha": "0ecb25a8d45b7768bada974a9d6a99b17cf8bf49",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): media preview centers its content and pins the close button (#17951).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17951"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:media-dialog-layout",
+      "reason": "Not applicable: upstream fixes its media dialog's centering and close button. F5's expanded image preview keeps its controls in a fixed toolbar. Upstream change: fix(web): media preview centers its content and pins the close button (#17951)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e4ef8d36bad346e0b8c38da276329cc54a1cce6f",
@@ -6547,13 +6442,9 @@
     },
     {
       "upstreamSha": "50647de0143e68fde051eb1a0ccf4fe63f9947b2",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): check the specific scope for scripts, preview input, and full-access MCP grants (#17772).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17772"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:scoped-auth",
+      "reason": "Not applicable: upstream splits browser preview control, scripts and MCP grants into their own RPC auth scopes, partly for its server browser. F5 has no scoped RPC authorization. Upstream change: fix(server): check the specific scope for scripts, preview input, and full-access MCP grants (#17772)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "cfbd1457ad093b1cd7f6c53851009a62b676b203",
@@ -7011,13 +6902,10 @@
     },
     {
       "upstreamSha": "5c715c6941184da09bf11f6651d303d284bd54da",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): keep preview browser connected after operation timeouts (#17693).",
+      "classification": "equivalent:apps/server/src/mcp/PreviewAutomationBroker.ts:499",
+      "reason": "Equivalent: upstream gives the browser's own timeout reply a grace period before treating the host as unresponsive. F5 waits the operation timeout plus 2 seconds, and a timeout fails only that request, never the host connection. Upstream change: fix(server): keep preview browser connected after operation timeouts (#17693)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17693"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["530136028fe8af450670a0fb2dca634545cc52b4"]
     },
     {
       "upstreamSha": "8b81a8880f56daf475136e9d89794bb2a33526d0",
@@ -7145,13 +7033,10 @@
     },
     {
       "upstreamSha": "318201caa520525517ef2bee8f4bbeedb2fec1d7",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): probe only owned preview listeners (#16687).",
+      "classification": "equivalent:apps/server/src/preview/PortScanner.ts:152",
+      "reason": "Equivalent: upstream probes only listeners its terminals own. F5 probes only localhost URLs printed by processes this profile owns, never a list of common ports. Upstream change: fix(server): probe only owned preview listeners (#16687)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-16687"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["a69b3fa1f4d04dff3c600f7d92f6fda65ce47684"]
     },
     {
       "upstreamSha": "f34adad34f21510e867b47fe018c7975779a0ffc",
@@ -7197,13 +7082,9 @@
     },
     {
       "upstreamSha": "eddc8fb817dbdb6c9ce34a30a2781c02ae8be9e0",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): server browser page resizes while the panel is dragged (#17660).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17660"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:server-browser",
+      "reason": "Not applicable: upstream runs a headless browser on the environment server and streams it to clients. F5's preview is an Electron webview in the desktop app; there is no server browser. The agent attachment and device toolkits in t3code#16956 do not exist in F5 either. Upstream change: fix(web): server browser page resizes while the panel is dragged (#17660)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "033866c7aa55c53593ca31538f7d8ac99fdfe0fd",
@@ -7743,13 +7624,9 @@
     },
     {
       "upstreamSha": "8f760371978f05b49e6f6b6aa4b2c523ab14b4fe",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): a timed-out browser drag no longer exits the server (#17360).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17360"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:server-browser",
+      "reason": "Not applicable: upstream runs a headless browser on the environment server and streams it to clients. F5's preview is an Electron webview in the desktop app; there is no server browser. The agent attachment and device toolkits in t3code#16956 do not exist in F5 either. Upstream change: fix(server): a timed-out browser drag no longer exits the server (#17360)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5785df19ea748be0755244582cb70d785f95f830",
@@ -7834,13 +7711,9 @@
     },
     {
       "upstreamSha": "dbd83435347d13d5f456271f4f1f5efe294a111d",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): agent browser tools stop bloating history, fall back sensibly, and respect ownership (#16956).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-16956"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:server-browser",
+      "reason": "Not applicable: upstream runs a headless browser on the environment server and streams it to clients. F5's preview is an Electron webview in the desktop app; there is no server browser. The agent attachment and device toolkits in t3code#16956 do not exist in F5 either. Upstream change: fix(server): agent browser tools stop bloating history, fall back sensibly, and respect ownership (#16956)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c724c7cb02aaeb0a23ff6e5e224d17c0fdb9a36b",
@@ -7850,13 +7723,9 @@
     },
     {
       "upstreamSha": "393ff4c968073d8419e5bade06000998602af6ad",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(mobile): restore chat image previews in the v5 stack (#17361).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17361"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: fix(mobile): restore chat image previews in the v5 stack (#17361)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6308db4ff500b89821e22605f964b1701cead8ee",
@@ -7872,13 +7741,10 @@
     },
     {
       "upstreamSha": "e0c80c198cfbb2afe04528cd6a7ec1d2f21606dd",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): images, video, HTML and PDF preview in a thread before its first message (#17352).",
+      "classification": "equivalent:apps/web/src/components/FileViewPanel.tsx:124",
+      "reason": "Equivalent: upstream lets media files preview in a draft thread. F5's file view resolves a draft thread's workspace the same way as a server thread. Upstream change: fix(web): images, video, HTML and PDF preview in a thread before its first message (#17352)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17352"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["17a390aef5c6e825c3c2bcf7d7a4bdd19d37d9d6"]
     },
     {
       "upstreamSha": "3bfbc37dbf37095816eda500f3f1e05cb98bb95b",
@@ -7892,43 +7758,32 @@
     },
     {
       "upstreamSha": "66298aa926e6a4c95ebecbc576a68634315899c0",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): desktop opens remote environments' browser tabs locally (#17316).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-17316"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:multi-environment",
+      "reason": "Not applicable: upstream maps loopback preview URLs and browser tabs across remote environments. F5 runs one local environment. Upstream change: fix(web): desktop opens remote environments' browser tabs locally (#17316)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d9f7c0caed5cc0fe84cec97f2b6f002084542a4e",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(desktop): browser tab fixes for fullscreen, shortcuts, links, reload and hidden tabs (#16961).",
+      "classification": "deferred",
+      "reason": "Partly ported: preview sessions now deny every permission except clipboard writes and fullscreen (9293d10f5d), stricter than upstream, a page's fullscreen fills its own webview, and agent-started downloads skip the Save dialog (7e5954e7e4). Declined: the prompt for custom-scheme links, since F5 denies openExternal outright. Deferred: app shortcuts and main-window reload while a preview page has focus (F5's guest ignores menu shortcuts and nothing forwards them), and background-open tab selection. Upstream change: fix(desktop): browser tab fixes for fullscreen, shortcuts, links, reload and hidden tabs (#16961)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-16961"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "evidence": ["apps/desktop/src/preview/previewPermissions.test.ts:5"],
+      "f5Shas": [
+        "9293d10f5da4eda67b3c0d4e747165c583b38842",
+        "7e5954e7e4ce676cf4e78e2f738476001d364700"
+      ]
     },
     {
       "upstreamSha": "5754121c23f73201d47a96feb97eca7b96334a2a",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): environment-hosted browser tabs behave like a normal browser (#16963).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-16963"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:server-browser",
+      "reason": "Not applicable: upstream runs a headless browser on the environment server and streams it to clients. F5's preview is an Electron webview in the desktop app; there is no server browser. The agent attachment and device toolkits in t3code#16956 do not exist in F5 either. Upstream change: fix(server): environment-hosted browser tabs behave like a normal browser (#16963)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "741377ce5fb1578916659cbb93fd403b26dbeb62",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): file previews handle downloads, in-page links, and repo paths, and favicons stop leaking internal hosts (#16950).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-16950"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:file-preview-frame",
+      "reason": "Not applicable: upstream lets its scripted file preview frame download and follow in-page links, and stops its third-party favicon service leaking internal hosts. F5's HTML file preview runs with an empty sandbox (no scripts), chat links never touch the hash route because every click is handled, and F5 fetches favicons through the page's own session (apps/desktop/src/preview/previewFavicon.ts), never a third-party service. Upstream change: fix(web): file previews handle downloads, in-page links, and repo paths, and favicons stop leaking internal hosts (#16950)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e38b6a188fafd499df347331f8c8279ff320c207",
@@ -8990,13 +8845,9 @@
     },
     {
       "upstreamSha": "7175edcff4f250b583ebed8877e27e36dc48411e",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(auth): separate browser preview control permissions (#9789).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-9789"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:scoped-auth",
+      "reason": "Not applicable: upstream splits browser preview control, scripts and MCP grants into their own RPC auth scopes, partly for its server browser. F5 has no scoped RPC authorization. Upstream change: feat(auth): separate browser preview control permissions (#9789)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "321c6f9d26e9240f6ed3d2a3a8f7fc11344c2f17",
@@ -9386,13 +9237,9 @@
     },
     {
       "upstreamSha": "fd1c3386c4d60f3477ab3f13c87537848de099f5",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(release): unblock nightly browser tests and cli builds (#16515).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-16515"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:release-pipeline",
+      "reason": "Not applicable: upstream unblocks its nightly browser test and CLI build jobs. F5 does not use T3's release pipeline. Upstream change: fix(release): unblock nightly browser tests and cli builds (#16515)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "dff412c3411f34b3150983f00686a98b600526e3",
@@ -9408,13 +9255,9 @@
     },
     {
       "upstreamSha": "ac8e9453ca0948469ccf5651b765086d8d9ecd64",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(preview): run the browser on the environment server (#15328).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-15328"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:server-browser",
+      "reason": "Not applicable: upstream runs a headless browser on the environment server and streams it to clients. F5's preview is an Electron webview in the desktop app; there is no server browser. The agent attachment and device toolkits in t3code#16956 do not exist in F5 either. Upstream change: feat(preview): run the browser on the environment server (#15328)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9bd1d8009a6b7c50f9dd9458e2bf27d481ff3b43",
@@ -9459,13 +9302,10 @@
     },
     {
       "upstreamSha": "411cef0008fa8e1e5251a8aae2cc6a215f700a9c",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(desktop): prevent browser screenshot filename collisions (#14784).",
+      "classification": "equivalent:apps/desktop/src/preview/PreviewArtifactStore.ts:199",
+      "reason": "Equivalent: upstream adds a random suffix so two screenshots in one millisecond cannot collide. F5 names every preview artifact with a random UUID. Upstream change: fix(desktop): prevent browser screenshot filename collisions (#14784)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-14784"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["2b3a2a981edc3b0f46d6f986d0ecdf70f78ca654"]
     },
     {
       "upstreamSha": "d0dc45885c1441da5bd46dcf13124d94ed728b0a",
@@ -10286,13 +10126,9 @@
     },
     {
       "upstreamSha": "7b797f2b90918e7bae0f710dcf24018b8b0843dc",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(desktop): bound preview inspector retention and record renderer identity (#16032).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-16032"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:desktop-telemetry",
+      "reason": "Not applicable: upstream records renderer identity in its desktop telemetry history. F5 has no desktop telemetry publisher. Upstream change: fix(desktop): bound preview inspector retention and record renderer identity (#16032)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1604ccc9d79f5270fb8e14d60664184bf142c4cb",
@@ -10552,13 +10388,9 @@
     },
     {
       "upstreamSha": "2dfef8779e046dc9b3fe87668022f4ed0907adbb",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): restore project action preview opening (#15490).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-15490"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:script-preview-url",
+      "reason": "Not applicable: upstream reopens a project action's preview URL after the action runs. F5 project actions have no preview URL or auto-open option (packages/contracts/src/orchestration.ts:292). Upstream change: fix(web): restore project action preview opening (#15490)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "836098543c6ecdf66734596df0ea3a8f6513f2a6",
@@ -11173,13 +11005,10 @@
     },
     {
       "upstreamSha": "f391794a35c604d57e166a3ab48d56fc6e4e469a",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(shared): classify workspace previews by literal filenames (#10311).",
+      "classification": "equivalent:packages/shared/src/filePreview.ts:13",
+      "reason": "Equivalent: upstream stops treating ? and # as query separators in workspace filenames. F5 classifies previews by the basename's literal extension. Upstream change: fix(shared): classify workspace previews by literal filenames (#10311)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-10311"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["d4d6991e764631bc825a3e4061651d6ff1ab484f"]
     },
     {
       "upstreamSha": "31a9da179ed0763335f05681c577474aec5d2309",
@@ -11293,23 +11122,15 @@
     },
     {
       "upstreamSha": "c5a929e1ac05dec15945a36905ab8bb2f1982e59",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): Woke dismiss syncs, preview mute is back, and subscription retries back off (#15034).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-15034"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:cross-device-sync",
+      "reason": "Not applicable: upstream syncs Woke acknowledgements across devices and backs off client-runtime subscription retries. F5 is single-device, has no client-runtime package, and already has preview mute. Upstream change: fix(web): Woke dismiss syncs, preview mute is back, and subscription retries back off (#15034)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "798e945aa77939937464ff45deaa8947be8d402f",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(preview): agent browser clicks no longer steal your composer focus (#15008).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-15008"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream hands keyboard focus back to the app after an agent click in a preview tab. F5 clicks with guest.sendInputEvent from the main process (apps/desktop/src/main.ts:1768); whether that moves focus off the composer needs a desktop run, which is unavailable here. Upstream change: fix(preview): agent browser clicks no longer steal your composer focus (#15008)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "63f74e209dc27df1f8733535d6fd4a79d442add8",
@@ -11434,13 +11255,10 @@
     },
     {
       "upstreamSha": "7ff2eabf56d30af15a8ac86b0eb46013a9e910ee",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(desktop): markdown no longer loads invisible in new dark-mode browser tabs (#14727).",
+      "classification": "equivalent:apps/desktop/src/preview/PreviewRuntime.ts:152",
+      "reason": "Equivalent: upstream sends the opaque base before a new dark-mode tab paints. F5 guests attach blank and get the opaque base and color scheme on registration, before they navigate. Upstream change: fix(desktop): markdown no longer loads invisible in new dark-mode browser tabs (#14727)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-14727"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["37d487dd0baef7ea4ed0601e99d9a961f6608a39"]
     },
     {
       "upstreamSha": "fd7ee2c30a7eeef910c99e7bc92e944526555db7",
@@ -12772,13 +12590,9 @@
     },
     {
       "upstreamSha": "a107f8a0792c3add90d398602998c55c3ebaef27",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(clients): a preview app no longer knocks the desktop's own server offline (#13577).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-13577"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:multi-environment",
+      "reason": "Not applicable: upstream maps loopback preview URLs and browser tabs across remote environments. F5 runs one local environment. Upstream change: fix(clients): a preview app no longer knocks the desktop's own server offline (#13577)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "7b84431161a64c9f9e9b57637dec23474a1b4236",
@@ -12820,13 +12634,10 @@
     },
     {
       "upstreamSha": "4f27a8463105662ddfc834e01bca375d5124be79",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(mcp): preview snapshots fit in the agent's tool output again (#13558).",
+      "classification": "equivalent:apps/desktop/src/preview/snapshotScript.ts:74",
+      "reason": "Equivalent: upstream caps snapshot text near 20 KB so agents keep its locators. F5 caps visible text at 20,000 characters and bounds element lists in the page script. Upstream change: fix(mcp): preview snapshots fit in the agent's tool output again (#13558)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-13558"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["aaff30384947534dfdd2634ced62f0e3cc797b5c"]
     },
     {
       "upstreamSha": "9957349c0a066a9efc657600fcb901c9b9cca34b",
@@ -13181,13 +12992,10 @@
     },
     {
       "upstreamSha": "894d33419dceb366eecda8e5e27c6fc043c3959e",
-      "classification": "planned:13b",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(preview): use the visible browser for new agent sessions (#13064).",
+      "classification": "equivalent:apps/server/src/mcp/PreviewAutomationBroker.ts:446",
+      "reason": "Equivalent: upstream points new agent sessions at the visible browser. F5 picks the visible owner first, then the most recently focused. Upstream change: fix(preview): use the visible browser for new agent sessions (#13064)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["13b-pr-13064"],
-        "targetModules": ["apps/desktop/src"]
-      }
+      "f5Shas": ["530136028fe8af450670a0fb2dca634545cc52b4"]
     },
     {
       "upstreamSha": "d4cd7d5c33122473da22ae118c93477ef7e38310",

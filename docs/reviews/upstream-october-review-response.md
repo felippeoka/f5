@@ -2988,3 +2988,69 @@ tooltip test without the shortcut, and the Claude text generation suite
 without `dontAsk` (18 failures). The 11 suites that use the mock ACP agent
 (191 tests), the title and reactor suites, and the server and web typechecks
 pass.
+
+## September set 13b triage log: browser preview
+
+All 88 open set 13b records are classified: 57 October follow-ups and 31
+September members, which change only in the ledger and keep their `13b` id.
+The result is 7 ported, 17 equivalent, 60 not applicable and 4 deferred.
+Most of the not-applicable records belong to upstream subsystems F5 does not
+have: the floating picture-in-picture preview, the browser that runs on the
+environment server, remote environments, scoped RPC auth, display-capture
+recording, Electron 43 and the mobile app, plus 19 React Compiler and
+memoization refactors.
+
+New ports:
+
+- [t3code#14573](https://github.com/pingdotgg/t3code/pull/14573): a download
+  from a preview tab the agent is driving saves to `preview-downloads` in the
+  state directory instead of opening a native Save dialog over the whole app.
+  A download the user starts keeps the dialog.
+- [t3code#16961](https://github.com/pingdotgg/t3code/pull/16961), in part:
+  preview sessions had no permission handler, and Electron approves every
+  request then, so any page could read the clipboard, post notifications, ask
+  for location, camera or microphone, or launch an app through a custom
+  scheme. Preview sessions now allow only clipboard writes and fullscreen,
+  which is stricter than upstream, and a page's fullscreen fills its own
+  webview. The shortcut forwarding and tab selection parts stay deferred.
+- [t3code#9068](https://github.com/pingdotgg/t3code/pull/9068): every preview
+  CDP use goes through one pinned Debugger per guest, so garbage collection
+  cannot crash the app while it is attached
+  ([electron/electron#53376](https://github.com/electron/electron/issues/53376)).
+- [t3code#13559](https://github.com/pingdotgg/t3code/pull/13559) and
+  [t3code#10232](https://github.com/pingdotgg/t3code/pull/10232): when no
+  desktop window can host the preview, or agent browser access is off, the
+  preview tools tell the agent not to retry and to check the page from the
+  shell instead. `preview_snapshot` accepts `includeImage=false`.
+- [t3code#13395](https://github.com/pingdotgg/t3code/pull/13395): checkpoint
+  capture no longer stamps the copied Git index one second early, which made
+  Git reread every file from the preceding second.
+- [t3code#19365](https://github.com/pingdotgg/t3code/pull/19365): a project
+  action shortcut recorded in a browser client is saved, not dropped.
+- [t3code#15628](https://github.com/pingdotgg/t3code/pull/15628): the file
+  view's read error names the attempted path and workspace folder.
+
+Equivalent, among others: F5 types into preview pages through the guest's own
+`insertText`, never CDP, so agent typing cannot land in the app
+([t3code#18556](https://github.com/pingdotgg/t3code/pull/18556)); it probes
+only URLs printed by processes it owns
+([t3code#16687](https://github.com/pingdotgg/t3code/pull/16687)); a preview
+timeout fails only its request, never the host connection
+([t3code#17693](https://github.com/pingdotgg/t3code/pull/17693),
+[t3code#12535](https://github.com/pingdotgg/t3code/pull/12535)); and its
+session cookie is `SameSite=Strict`
+([t3code#18509](https://github.com/pingdotgg/t3code/pull/18509)).
+
+Deferred: agent cursor and input feedback drawn into recordings
+([t3code#12779](https://github.com/pingdotgg/t3code/pull/12779)), favicons on
+browser tool activity rows
+([t3code#11032](https://github.com/pingdotgg/t3code/pull/11032)), and handing
+focus back after an agent click
+([t3code#15008](https://github.com/pingdotgg/t3code/pull/15008)), which needs
+a desktop run to confirm F5 has the problem.
+
+Validation: the 102 desktop preview tests, the 44 preview MCP tests, the
+checkpoint store, project script keybinding and file view suites, and the
+server, web and desktop typechecks pass. Electron cannot launch in this
+environment, so the download, permission and debugger changes were checked by
+unit tests and typecheck only, not in a running desktop window.
