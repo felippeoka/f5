@@ -4233,14 +4233,11 @@ export default memo(function ChatView({
       if (command === "thread.toggleSettled") {
         if (event.repeat || dialogFocus || isTerminalFocused()) return;
         event.preventDefault();
-        void threadActionController
-          .executeAction(activeThreadId, activeThread?.settledAt ? "unsettle" : "settle")
-          .catch(() =>
-            toastManager.add({
-              type: "error",
-              title: "Could not change settlement; check pending work first.",
-            }),
-          );
+        // The controller reports a refused settle with the server's reason.
+        void threadActionController.executeAction(
+          activeThreadId,
+          activeThread?.settledAt ? "unsettle" : "settle",
+        );
         return;
       }
       if (command === "thread.togglePin" || command === "thread.copyReference") {

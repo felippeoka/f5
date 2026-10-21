@@ -498,19 +498,37 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               yield* checkWorkspaceBarrier;
               if (envelope.command.type === "thread.settle") {
                 const command = envelope.command;
-                const blocked = yield* sql`SELECT 1 WHERE
-                  EXISTS(SELECT 1 FROM thread_settlement_hooks WHERE thread_id=${command.threadId} AND state IN ('pending','running','orphaned'))
-                  OR EXISTS(SELECT 1 FROM next_turn_queue WHERE thread_id=${command.threadId} AND deleted_at IS NULL)
-                  OR EXISTS(SELECT 1 FROM next_turn_queue_quarantine WHERE thread_id=${command.threadId})
-                  OR EXISTS(SELECT 1 FROM next_turn_queue_state WHERE thread_id=${command.threadId} AND worktree_block_token IS NOT NULL)
-                  OR EXISTS(SELECT 1 FROM projection_pending_approvals WHERE thread_id=${command.threadId} AND status='pending')
-                  OR EXISTS(SELECT 1 FROM projection_pending_user_inputs WHERE thread_id=${command.threadId} AND resolution IS NULL)
-                  OR EXISTS(SELECT 1 FROM projection_thread_background_work WHERE thread_id=${command.threadId} AND active=1)
-                  OR (${command.settledBy === "auto" ? 1 : 0}=1 AND EXISTS(SELECT 1 FROM thread_pull_request_watches WHERE thread_id=${command.threadId}))`;
-                if (blocked.length)
+                const [blocked] = yield* sql<{
+                  request: number;
+                  queued: number;
+                  background: number;
+                  scripts: number;
+                  watch: number;
+                }>`SELECT
+                  (EXISTS(SELECT 1 FROM projection_pending_approvals WHERE thread_id=${command.threadId} AND status='pending')
+                    OR EXISTS(SELECT 1 FROM projection_pending_user_inputs WHERE thread_id=${command.threadId} AND resolution IS NULL)) AS request,
+                  (EXISTS(SELECT 1 FROM next_turn_queue WHERE thread_id=${command.threadId} AND deleted_at IS NULL)
+                    OR EXISTS(SELECT 1 FROM next_turn_queue_quarantine WHERE thread_id=${command.threadId})
+                    OR EXISTS(SELECT 1 FROM next_turn_queue_state WHERE thread_id=${command.threadId} AND worktree_block_token IS NOT NULL)) AS queued,
+                  EXISTS(SELECT 1 FROM projection_thread_background_work WHERE thread_id=${command.threadId} AND active=1) AS background,
+                  EXISTS(SELECT 1 FROM thread_settlement_hooks WHERE thread_id=${command.threadId} AND state IN ('pending','running','orphaned')) AS scripts,
+                  (${command.settledBy === "auto" ? 1 : 0}=1 AND EXISTS(SELECT 1 FROM thread_pull_request_watches WHERE thread_id=${command.threadId})) AS watch`;
+                // The reason is shown to the user, so it names what to clear first.
+                const blocker = blocked?.request
+                  ? "This thread is waiting on an approval or question. Answer it before settling."
+                  : blocked?.queued
+                    ? "This thread has a queued message. Send it or remove it from the queue before settling."
+                    : blocked?.background
+                      ? "This thread still has background work running. Stop it before settling."
+                      : blocked?.scripts
+                        ? "Settlement scripts from an earlier settle are still running or need attention."
+                        : blocked?.watch
+                          ? "This thread is watching a pull request."
+                          : null;
+                if (blocker !== null)
                   return yield* new OrchestrationCommandInvariantError({
                     commandType: command.type,
-                    detail: "This thread still has pending work, requests or PR watches.",
+                    detail: blocker,
                   });
               }
               if (

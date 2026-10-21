@@ -3,7 +3,21 @@ import { describe, expect, it } from "vitest";
 import {
   buildThreadActionMenuItems,
   nativeThreadActionMenuItems,
+  settlementErrorDetail,
 } from "./useThreadActionController";
+
+describe("settlementErrorDetail", () => {
+  it("shows the server's reason a settle was refused", () => {
+    const pretty =
+      "OrchestrationCommandInvariantError: Orchestration command invariant failed (thread.settle): This thread has a queued message. Send it or remove it from the queue before settling.\n    at decide (decider.ts:1:1)";
+    expect(settlementErrorDetail(new Error(pretty))).toBe(
+      "This thread has a queued message. Send it or remove it from the queue before settling.",
+    );
+    expect(settlementErrorDetail(new Error("socket closed"))).toBe(
+      "Check pending work on the thread, then retry.",
+    );
+  });
+});
 
 describe("buildThreadActionMenuItems", () => {
   it("adapts active thread actions to pin and snooze state", () => {

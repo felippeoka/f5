@@ -23,6 +23,13 @@ import { toastManager } from "~/components/ui/toast";
 
 import { useCopyToClipboard } from "./useCopyToClipboard";
 
+/** The server's reason a settle was refused, without the invariant prefix or a stack. */
+export function settlementErrorDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const reason = /invariant failed \(thread\.(?:un)?settle\): ([^\n]+)/.exec(message)?.[1];
+  return reason?.trim() || "Check pending work on the thread, then retry.";
+}
+
 export type ThreadActionId =
   | "rename"
   | "regenerate-title"
@@ -318,12 +325,20 @@ export function useThreadActionController(input: {
         return;
       }
       if (actionId === "settle" || actionId === "unsettle") {
-        await api.orchestration.dispatchCommand({
-          type: actionId === "settle" ? "thread.settle" : "thread.unsettle",
-          commandId: newCommandId(),
-          threadId,
-          createdAt: new Date().toISOString(),
-        });
+        try {
+          await api.orchestration.dispatchCommand({
+            type: actionId === "settle" ? "thread.settle" : "thread.unsettle",
+            commandId: newCommandId(),
+            threadId,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: actionId === "settle" ? "Could not settle thread" : "Could not unsettle thread",
+            description: settlementErrorDetail(error),
+          });
+        }
         return;
       }
       if (actionId === "archive" || actionId === "unarchive") {

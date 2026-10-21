@@ -724,19 +724,26 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
         command,
         threadId: command.threadId,
       });
-      if (
-        thread.deletedAt ||
-        thread.pinnedAt ||
-        thread.session?.activeTurnId ||
-        thread.latestTurn?.state === "running" ||
-        (thread.latestTurn?.completedAt && thread.latestTurn.processingQuiescedAt === null) ||
-        ["running", "starting"].includes(thread.session?.status ?? "") ||
-        (thread.pendingUserInputs?.length ?? 0) > 0 ||
-        (thread.snoozedUntil && Date.parse(thread.snoozedUntil) > Date.parse(command.createdAt))
-      )
+      // The reason is shown to the user, so it names what to clear first.
+      const blocker = thread.deletedAt
+        ? "This thread was deleted."
+        : (thread.pendingUserInputs?.length ?? 0) > 0
+          ? "This thread is waiting on a question. Answer it before settling."
+          : thread.session?.activeTurnId ||
+              thread.latestTurn?.state === "running" ||
+              (thread.latestTurn?.completedAt && thread.latestTurn.processingQuiescedAt === null) ||
+              ["running", "starting"].includes(thread.session?.status ?? "")
+            ? "This thread is still running. Stop it before settling."
+            : thread.pinnedAt
+              ? "This thread is pinned. Unpin it before settling."
+              : thread.snoozedUntil &&
+                  Date.parse(thread.snoozedUntil) > Date.parse(command.createdAt)
+                ? "This thread is snoozed. Wake it before settling."
+                : null;
+      if (blocker !== null)
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "Finish pending work and clear the pin or snooze before settling this thread.",
+          detail: blocker,
         });
       if (command.expectedUpdatedAt !== undefined && command.expectedUpdatedAt !== thread.updatedAt)
         return yield* new OrchestrationCommandInvariantError({

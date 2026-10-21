@@ -246,10 +246,16 @@ it.effect("checks queued work and pending requests inside the settlement command
           createdAt: old,
         },
       });
-      assert.equal((yield* f.settle().pipe(Effect.result))._tag, "Failure");
+      // The rejection names what to clear first.
+      const reason = () =>
+        f.settle().pipe(
+          Effect.flip,
+          Effect.map((error) => error.message),
+        );
+      assert.include(yield* reason(), "has a queued message. Send it or remove it");
       yield* f.queue.softDelete({ itemId: id });
       yield* f.sql`INSERT INTO projection_pending_user_inputs(thread_id,request_id,payload_json,resolution) VALUES(${threadId},'input','{}',NULL)`;
-      assert.equal((yield* f.settle().pipe(Effect.result))._tag, "Failure");
+      assert.include(yield* reason(), "waiting on an approval or question. Answer it");
       yield* f.sql`DELETE FROM projection_pending_user_inputs WHERE thread_id=${threadId}`;
       yield* f.settle();
       assert.isNotNull((yield* f.thread()).settledAt);
