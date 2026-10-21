@@ -12,7 +12,7 @@ import { emptyGitProjectRepositories } from "../testDoubles";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { ForgeAccounts, type ForgeAccountsShape } from "../../sourceControl/accountRouting.ts";
@@ -213,6 +213,45 @@ describe("GitManager unit", () => {
       id: "42",
       provider: { kind: "github", remoteName: "origin" },
     });
+  });
+
+  it("announces a pull request once when status sees it change state", async () => {
+    const pr = {
+      number: 42,
+      title: "Fast tests",
+      url: "https://github.com/t3tools/f5/pull/42",
+      baseRefName: "main",
+      headRefName: "feature/test",
+      headRefOid: "abc123",
+      state: "open" as "open" | "merged",
+    };
+    const { manager } = await makeManager({
+      gitCore: { statusDetails: () => Effect.succeed(cleanStatus) },
+      gitHub: {
+        get pullRequests() {
+          return [{ ...pr }];
+        },
+      },
+    });
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const changes: string[] = [];
+          yield* Stream.runForEach(manager.pullRequestStateChanges!, (url) =>
+            Effect.sync(() => changes.push(url)),
+          ).pipe(Effect.forkScoped);
+          yield* Effect.sleep("10 millis");
+          yield* manager.status({ cwd });
+          pr.state = "merged";
+          yield* manager.status({ cwd });
+          yield* manager.status({ cwd });
+          yield* Effect.sleep("10 millis");
+          return changes;
+        }),
+      ),
+    );
+    // An open first read is not news; the merge is, once.
+    expect([...seen]).toEqual(["https://github.com/t3tools/f5/pull/42"]);
   });
 
   it("fails closed instead of dispatching GitHub operations for unsupported remotes", async () => {

@@ -540,6 +540,10 @@ export const makeThreadSettlementService = Effect.gen(function* () {
       yield* Stream.runForEach(federation.value.hub.streamChanges, () => requestSweep).pipe(
         Effect.forkScoped,
       );
+    // Branch status can see a thread's PR merge before the PR hub does.
+    const statusChanges = Option.isSome(gitManager) && gitManager.value.pullRequestStateChanges;
+    if (statusChanges)
+      yield* Stream.runForEach(statusChanges, () => requestSweep).pipe(Effect.forkScoped);
     yield* requestSweep.pipe(Effect.repeat(Schedule.spaced("5 minutes")), Effect.forkScoped);
   });
   return { start, sweep, requestSweep, settleProjectIdle, settleFromAgent, readCandidate };

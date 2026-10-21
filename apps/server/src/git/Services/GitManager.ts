@@ -18,7 +18,7 @@ import {
   GitStatusResult,
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
-import type { Effect } from "effect";
+import type { Effect, Stream } from "effect";
 import type { GitManagerServiceError } from "../Errors.ts";
 
 export interface GitActionProgressReporter {
@@ -42,6 +42,11 @@ export interface GitManagerShape {
     import("../../sourceControl/SourceControlProvider.ts").SourceControlPullRequestSummary | null,
     GitManagerServiceError
   >;
+  /**
+   * URLs of pull requests that a status read saw change state (merged, closed or reopened),
+   * so settlement can react before its next sweep. Best effort; drops under backpressure.
+   */
+  readonly pullRequestStateChanges?: Stream.Stream<string>;
   /**
    * Read current repository Git status plus open PR metadata when available.
    */

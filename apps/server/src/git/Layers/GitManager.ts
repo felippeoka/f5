@@ -15,7 +15,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 
-import { Effect, FileSystem, Layer, Path, Option, Schema } from "effect";
+import { Effect, FileSystem, Layer, Path, Option, PubSub, Schema, Stream } from "effect";
 import {
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
@@ -357,6 +357,24 @@ function toPullRequestHeadRemoteInfo(pr: {
 }
 
 export const makeGitManager = Effect.gen(function* () {
+  // The last PR state each status read saw. Thread details show this read, so a merge it sees
+  // must reach settlement right away instead of waiting for the next sweep.
+  const pullRequestStateChanges = yield* PubSub.sliding<string>(64);
+  const statusPullRequestStates = new Map<string, PullRequestInfo["state"]>();
+  const noteStatusPullRequestState = (pr: PullRequestInfo) =>
+    Effect.suspend(() => {
+      // An unseen PR counts as open, so only a terminal first read announces.
+      const previous = statusPullRequestStates.get(pr.url) ?? "open";
+      statusPullRequestStates.delete(pr.url);
+      if (statusPullRequestStates.size >= 256) {
+        const oldest = statusPullRequestStates.keys().next().value;
+        if (oldest !== undefined) statusPullRequestStates.delete(oldest);
+      }
+      statusPullRequestStates.set(pr.url, pr.state);
+      return previous === pr.state
+        ? Effect.void
+        : PubSub.publish(pullRequestStateChanges, pr.url).pipe(Effect.asVoid);
+    });
   const gitCore = yield* GitCore;
   const gitHubCli = yield* GitHubCli;
   const forgeAccounts = yield* Effect.serviceOption(ForgeAccounts);
@@ -1311,6 +1329,7 @@ export const makeGitManager = Effect.gen(function* () {
             Effect.catch(() => Effect.succeed(null)),
           )
         : null;
+    if (latestPr) yield* noteStatusPullRequestState(latestPr);
     const pr = latestPr ? toStatusPr(latestPr) : null;
     const changeRequest = latestPr ? toChangeRequest(latestPr, sourceControlProvider) : null;
 
@@ -1663,6 +1682,7 @@ export const makeGitManager = Effect.gen(function* () {
 
   return {
     status,
+    pullRequestStateChanges: Stream.fromPubSub(pullRequestStateChanges),
     branchPullRequest,
     resolvePullRequest,
     preparePullRequestThread,

@@ -11,7 +11,7 @@ import {
   type OrchestrationCommand,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Clock, Effect, Layer, Stream, type Scope } from "effect";
+import { Clock, Effect, Layer, Queue, Stream, type Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ServerConfig } from "../../config.ts";
@@ -524,6 +524,7 @@ const prFixture = (
           return { ...detail, stale: state.stale };
         }),
     };
+    const statusChanges = yield* Queue.unbounded<string>();
     const service = yield* f.makeService.pipe(
       Effect.provideService(PrHubFederation, {
         hub,
@@ -551,6 +552,7 @@ const prFixture = (
           }),
           options?.branch
             ? Layer.mock(GitManager)({
+                pullRequestStateChanges: Stream.fromQueue(statusChanges),
                 branchPullRequest: (input) =>
                   Effect.gen(function* () {
                     state.branchCalls.push(input.branch);
@@ -578,7 +580,7 @@ const prFixture = (
     );
     if (!options?.noLink)
       yield* f.sql`INSERT INTO projection_thread_pull_requests(link_id,thread_id,provider,host,repository,number,title,url,updated_at) VALUES('link',${threadId},${ref.provider},${ref.host},${ref.repository},7,'Change',${url},${old})`;
-    return { service, state };
+    return { service, state, statusChanges };
   });
 it.effect(
   "tracks newly linked PRs, shares reads, and never reuses an old merge after manual wake",
@@ -680,6 +682,31 @@ it.effect(
         assert.equal((yield* f.thread()).settledBy, "auto");
       }),
     ),
+);
+it.effect("settles as soon as branch status sees the PR merge, without waiting for a sweep", () =>
+  runWithBranch((f) =>
+    Effect.gen(function* () {
+      const pr = yield* prFixture(f, { branch: true, noLink: true });
+      // Starting runs one sweep while merge settlement is still off; the clock never advances.
+      yield* pr.service.start;
+      const settledAfter = (yieldsLeft: number): Effect.Effect<boolean, unknown> =>
+        f
+          .thread()
+          .pipe(
+            Effect.flatMap((thread) =>
+              thread.settledAt !== null || yieldsLeft === 0
+                ? Effect.succeed(thread.settledAt !== null)
+                : Effect.yieldNow.pipe(Effect.andThen(settledAfter(yieldsLeft - 1))),
+            ),
+          );
+      assert.isFalse(yield* settledAfter(50));
+      yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
+      assert.isFalse(yield* settledAfter(50));
+      yield* Queue.offer(pr.statusChanges, "https://gitlab.example/team/repo/-/merge_requests/7");
+      assert.isTrue(yield* settledAfter(500));
+      assert.equal((yield* f.thread()).settledBy, "auto");
+    }),
+  ),
 );
 it.effect(
   "a newer open PR on a reused branch keeps an older terminal linked PR's thread active",
