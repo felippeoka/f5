@@ -138,7 +138,7 @@ describe("SurfaceErrorBoundary", () => {
 
 describe("right panel drag order", () => {
   afterEach(() => {
-    useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {}, tabMenuThreadId: null });
+    useRightPanelStore.setState({ byThreadId: {}, closedHistory: [], tabMenuThreadId: null });
     document.body.innerHTML = "";
   });
   function ReorderHarness() {

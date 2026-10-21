@@ -36,7 +36,7 @@ beforeEach(() => {
     openExternal: api.openExternal,
     setTheme: async () => undefined,
   } as never;
-  useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {} });
+  useRightPanelStore.setState({ byThreadId: {}, closedHistory: [] });
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) =>
     String(input).includes("/attachments/html-page")
       ? Promise.resolve(new Response(source, { headers: { "content-type": "text/html" } }))

@@ -41,11 +41,13 @@ export interface OpenFileSurfaceInput {
 
 interface RightPanelStoreState {
   byThreadId: Record<string, ThreadRightPanelState>;
-  closedByThreadId: Record<string, RightPanelSurface[]>;
+  /** Closed tabs across every thread, oldest first. */
+  closedHistory: ClosedRightPanelSurface[];
   tabMenuThreadId: ThreadId | null;
   setTabMenuThread: (threadId: ThreadId | null) => void;
   moveSurface: (threadId: ThreadId, from: number, to: number) => void;
-  reopenClosed: (threadId: ThreadId) => RightPanelSurface | null;
+  /** Reopens the most recently closed tab in its own thread, skipping tabs already open. */
+  reopenClosed: () => ClosedRightPanelSurface | null;
   open: (threadId: ThreadId, kind: Exclude<RightPanelSurfaceKind, "file" | "pull-request">) => void;
   /**
    * Adds a surface tab without opening the panel or changing the active tab unless
@@ -71,6 +73,13 @@ interface RightPanelStoreState {
   close: (threadId: ThreadId) => void;
   removeThread: (threadId: ThreadId) => void;
 }
+
+export interface ClosedRightPanelSurface {
+  threadId: ThreadId;
+  surface: RightPanelSurface;
+}
+
+const MAX_CLOSED_HISTORY = 20;
 
 const EMPTY_THREAD_RIGHT_PANEL_STATE: ThreadRightPanelState = {
   isOpen: false,
@@ -182,16 +191,18 @@ function closeWithHistory(
   const removed = before.surfaces.filter((surface) => !remaining.has(surface.id));
   if (!removed.length) return { byThreadId };
   const removedIds = new Set(removed.map((surface) => surface.id));
-  const closed = [
-    ...(state.closedByThreadId[threadId] ?? []).filter((surface) => !removedIds.has(surface.id)),
-    ...removed,
-  ].slice(-20);
-  return { byThreadId, closedByThreadId: { ...state.closedByThreadId, [threadId]: closed } };
+  const closedHistory = [
+    ...state.closedHistory.filter(
+      (entry) => entry.threadId !== threadId || !removedIds.has(entry.surface.id),
+    ),
+    ...removed.map((surface) => ({ threadId, surface })),
+  ].slice(-MAX_CLOSED_HISTORY);
+  return { byThreadId, closedHistory };
 }
 
 export const useRightPanelStore = create<RightPanelStoreState>()((set, get) => ({
   byThreadId: {},
-  closedByThreadId: {},
+  closedHistory: [],
   tabMenuThreadId: null,
   setTabMenuThread: (tabMenuThreadId) => set({ tabMenuThreadId }),
   moveSurface: (threadId, from, to) =>
@@ -213,32 +224,29 @@ export const useRightPanelStore = create<RightPanelStoreState>()((set, get) => (
         return { ...current, surfaces };
       }),
     })),
-  reopenClosed: (threadId) => {
+  reopenClosed: () => {
     const state = get(),
-      closed = [...(state.closedByThreadId[threadId] ?? [])];
-    const current = selectThreadRightPanelState(state.byThreadId, threadId);
-    let surface: RightPanelSurface | undefined;
-    while (closed.length) {
-      const candidate = closed.pop()!;
-      if (!current.surfaces.some((entry) => entry.id === candidate.id)) {
-        surface = candidate;
+      closedHistory = [...state.closedHistory];
+    let reopened: ClosedRightPanelSurface | null = null;
+    while (closedHistory.length) {
+      const candidate = closedHistory.pop()!;
+      const current = selectThreadRightPanelState(state.byThreadId, candidate.threadId);
+      if (!current.surfaces.some((entry) => entry.id === candidate.surface.id)) {
+        reopened = candidate;
         break;
       }
     }
-    const closedByThreadId = { ...state.closedByThreadId };
-    if (closed.length) closedByThreadId[threadId] = closed;
-    else delete closedByThreadId[threadId];
     set({
-      closedByThreadId,
-      ...(surface
+      closedHistory,
+      ...(reopened
         ? {
-            byThreadId: updateThread(state.byThreadId, threadId, (panel) =>
-              upsertSurface(panel, surface!),
+            byThreadId: updateThread(state.byThreadId, reopened.threadId, (panel) =>
+              upsertSurface(panel, reopened!.surface),
             ),
           }
         : {}),
     });
-    return surface ?? null;
+    return reopened;
   },
   open: (threadId, kind) =>
     set((state) => ({
@@ -379,10 +387,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()((set, get) => (
     set((state) => {
       const key = threadKey(threadId);
       const { [key]: _panel, ...byThreadId } = state.byThreadId;
-      const { [key]: _history, ...closedByThreadId } = state.closedByThreadId;
       return {
         byThreadId,
-        closedByThreadId,
+        closedHistory: state.closedHistory.filter((entry) => entry.threadId !== threadId),
         tabMenuThreadId: state.tabMenuThreadId === threadId ? null : state.tabMenuThreadId,
       };
     }),

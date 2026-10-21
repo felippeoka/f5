@@ -4299,18 +4299,6 @@ export default memo(function ChatView({
         }
         return;
       }
-      if (command === "rightPanel.reopenClosed") {
-        event.preventDefault();
-        const surface = useRightPanelStore.getState().reopenClosed(activeThreadId);
-        if (surface)
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: activeThreadId },
-            replace: true,
-            search: (previous) => setSearchParamsForSurface(previous, surface),
-          });
-        return;
-      }
       if (command === "rightPanel.closeTab") {
         const state = useRightPanelStore.getState();
         const panel = state.byThreadId[activeThreadId];

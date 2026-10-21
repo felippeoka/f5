@@ -21,7 +21,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   window.desktopBridge = { openExternal: api.openExternal, preview: {} } as never;
-  useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {} });
+  useRightPanelStore.setState({ byThreadId: {}, closedHistory: [] });
 });
 afterEach(async () => {
   await active?.unmount();

@@ -46,7 +46,7 @@ let changed: ((input: PullRequestWatchChanged) => void) | undefined;
 let saved: PullRequestWatchEntry[];
 let active: Awaited<ReturnType<typeof render>> | undefined;
 beforeEach(() => {
-  useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {} });
+  useRightPanelStore.setState({ byThreadId: {}, closedHistory: [] });
   saved = [];
   api.list.mockReset().mockImplementation(async () => saved);
   api.start.mockReset().mockImplementation(async () => {

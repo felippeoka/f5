@@ -12,7 +12,7 @@ const THREAD_B = ThreadId.makeUnsafe("thread-b");
 
 describe("rightPanelStore", () => {
   beforeEach(() => {
-    useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {}, tabMenuThreadId: null });
+    useRightPanelStore.setState({ byThreadId: {}, closedHistory: [], tabMenuThreadId: null });
   });
 
   it("adds agent surfaces without opening the panel or stealing the active tab", () => {
@@ -218,7 +218,7 @@ describe("rightPanelStore", () => {
 
 describe("right panel order and closed history", () => {
   beforeEach(() =>
-    useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {}, tabMenuThreadId: null }),
+    useRightPanelStore.setState({ byThreadId: {}, closedHistory: [], tabMenuThreadId: null }),
   );
   it("moves tabs without changing the active surface and ignores invalid positions", () => {
     const store = useRightPanelStore.getState();
@@ -245,43 +245,63 @@ describe("right panel order and closed history", () => {
     store.openFile(THREAD_A, { relativePath: "src/a.ts", line: 12, endLine: 15, column: 3 });
     store.open(THREAD_A, "plan");
     store.closeSurfacesToRight(THREAD_A, "diff");
-    expect(store.reopenClosed(THREAD_A)?.kind).toBe("plan");
-    expect(store.reopenClosed(THREAD_A)).toEqual({
-      id: "file:src/a.ts",
-      kind: "file",
-      relativePath: "src/a.ts",
-      line: 12,
-      endLine: 15,
-      column: 3,
+    expect(store.reopenClosed()?.surface.kind).toBe("plan");
+    expect(store.reopenClosed()).toEqual({
+      threadId: THREAD_A,
+      surface: {
+        id: "file:src/a.ts",
+        kind: "file",
+        relativePath: "src/a.ts",
+        line: 12,
+        endLine: 15,
+        column: 3,
+      },
     });
     expect(useRightPanelStore.getState().byThreadId[THREAD_A]?.isOpen).toBe(true);
     store.closeAllSurfaces(THREAD_A);
-    expect(store.reopenClosed(THREAD_A)?.id).toBe("file:src/a.ts");
+    expect(store.reopenClosed()?.surface.id).toBe("file:src/a.ts");
   });
-  it("retains at most twenty tabs per thread and removes history when its thread is removed", () => {
+  it("reopens the latest closed tab in its own thread from any thread", () => {
+    const store = useRightPanelStore.getState();
+    store.open(THREAD_A, "diff");
+    store.closeSurface(THREAD_A, "diff");
+    store.open(THREAD_B, "plan");
+    store.closeSurface(THREAD_B, "plan");
+    expect(store.reopenClosed()).toEqual({
+      threadId: THREAD_B,
+      surface: { id: "plan", kind: "plan" },
+    });
+    expect(store.reopenClosed()).toMatchObject({ threadId: THREAD_A, surface: { id: "diff" } });
+    expect(useRightPanelStore.getState().byThreadId[THREAD_A]?.activeSurfaceId).toBe("diff");
+    expect(useRightPanelStore.getState().byThreadId[THREAD_B]?.activeSurfaceId).toBe("plan");
+    expect(store.reopenClosed()).toBeNull();
+  });
+  it("retains at most twenty closed tabs and removes a thread's history with the thread", () => {
     const store = useRightPanelStore.getState();
     for (let index = 0; index < 25; index++) {
       const file = store.openFile(THREAD_A, { relativePath: `file-${index}` });
       store.closeSurface(THREAD_A, file.id);
     }
-    expect(useRightPanelStore.getState().closedByThreadId[THREAD_A]).toHaveLength(20);
-    expect(store.reopenClosed(THREAD_B)).toBeNull();
-    expect(store.reopenClosed(THREAD_A)?.id).toBe("file:file-24");
+    expect(useRightPanelStore.getState().closedHistory).toHaveLength(20);
+    expect(store.reopenClosed()?.surface.id).toBe("file:file-24");
+    store.open(THREAD_B, "diff");
+    store.closeSurface(THREAD_B, "diff");
     store.closeAllSurfaces(THREAD_A);
     store.setTabMenuThread(THREAD_A);
     store.removeThread(THREAD_A);
-    expect(useRightPanelStore.getState().closedByThreadId[THREAD_A]).toBeUndefined();
+    expect(useRightPanelStore.getState().closedHistory).toEqual([
+      { threadId: THREAD_B, surface: { id: "diff", kind: "diff" } },
+    ]);
     expect(useRightPanelStore.getState().tabMenuThreadId).toBeNull();
-    expect(store.reopenClosed(THREAD_A)).toBeNull();
   });
   it("does not remember hidden panels or reopen a duplicate tab", () => {
     const store = useRightPanelStore.getState();
     store.open(THREAD_A, "diff");
     store.close(THREAD_A);
-    expect(store.reopenClosed(THREAD_A)).toBeNull();
+    expect(store.reopenClosed()).toBeNull();
     store.closeSurface(THREAD_A, "diff");
     store.open(THREAD_A, "diff");
-    expect(store.reopenClosed(THREAD_A)).toBeNull();
+    expect(store.reopenClosed()).toBeNull();
     expect(useRightPanelStore.getState().byThreadId[THREAD_A]?.surfaces).toHaveLength(1);
   });
 });
@@ -294,7 +314,7 @@ it("keeps one PR tab per reference and restores it through normal close history"
   store.openPullRequest(thread, { key, url: "https://github.com/org/repo/pull/7#discussion" });
   expect(useRightPanelStore.getState().byThreadId[thread]?.surfaces).toHaveLength(1);
   store.closeSurface(thread, `pr:${key}`);
-  expect(store.reopenClosed(thread)).toMatchObject({
+  expect(store.reopenClosed()?.surface).toMatchObject({
     kind: "pull-request",
     key,
     url: "https://github.com/org/repo/pull/7#discussion",
@@ -321,5 +341,5 @@ it("consumes a quick action once without switching tabs or retaining it in close
     "initialAction",
   );
   store.closeSurface(thread, `pr:${key}`);
-  expect(store.reopenClosed(thread)).not.toHaveProperty("initialAction");
+  expect(store.reopenClosed()?.surface).not.toHaveProperty("initialAction");
 });
