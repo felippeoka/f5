@@ -2752,3 +2752,48 @@ cases), as do 14 usage service tests, the usage facts repository tests
 including the new hidden-provider assertions, and the keybinding, shortcut
 reference, conflict-label, editor-grouping and Usage search unit suites. The
 server and web typechecks pass.
+
+## 15s triage log: desktop
+
+All 10 open October 15s records are classified: 7 ported, 2 not applicable
+and 1 deferred. The September 13a, 13b and 14 carriers are triaged separately.
+
+New ports:
+
+- [t3code#17726](https://github.com/pingdotgg/t3code/pull/17726): in the
+  macOS app, tooltips treat the 52px header with the traffic lights as
+  off-screen and flip instead of opening under them.
+- [t3code#18238](https://github.com/pingdotgg/t3code/pull/18238): an
+  Option/Alt-clicked chat link opens the system browser, like the other
+  modifier clicks, instead of F5's in-app preview.
+- [t3code#14601](https://github.com/pingdotgg/t3code/pull/14601): preview
+  tabs get an opaque white base, so dark-scheme Markdown and plain-text pages
+  are no longer white on white.
+
+Already in F5 and now cited with tests: the compile cache for the packaged
+app and backend
+([t3code#13501](https://github.com/pingdotgg/t3code/pull/13501)), CA trust
+variables from the login shell
+([t3code#19604](https://github.com/pingdotgg/t3code/pull/19604)), and
+installing the CLI commands from Settings, including the refusal to install
+behind another `t3`
+([t3code#16683](https://github.com/pingdotgg/t3code/pull/16683),
+[t3code#17351](https://github.com/pingdotgg/t3code/pull/17351)). As the plan
+asked, the Agent Bridge docs now show `f5` instead of `t3`.
+
+Not applicable: [t3code#12006](https://github.com/pingdotgg/t3code/pull/12006)
+keeps upstream's managed cloud tunnel across update restarts, and
+[t3code#16939](https://github.com/pingdotgg/t3code/pull/16939) fixes its
+Playwright CDP relay. F5 has neither.
+
+Deferred, as the plan requires:
+[t3code#16952](https://github.com/pingdotgg/t3code/pull/16952), preview
+passkeys. They need the native `electron-webauthn` module, Apple's
+web-browser passkey entitlement and a signed-build test on a real relying
+party.
+
+Validation: 22 desktop tests across the preview runtime, shell environment
+and compile cache pass, as do the tooltip unit test, the new chat link browser
+test and the ChatMarkdown unit suite. The desktop and web typechecks pass.
+Electron cannot launch in this environment, so the tooltip and preview
+changes were not checked in a running desktop window.

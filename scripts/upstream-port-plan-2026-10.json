@@ -7697,13 +7697,9 @@
     },
     {
       "upstreamSha": "454b94a13aea918f27bb060d8d054d4cfb791bc2",
-      "classification": "planned:15s",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: feat(desktop): passkeys in the in-app browser on macOS (#16952).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15s-pr-16952"],
-        "targetModules": ["apps/desktop/src", "apps/server/src/distribution"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred (gated by the plan): preview-browser passkeys add the native electron-webauthn module and need Apple's com.apple.developer.web-browser.public-key-credential entitlement plus a signed-build registration and sign-in test on a real relying party before the setting can ship. Upstream change: feat(desktop): passkeys in the in-app browser on macOS (#16952)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0a4d789128100ed7ccd6d42f454946aea8edfca8",
@@ -8936,13 +8932,9 @@
     },
     {
       "upstreamSha": "538329603352173afe3ae9f4586a4f772c0f3a4f",
-      "classification": "planned:15s",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): sign-in and captchas work again in desktop browser tabs (#16939).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15s-pr-16939"],
-        "targetModules": ["apps/desktop/src", "apps/server/src/distribution"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:cdp-relay",
+      "reason": "Not applicable: upstream's Playwright CDP relay swallowed Runtime.runIfWaitingForDebugger for auto-attached child frames, freezing sign-in and captcha iframes. F5 has no CDP relay or auto-attach for preview tabs. Upstream change: fix(desktop): sign-in and captchas work again in desktop browser tabs (#16939)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8a92ebe413dd9e4569724c94e74a1ed54675eff7",
@@ -13272,13 +13264,9 @@
     },
     {
       "upstreamSha": "d4a33457cb0da797728f4846a9da8592d7d81d36",
-      "classification": "planned:15s",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): desktop updates reconnect in seconds, not minutes (#12006).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15s-pr-12006"],
-        "targetModules": ["apps/desktop/src", "apps/server/src/distribution"]
-      }
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not applicable: upstream keeps its managed cloud tunnel alive across a desktop update restart so remote clients reconnect quickly. F5 has no managed tunnel or relay. Upstream change: fix(desktop): desktop updates reconnect in seconds, not minutes (#12006)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9a91177c3ecadaaa088d00e467491de4be9d7ce3",

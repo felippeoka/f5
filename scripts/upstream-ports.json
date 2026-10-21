@@ -839,10 +839,18 @@
     {
       "upstreamSha": "0678e4e23d8675ef88f9ac08e1ae90cfe7d6ef2e",
       "subject": "feat(desktop): install the t3 command from Settings (#16683)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: feat(desktop): install the t3 command from Settings (#16683).",
+      "reason": "Ported: Settings, About, Command-line tools installs the bundled launcher as f5 and t3 in /usr/local/bin, falling back to ~/.local/bin without privilege prompts, and shows PATH instructions when needed. The Agent Bridge docs now show the f5 command. Upstream change: feat(desktop): install the t3 command from Settings (#16683)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "ported",
+      "plannedWorkstream": "15s",
+      "f5Shas": [
+        "f46c26cd2cfc43fa846d701fd48c411656e3b7ab",
+        "d55b85b64bde09a331ec1047ab5ec3bc7a56fcd5"
+      ],
+      "evidence": [
+        "apps/web/src/components/settings/CliCommandSettings.browser.tsx:14",
+        "apps/desktop/src/cliCommand.test.ts:49"
+      ]
     },
     {
       "upstreamSha": "0681d854994ec0ceed0562ae74549ccf8ef2ec41",
@@ -8490,10 +8498,15 @@
     {
       "upstreamSha": "3bfbc37dbf37095816eda500f3f1e05cb98bb95b",
       "subject": "fix(desktop): the t3 command warns instead of installing behind another t3 (#17351)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): the t3 command warns instead of installing behind another t3 (#17351).",
+      "reason": "Ported: when another f5 or t3 runs first on PATH, Settings names it and disables installation instead of installing behind it, and existing files and symlinks are never replaced. Upstream change: fix(desktop): the t3 command warns instead of installing behind another t3 (#17351)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "ported",
+      "plannedWorkstream": "15s",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/web/src/components/settings/CliCommandSettings.browser.tsx:41",
+        "apps/desktop/src/cliCommand.test.ts:71"
+      ]
     },
     {
       "upstreamSha": "3c0665543f0e31db1e3425d4fcf9f4aea295a8ce",
@@ -8758,10 +8771,12 @@
     {
       "upstreamSha": "3e60fecf39f37faaca9bdf37e64b7a58229ea547",
       "subject": "fix(desktop): markdown pages no longer render invisible in the dark-mode browser (#14601)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): markdown pages no longer render invisible in the dark-mode browser (#14601).",
+      "reason": "Ported: applying a preview tab's color scheme, which every guest registration does, also sets an opaque white default background, so dark-scheme Markdown and plain-text pages no longer render white text on a transparent base. Upstream change: fix(desktop): markdown pages no longer render invisible in the dark-mode browser (#14601)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "ported",
+      "plannedWorkstream": "15s",
+      "f5Shas": ["37d487dd0baef7ea4ed0601e99d9a961f6608a39"],
+      "evidence": ["apps/desktop/src/preview/PreviewRuntime.test.ts:117"]
     },
     {
       "upstreamSha": "3e6ab36f6ed303f95f210971f56cc8642214c6fc",
@@ -9704,10 +9719,9 @@
     {
       "upstreamSha": "454b94a13aea918f27bb060d8d054d4cfb791bc2",
       "subject": "feat(desktop): passkeys in the in-app browser on macOS (#16952)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: feat(desktop): passkeys in the in-app browser on macOS (#16952).",
+      "reason": "Deferred (gated by the plan): preview-browser passkeys add the native electron-webauthn module and need Apple's com.apple.developer.web-browser.public-key-credential entitlement plus a signed-build registration and sign-in test on a real relying party before the setting can ship. Upstream change: feat(desktop): passkeys in the in-app browser on macOS (#16952)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "456930a09db29efdd3d4a397fe214e9ede2d6975",
@@ -11716,10 +11730,9 @@
     {
       "upstreamSha": "538329603352173afe3ae9f4586a4f772c0f3a4f",
       "subject": "fix(desktop): sign-in and captchas work again in desktop browser tabs (#16939)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): sign-in and captchas work again in desktop browser tabs (#16939).",
+      "reason": "Not applicable: upstream's Playwright CDP relay swallowed Runtime.runIfWaitingForDebugger for auto-attached child frames, freezing sign-in and captcha iframes. F5 has no CDP relay or auto-attach for preview tabs. Upstream change: fix(desktop): sign-in and captchas work again in desktop browser tabs (#16939)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5392c9bb99c4be1f1c3fd78743df62885fd214dd",
@@ -14239,10 +14252,12 @@
     {
       "upstreamSha": "662148dd296984d11b40863ce6f90ead9c26396e",
       "subject": "fix(desktop): tooltips no longer open under the macOS traffic lights (#17726)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): tooltips no longer open under the macOS traffic lights (#17726).",
+      "reason": "Ported: in the macOS desktop app, tooltips treat the 52px app header that holds the traffic lights as off-screen, so one that would open under them flips to its other side. F5 has no Windows Controls Overlay, so other platforms keep Base UI's default padding. Upstream change: fix(desktop): tooltips no longer open under the macOS traffic lights (#17726)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "ported",
+      "plannedWorkstream": "15s",
+      "f5Shas": ["b06c77895e750f938960eebd9fecf5fb4416ef28"],
+      "evidence": ["apps/web/src/components/ui/tooltip.test.ts:5"]
     },
     {
       "upstreamSha": "66298aa926e6a4c95ebecbc576a68634315899c0",
@@ -23469,10 +23484,12 @@
     {
       "upstreamSha": "aa81d1203ea43c3b6cc09c5442559fa0cf18db63",
       "subject": "fix(desktop): import CA trust variables from the login shell (#19604)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): import CA trust variables from the login shell (#19604).",
+      "reason": "Ported: on macOS the desktop app imports SSL_CERT_FILE, SSL_CERT_DIR and NODE_EXTRA_CA_CERTS from the login shell when they are not already set, never overriding inherited values. Upstream change: fix(desktop): import CA trust variables from the login shell (#19604)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "ported",
+      "plannedWorkstream": "15s",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["apps/desktop/src/syncShellEnvironment.test.ts:38"]
     },
     {
       "upstreamSha": "aa8c6662e212a4307bd4e585661da99a358e46d4",
@@ -28602,10 +28619,12 @@
     {
       "upstreamSha": "d10bd1360ace3ab1dbccc1ee706c9169982d98ae",
       "subject": "perf(desktop): cache compiled JavaScript between launches (#13501)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: perf(desktop): cache compiled JavaScript between launches (#13501).",
+      "reason": "Ported: the packaged desktop entry (boot.ts) enables Node's compile cache before the main bundle loads, and the packaged backend starts with --require compileCache.js, so provider and terminal children keep their own cache policy (apps/desktop/src/main.ts:2886). AppImage builds skip the cache because their paths move on every launch. Upstream change: perf(desktop): cache compiled JavaScript between launches (#13501)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "ported",
+      "plannedWorkstream": "15s",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["apps/desktop/src/compileCache.test.ts:8"]
     },
     {
       "upstreamSha": "d110f9867041f0466bed9b032c15efcfcefcbfc5",
@@ -29025,10 +29044,12 @@
     {
       "upstreamSha": "d45d1a1ede45cc4daa88843c2e4bffba938df367",
       "subject": "fix(desktop): Option-click on a chat link opens the system browser (#18238)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): Option-click on a chat link opens the system browser (#18238).",
+      "reason": "Ported: an Option/Alt-clicked chat link opens the system browser directly, like the other modifier clicks, instead of F5's in-app preview or pull request panel. It opens while the key is still down so link routers can read it. Upstream change: fix(desktop): Option-click on a chat link opens the system browser (#18238)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "ported",
+      "plannedWorkstream": "15s",
+      "f5Shas": ["136d48c675554621ca4b59ad5b8c9764542fe12f"],
+      "evidence": ["apps/web/src/components/ChatMarkdown.links.browser.tsx:27"]
     },
     {
       "upstreamSha": "d484735c64ed98a0737b594818996660f72c1616",
@@ -29059,10 +29080,9 @@
     {
       "upstreamSha": "d4a33457cb0da797728f4846a9da8592d7d81d36",
       "subject": "fix(desktop): desktop updates reconnect in seconds, not minutes (#12006)",
-      "reason": "Planned: implement and verify the explicitly approved 15s scenario. Upstream change: fix(desktop): desktop updates reconnect in seconds, not minutes (#12006).",
+      "reason": "Not applicable: upstream keeps its managed cloud tunnel alive across a desktop update restart so remote clients reconnect quickly. F5 has no managed tunnel or relay. Upstream change: fix(desktop): desktop updates reconnect in seconds, not minutes (#12006)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15s"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d4ba2a1f11498eae9683f6dc95a08b1c17c29765",
