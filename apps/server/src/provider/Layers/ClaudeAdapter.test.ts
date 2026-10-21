@@ -8942,6 +8942,21 @@ describe("ClaudeAdapterLive", () => {
       ),
     );
 
+    it.effect("reports present for a conversation record containing U+2028", () =>
+      withClaudeConfigDir((configDir) =>
+        Effect.gen(function* () {
+          writeTranscript(
+            configDir,
+            "-Users-me-project",
+            probeSessionId,
+            `${JSON.stringify({ type: "assistant", text: `a${String.fromCharCode(0x2028)}b` })}\n`,
+          );
+
+          assert.equal(yield* probeClaudeSessionAvailability(probeInput(configDir)), "present");
+        }),
+      ),
+    );
+
     it.effect("reports absent only when the readable store lacks the transcript", () =>
       withClaudeConfigDir((configDir) =>
         Effect.gen(function* () {
