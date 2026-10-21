@@ -8864,13 +8864,9 @@
     },
     {
       "upstreamSha": "14fe0158ede3d964f183e281f9fec225d30a6b32",
-      "classification": "planned:15p",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): find in diffs with Cmd+F (#14623).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15p-pr-14623"],
-        "targetModules": ["apps/web/src/rightPanelStore.ts", "packages/shared/src/keybindings.ts"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: find in diffs is built on an 869-line vendor patch that adds search to @pierre/diffs 1.5.2's virtualized code view. F5 uses @pierre/diffs 1.1.0-beta.19 and has no patched-dependency setup, so this needs a library upgrade and its own block. Upstream change: feat(web): find in diffs with Cmd+F (#14623)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ff3a04a8ebaaf6bb74b8b5b996013b82e044c700",
@@ -11075,13 +11071,14 @@
     },
     {
       "upstreamSha": "737993303d36e10674c54b95e5bd3826682c99c7",
-      "classification": "planned:15p",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat: retry a failed workspace preparation (#15326).",
+      "classification": "equivalent:apps/web/src/components/ChatView.tsx:7791",
+      "reason": "Equivalent: upstream adds Retry for a run whose orchestration-v2 workspace preparation failed. F5's worktree setup card already offers Retry for a failed or cancelled setup that holds the queued first turn; it reuses the same worktree and starts the turn once the worktree is ready. Upstream change: feat: retry a failed workspace preparation (#15326)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15p-pr-15326"],
-        "targetModules": ["apps/web/src/rightPanelStore.ts", "packages/shared/src/keybindings.ts"]
-      }
+      "evidence": [
+        "apps/server/src/wsServer.test.ts:4921",
+        "apps/server/src/project/worktreePreparation.test.ts:202"
+      ],
+      "f5Shas": ["3228773cd3bb602c81b219716c1f440b5db3f792"]
     },
     {
       "upstreamSha": "1826fb55cc4c9c6246d31175e15a496ba4778e07",

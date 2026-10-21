@@ -1966,10 +1966,12 @@
     {
       "upstreamSha": "0e7346ccd9427c06161e222319e718e6bd70887f",
       "subject": "fix: expose running terminals and prevent setup install stalls (#18740)",
-      "reason": "Planned: makes the sidebar terminal indicator reveal the running terminal and reuses server-created setup terminals in the drawer, which is workspace UX for 15p. Its setup-install half changes upstream's own dev script; f5 runs async setup scripts in an interactive terminal. Upstream change: fix: expose running terminals and prevent setup install stalls (#18740)",
+      "reason": "Ported: the sidebar's running-terminal indicator is a button that opens the drawer on the running terminal, including one in a split. Server-started terminals already open in F5. Upstream's `vp i --yes` setup fix does not apply because F5's setup does not run vp. Upstream change: fix: expose running terminals and prevent setup install stalls (#18740)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["b6b1ba61ee798f7d04b8a016e7c1c8a7c384898b"],
+      "evidence": ["apps/web/src/components/sidebar/ThreadRowTrailingMeta.browser.tsx:16"]
     },
     {
       "upstreamSha": "0e77fbd3d0d79eec5247e75583a04590a1785133",
@@ -2910,10 +2912,9 @@
     {
       "upstreamSha": "14fe0158ede3d964f183e281f9fec225d30a6b32",
       "subject": "feat(web): find in diffs with Cmd+F (#14623)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): find in diffs with Cmd+F (#14623).",
+      "reason": "Deferred: find in diffs is built on an 869-line vendor patch that adds search to @pierre/diffs 1.5.2's virtualized code view. F5 uses @pierre/diffs 1.1.0-beta.19 and has no patched-dependency setup, so this needs a library upgrade and its own block. Upstream change: feat(web): find in diffs with Cmd+F (#14623)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "1508552a16edebe29cab4820c54c16b75c142408",
@@ -5700,10 +5701,15 @@
     {
       "upstreamSha": "2993dfc069115ed590d00741dd58013889387793",
       "subject": "feat(web): step reasoning effort from the keyboard (#19928)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): step reasoning effort from the keyboard (#19928).",
+      "reason": "Ported: composer.effortUp and composer.effortDown step the reasoning effort from the keyboard without sending or changing other traits. Upstream change: feat(web): step reasoning effort from the keyboard (#19928)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/web/src/components/ChatView.browser.tsx:5037",
+        "apps/web/src/components/chat/effortLevels.test.ts:98"
+      ]
     },
     {
       "upstreamSha": "299404a754f52c02c69634528d8856b3c93b378c",
@@ -9071,10 +9077,15 @@
     {
       "upstreamSha": "4107930420cffe14776ad80783f7060236b5868b",
       "subject": "feat(web): reorder right panel tabs by dragging (#17730)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): reorder right panel tabs by dragging (#17730).",
+      "reason": "Ported: right panel tabs reorder by dragging, without changing the selected tab. Upstream change: feat(web): reorder right panel tabs by dragging (#17730)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/web/src/components/RightPanelHost.browser.tsx:177",
+        "apps/web/src/rightPanelStore.test.ts:223"
+      ]
     },
     {
       "upstreamSha": "41124c726001498bb09e6c1b3eaff71e6ca0b43d",
@@ -12868,10 +12879,12 @@
     {
       "upstreamSha": "5c0429b1578cff3307c35c51a305e2749a6dcb6e",
       "subject": "feat(web): mod+alt+enter on an existing thread sends and opens a new thread (#15050)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): mod+alt+enter on an existing thread sends and opens a new thread (#15050).",
+      "reason": "Ported: mod+alt+enter (chat.sendAndNew) sends on an existing thread and opens a new thread once the server has durably admitted the message. Upstream change: feat(web): mod+alt+enter on an existing thread sends and opens a new thread (#15050)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["42d9a5862ed8c86c61bb4f953cfa616303301162"],
+      "evidence": ["apps/web/src/components/ChatView.browser.tsx:6385"]
     },
     {
       "upstreamSha": "5c2798d47eb41d5d659b8d2189781fcb06536a5f",
@@ -15924,10 +15937,12 @@
     {
       "upstreamSha": "7202ba666080cfca1351c080d7aaa2d81bfa9a66",
       "subject": "feat(web): open right panel tab menu with Mod+T (#15686)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): open right panel tab menu with Mod+T (#15686).",
+      "reason": "Ported: Mod+T (rightPanel.tabMenu) opens a searchable menu of the open right panel tabs, and Enter selects the highlighted one. Upstream change: feat(web): open right panel tab menu with Mod+T (#15686)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["apps/web/src/components/RightPanelTabMenu.browser.tsx:24"]
     },
     {
       "upstreamSha": "720490adc9b8f3676c614f3611d8c7fd9f4dd368",
@@ -16049,10 +16064,15 @@
     {
       "upstreamSha": "72d5c32ba67953805feb6fe9ad3b70b632a64c47",
       "subject": "feat(web): group keybindings settings by area with a page toolbar (#12822)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): group keybindings settings by area with a page toolbar (#12822).",
+      "reason": "Ported: the keybinding editor lists bindings under Navigation, Threads, Composer, Terminal, Diff, Project scripts and Other, and search hides sections it empties. F5's editor already had upstream's page toolbar: search, Add and Reset all above the list. Upstream change: feat(web): group keybindings settings by area with a page toolbar (#12822)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["0695a4d78551f5cd03f7e51342c383e8bcf7554a"],
+      "evidence": [
+        "apps/web/src/components/settings/KeybindingEditor.logic.test.ts:8",
+        "apps/web/src/components/settings/KeybindingEditor.browser.tsx:123"
+      ]
     },
     {
       "upstreamSha": "72d673a855c730536f0cf3bb964ba523e0af9e2e",
@@ -16138,10 +16158,15 @@
     {
       "upstreamSha": "737993303d36e10674c54b95e5bd3826682c99c7",
       "subject": "feat: retry a failed workspace preparation (#15326)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat: retry a failed workspace preparation (#15326).",
+      "reason": "Equivalent: upstream adds Retry for a run whose orchestration-v2 workspace preparation failed. F5's worktree setup card already offers Retry for a failed or cancelled setup that holds the queued first turn; it reuses the same worktree and starts the turn once the worktree is ready. Upstream change: feat: retry a failed workspace preparation (#15326)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "equivalent",
+      "f5Shas": ["3228773cd3bb602c81b219716c1f440b5db3f792"],
+      "evidence": [
+        "apps/web/src/components/ChatView.tsx:7791",
+        "apps/server/src/wsServer.test.ts:4921",
+        "apps/server/src/project/worktreePreparation.test.ts:202"
+      ]
     },
     {
       "upstreamSha": "7383cce7fc07a2dce9fa8d907f82f2acd69e5c37",
@@ -20202,10 +20227,12 @@
     {
       "upstreamSha": "921cb3c8bc772309ccab4c422b091d0a91497a49",
       "subject": "feat(web): restart the agent session from cmd+k to load new skills and plugins (#14542)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): restart the agent session from cmd+k to load new skills and plugins (#14542).",
+      "reason": "Ported: the command palette offers Restart agent session while the thread's provider process is idle. It stops the process, keeping the conversation so the next message resumes it in a fresh process, and rescans that provider instance so newly added skills, plugins and MCP servers load. Upstream change: feat(web): restart the agent session from cmd+k to load new skills and plugins (#14542)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["5dea74adba001f95f0beecbfdb4f64e3b7fee877"],
+      "evidence": ["apps/web/src/components/ChatView.browser.tsx:5803"]
     },
     {
       "upstreamSha": "9220fd73bf2f222ea602b711fd71e7b44d4a2bfd",
@@ -21304,10 +21331,12 @@
     {
       "upstreamSha": "9a3070bcf023c3c025633659addeef4cf628133a",
       "subject": "feat(web): improve terminal scrollback navigation and snapshots (#17091)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): improve terminal scrollback navigation and snapshots (#17091).",
+      "reason": "Ported for F5's xterm terminal: Cmd+A on macOS or Ctrl+Shift+A elsewhere selects all retained output, and mod+Shift+Home/End jump to the start and the latest output outside full-screen programs. xterm already pages with Shift+PageUp/Down. Upstream's snapshot and selection changes are in its Ghostty surface, which F5 does not have, and F5's right-click menu appears only for a selection, so it gains no Select all or Jump to latest entries. Upstream change: feat(web): improve terminal scrollback navigation and snapshots (#17091)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["a9fa98e05a0098251963fe498168d74d76e43cc0"],
+      "evidence": ["apps/web/src/keybindings.test.ts:803", "apps/web/src/keybindings.test.ts:819"]
     },
     {
       "upstreamSha": "9a47c7bd40522977c7df022a5b64759aae7b58e0",
@@ -25048,10 +25077,12 @@
     {
       "upstreamSha": "b744bded016b15b9b5ade552a3e28270ac20176f",
       "subject": "feat(web): draft screen project picker is searchable (#17664)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): draft screen project picker is searchable (#17664).",
+      "reason": "Ported: the Home quick start's project picker is a searchable combobox with an empty state for no matches. Upstream change: feat(web): draft screen project picker is searchable (#17664)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["6161c30ef042cf2bbabe40bc6f9d02f5ad8f94f6"],
+      "evidence": ["apps/web/src/components/home/HomeMissionControl.browser.tsx:273"]
     },
     {
       "upstreamSha": "b7465a3bc993e7f10f4ec7a469759b95eb4c2f2a",
@@ -25212,10 +25243,18 @@
     {
       "upstreamSha": "b83d731cabbfd32c7479bb2db7e6afbfb2085ff2",
       "subject": "feat(web): reopen closed tabs across the app (#15207)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(web): reopen closed tabs across the app (#15207).",
+      "reason": "Ported: rightPanel.reopenClosed reopens the most recently closed right panel tab from anywhere in the app. Closed tabs form one global history of 20, and reopening navigates to the tab's own thread. Upstream change: feat(web): reopen closed tabs across the app (#15207)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": [
+        "0ad77ecbcf00dd326167924c939890d47af79c93",
+        "f46c26cd2cfc43fa846d701fd48c411656e3b7ab"
+      ],
+      "evidence": [
+        "apps/web/src/components/ThreadNavigationController.browser.tsx:44",
+        "apps/web/src/rightPanelStore.test.ts:264"
+      ]
     },
     {
       "upstreamSha": "b84a591f706784ee70ef4c78670ed31a88c3c559",
@@ -30375,10 +30414,15 @@
     {
       "upstreamSha": "de49d637d4b72b3e3306533e3777cb37e6a3f738",
       "subject": "feat(server): use macOS .icns app icons as project icons (#17149)",
-      "reason": "Planned: implement and verify the explicitly approved 15p scenario. Upstream change: feat(server): use macOS .icns app icons as project icons (#17149).",
+      "reason": "Ported: project icon lookup also tries Resources/AppIcon.icns and AppIcon.icns, and f5.json's iconPath may name an .icns file. The workspace asset reader serves the smallest embedded PNG at least 96px wide, else the largest, and reads .icns files under an 8 MB cap because app icons embed every size up to 1024px. Upstream change: feat(server): use macOS .icns app icons as project icons (#17149)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15p"
+      "disposition": "ported",
+      "plannedWorkstream": "15p",
+      "f5Shas": ["0663f058f1d668f6d55e96f2fe8d48b9be10cae5"],
+      "evidence": [
+        "apps/server/src/icns.test.ts:7",
+        "apps/server/src/projectFaviconRoute.test.ts:145"
+      ]
     },
     {
       "upstreamSha": "de545c41737aca08359244b7778ab52e55934f17",

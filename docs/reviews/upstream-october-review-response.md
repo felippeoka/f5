@@ -2640,3 +2640,64 @@ Validation: the timeline and ChatView browser suites pass (205 cases), as
 do the question panel (15), tray (8), editor draft (4), file view (4) and
 ChatMarkdown (8) suites, 187 web unit tests across the session-logic and
 timeline files, and the find-in-thread suites. The web typecheck passes.
+
+## 15p triage log: keyboard, tabs and workspace UX
+
+All 13 open 15p records are classified: 11 ported, 1 equivalent and 1
+deferred.
+
+New ports:
+
+- [t3code#14542](https://github.com/pingdotgg/t3code/pull/14542): the command
+  palette offers Restart agent session while the provider process is idle. It
+  stops the process but keeps the conversation, then rescans that provider
+  instance, so new skills, plugins and MCP servers load on the next message.
+  The first version of the test caught a real bug: the palette's thread
+  summary has no session, so the action never appeared. It now reads the
+  session from the store.
+- [t3code#17091](https://github.com/pingdotgg/t3code/pull/17091), keyboard
+  part only: in F5's xterm terminal, Cmd+A on macOS or Ctrl+Shift+A elsewhere
+  selects all retained output, and mod+Shift+Home/End jump to the start and
+  the latest output outside full-screen programs. Upstream's snapshot and
+  selection work is in its Ghostty surface, which F5 lacks. F5's right-click
+  menu appears only for a selection, so it has no Select all or Jump to latest
+  entries.
+- [t3code#17149](https://github.com/pingdotgg/t3code/pull/17149): projects
+  can use a macOS `.icns` app icon, either discovered at
+  `Resources/AppIcon.icns` or `AppIcon.icns` or named in `f5.json`. The asset
+  reader serves the smallest embedded PNG at least 96px wide, and reads
+  `.icns` files under an 8 MB cap instead of 1 MB.
+- [t3code#12822](https://github.com/pingdotgg/t3code/pull/12822): keybinding
+  settings are grouped by area, and search hides groups it empties. F5's
+  editor already had the toolbar.
+- [t3code#15207](https://github.com/pingdotgg/t3code/pull/15207),
+  [t3code#17664](https://github.com/pingdotgg/t3code/pull/17664) and
+  [t3code#18740](https://github.com/pingdotgg/t3code/pull/18740), ported
+  earlier in this batch: reopening a closed tab works from anywhere and returns
+  to its thread, the Home project picker is searchable, and the sidebar's
+  running-terminal indicator opens that terminal. The `vp i --yes` half of
+  t3code#18740 does not apply, because F5's setup does not run vp.
+
+Already in F5 and now cited with tests:
+[t3code#15686](https://github.com/pingdotgg/t3code/pull/15686) (Mod+T tab
+menu), [t3code#17730](https://github.com/pingdotgg/t3code/pull/17730) (drag to
+reorder tabs), [t3code#19928](https://github.com/pingdotgg/t3code/pull/19928)
+(step reasoning effort) and
+[t3code#15050](https://github.com/pingdotgg/t3code/pull/15050) (send and open
+a new thread).
+
+Equivalent: [t3code#15326](https://github.com/pingdotgg/t3code/pull/15326)
+retries a failed orchestration-v2 workspace preparation. F5's worktree setup
+card already retries a failed or cancelled setup on the same worktree and
+then starts the queued first turn.
+
+Deferred: [t3code#14623](https://github.com/pingdotgg/t3code/pull/14623), find
+in diffs. It depends on an 869-line vendor patch to `@pierre/diffs` 1.5.2,
+while F5 is on 1.1.0-beta.19 and has no patched-dependency setup.
+
+Validation: the ChatView browser suite passes (133 cases), as do the
+navigation controller, Home, sidebar row, right panel host and tab menu,
+keybinding editor and terminal drawer browser suites (23 cases), 83 web unit
+tests across the right panel store, keybindings, effort levels and keybinding
+grouping, and 10 server tests for `.icns` decoding and the favicon route. The
+web and server typechecks pass.
