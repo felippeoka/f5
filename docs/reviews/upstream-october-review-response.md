@@ -2701,3 +2701,54 @@ keybinding editor and terminal drawer browser suites (23 cases), 83 web unit
 tests across the right panel store, keybindings, effort levels and keybinding
 grouping, and 10 server tests for `.icns` decoding and the favicon route. The
 web and server typechecks pass.
+
+## 15q triage log: Usage
+
+All 10 open October 15q records are classified: 5 ported and 5 deferred. The
+September 11a carrier records for this workstream are triaged separately.
+
+New ports:
+
+- [t3code#9434](https://github.com/pingdotgg/t3code/pull/9434): `mod+U`
+  (`usage.open`) opens Usage from anywhere outside the terminal.
+- [t3code#11391](https://github.com/pingdotgg/t3code/pull/11391): F5's
+  Projects and threads card ranked rows by the chart metric but always showed
+  a token share. Share now follows tokens, cost or recorded turns, a row with
+  an unknown cost has no cost share, and the Providers and models table ranks
+  by the same metric. The new test fails before the change.
+- [t3code#16970](https://github.com/pingdotgg/t3code/pull/16970): a saved
+  provider menu replaces the single History provider select and applies to
+  both tabs. The server leaves hidden providers out of fact and legacy cost
+  totals, and their account cards are hidden.
+- [t3code#10158](https://github.com/pingdotgg/t3code/pull/10158): on Usage,
+  T, C, R and L switch views, 1 to 4 pick the range and Escape goes back.
+  Upstream uses mod+Shift+1..4 for ranges. F5 uses bare digits because
+  Cmd+Shift+3 and Cmd+Shift+4 are macOS screenshot keys and never reach the
+  app.
+- [t3code#15333](https://github.com/pingdotgg/t3code/pull/15333): model
+  mappings count one model as another, so a preview model can report and
+  price as its released name.
+
+Deferred:
+
+- [t3code#15108](https://github.com/pingdotgg/t3code/pull/15108) splits cost
+  by token type and speed. It depends on upstream's built-in price table and
+  a per-record service tier, and F5 has neither.
+- [t3code#13118](https://github.com/pingdotgg/t3code/pull/13118) (Claude
+  banked resets) and
+  [t3code#17530](https://github.com/pingdotgg/t3code/pull/17530)
+  (Antigravity quota) need a security review first. Both read a CLI's stored
+  OAuth credentials and call undocumented endpoints. F5 reads limits today
+  without touching provider credential files. Upstream also does not offer
+  the Claude feature on macOS.
+- [t3code#10409](https://github.com/pingdotgg/t3code/pull/10409) (Cursor,
+  OpenCode and Antigravity history) and
+  [t3code#17848](https://github.com/pingdotgg/t3code/pull/17848) (Pi native
+  sessions) are about 3,600 lines of native-store scanners. They also need
+  the plan's `usage_native_records` design, so they get their own block.
+
+Validation: the Usage dashboard and price editor browser suites pass (42
+cases), as do 14 usage service tests, the usage facts repository tests
+including the new hidden-provider assertions, and the keybinding, shortcut
+reference, conflict-label, editor-grouping and Usage search unit suites. The
+server and web typechecks pass.

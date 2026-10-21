@@ -1706,10 +1706,12 @@
     {
       "upstreamSha": "0c8112013760617230d382e55447ddb75627a997",
       "subject": "fix(usage): model shares and order follow the selected metric (#11391)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: fix(usage): model shares and order follow the selected metric (#11391).",
+      "reason": "Ported: the Projects and threads card already ranked rows by the chart metric but always showed a token share; Share now follows tokens, cost or recorded turns, and a row with an unknown cost has no cost share. The Providers and models table ranks by the same metric instead of server order. The new test fails before the change. Upstream change: fix(usage): model shares and order follow the selected metric (#11391)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "ported",
+      "plannedWorkstream": "15q",
+      "f5Shas": ["2fc855663457946b45c82e4379cfb82d701adfdc"],
+      "evidence": ["apps/web/src/components/usage/UsageDashboard.browser.tsx:506"]
     },
     {
       "upstreamSha": "0c84b4289cc9dee9af770a823f812ea1e8bea05d",
@@ -2770,10 +2772,15 @@
     {
       "upstreamSha": "13c5328dd02ab0f5863f7d46455efc8dc243d4ce",
       "subject": "feat(web): filter the Usage page to just the providers you want (#16970)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(web): filter the Usage page to just the providers you want (#16970).",
+      "reason": "Ported: a provider menu next to the Usage tabs replaces F5's single History provider select. It is saved as the hidden set, so new providers show by default, and applies to both tabs: the summary request sends hiddenProviders, which the server leaves out of fact and legacy cost totals, and hidden providers' account cards are not shown. Upstream change: feat(web): filter the Usage page to just the providers you want (#16970)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "ported",
+      "plannedWorkstream": "15q",
+      "f5Shas": ["a05048881664e5d579c6724c71b979b7556e6a67"],
+      "evidence": [
+        "apps/web/src/components/usage/UsageDashboard.browser.tsx:1112",
+        "apps/server/src/persistence/Layers/UsageFacts.test.ts:99"
+      ]
     },
     {
       "upstreamSha": "13d6b30515e9d44bb4cc2d223b8b3179c2ba4c79",
@@ -7341,10 +7348,9 @@
     {
       "upstreamSha": "3412097bff7ffa62ef79e735c65d1e5cff71c356",
       "subject": "feat(server): show and redeem Claude banked resets (#13118)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(server): show and redeem Claude banked resets (#13118).",
+      "reason": "Deferred pending a security review: redeeming Claude banked resets reads the Claude CLI's OAuth access token from its config directory and calls an undocumented claim endpoint, and upstream does not offer it on macOS because the token is in the keychain. F5 reads Claude limits through the SDK's usage call without touching credentials. Upstream change: feat(server): show and redeem Claude banked resets (#13118)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "341738b80a8824dcaf6fbb2401c860135bc9a043",
@@ -8728,10 +8734,12 @@
     {
       "upstreamSha": "3e2370fbbf1efacb341a68e6f28efb06b695e148",
       "subject": "feat(web): add usage page keybinding (#9434)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(web): add usage page keybinding (#9434).",
+      "reason": "Ported: a usage.open command, bound to mod+U outside the terminal, opens Usage. It shows on the palette's Open Usage item and in the shortcuts reference, and can be rebound in Settings. Upstream change: feat(web): add usage page keybinding (#9434)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "ported",
+      "plannedWorkstream": "15q",
+      "f5Shas": ["417877abe13b321625db59271252ce05e49647dd"],
+      "evidence": ["apps/web/src/keybindings.test.ts:957"]
     },
     {
       "upstreamSha": "3e2c1a66f74f0a45768332c360cd3682f61129e1",
@@ -15834,10 +15842,9 @@
     {
       "upstreamSha": "716357cbbaca914ee1cbaef7b9fe3ea79319d1b6",
       "subject": "feat(provider-antigravity): support subscription quota and usage limits (#17530)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(provider-antigravity): support subscription quota and usage limits (#17530).",
+      "reason": "Deferred pending a security review: Antigravity quota reads the CLI's stored OAuth token file (refresh token and client secret), refreshes it with Google and calls private Cloud Code quota endpoints. F5 does not read provider credential files for usage today. Upstream change: feat(provider-antigravity): support subscription quota and usage limits (#17530)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "7175edcff4f250b583ebed8877e27e36dc48411e",
@@ -21452,10 +21459,9 @@
     {
       "upstreamSha": "9afde1c6dbe00d2b87829732c88789c10f3429c0",
       "subject": "feat(pi): include native sessions in usage reports (#17848)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(pi): include native sessions in usage reports (#17848).",
+      "reason": "Deferred with t3code#10409: Pi native session usage is a scanner on upstream's native history framework (scan cache and transcript streaming), which F5 does not have yet. Upstream change: feat(pi): include native sessions in usage reports (#17848)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "9afef94a61466422128da9c3b723b633d4c7ed1d",
@@ -24178,10 +24184,15 @@
     {
       "upstreamSha": "b05adb70b00feac0883b2e364256100cfab4b6ca",
       "subject": "feat(usage): fold preview model IDs into the model they belong to (#15333)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(usage): fold preview model IDs into the model they belong to (#15333).",
+      "reason": "Ported: the usageModelAliases server setting maps an exact model ID to the model its usage counts as. Mapped rows are renamed before aggregation, so they merge into the target in every total and take its price; chains resolve and loops stay unmapped. The Usage prices editor has a Model mappings section. Upstream change: feat(usage): fold preview model IDs into the model they belong to (#15333)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "ported",
+      "plannedWorkstream": "15q",
+      "f5Shas": ["0b1199079f0675ea083bb9ea1ffafa017669541f"],
+      "evidence": [
+        "apps/server/src/usage/Layers/UsageService.test.ts:349",
+        "apps/web/src/components/usage/UsagePriceEditor.browser.tsx:35"
+      ]
     },
     {
       "upstreamSha": "b070e52d3e6b49c98117249e5b3f0d46edce173a",
@@ -29867,10 +29878,12 @@
     {
       "upstreamSha": "daafcc4a972b25eb762962cb72575b1a2e583d61",
       "subject": "feat(web): add keyboard navigation for usage (#10158)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(web): add keyboard navigation for usage (#10158).",
+      "reason": "Ported: on Usage, T, C and R show tokens, cost or recorded turns, L opens Limits, 1 to 4 pick the range, and Escape returns to the previous page. They are rebindable usage.* commands in a usagePageOpen context and are ignored while typing or in a dialog, menu or popup. F5 binds ranges to bare digits instead of upstream's mod+Shift+1..4 because Cmd+Shift+3 and 4 are macOS screenshot keys. Upstream change: feat(web): add keyboard navigation for usage (#10158)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "ported",
+      "plannedWorkstream": "15q",
+      "f5Shas": ["9be2bfb59d2ff786c23746b15c74631799931549"],
+      "evidence": ["apps/web/src/components/usage/UsageDashboard.browser.tsx:1156"]
     },
     {
       "upstreamSha": "dab26f582cf7826fec67fbed64b46f59f3421280",
@@ -31413,10 +31426,9 @@
     {
       "upstreamSha": "e5a46d6c5d00b89afba5274a94d42428c8d79763",
       "subject": "feat(usage): read cursor, opencode, and antigravity history (#10409)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(usage): read cursor, opencode, and antigravity history (#10409).",
+      "reason": "Deferred to its own block: importing Cursor, OpenCode and Antigravity history is about 3,000 lines of native store scanners (including Cursor keychain access) plus the plan's usage_native_records table, includeNative contract and f5-turn deduplication. F5's usage reports only its own recorded facts today. Upstream change: feat(usage): read cursor, opencode, and antigravity history (#10409)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "e5a87e8b9ca9db21e0291ddbd54438c5fe56b277",
@@ -31846,10 +31858,9 @@
     {
       "upstreamSha": "e8545b293b79cdd73d30ef921db149ef1b5abee0",
       "subject": "feat(usage): show cost by token type, speed, and model detail (#15108)",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(usage): show cost by token type, speed, and model detail (#15108).",
+      "reason": "Deferred: upstream's cost split by token type and speed builds on its built-in public price table and a per-record service tier. F5 prices only from user overrides and its usage facts carry no service tier, so this needs a pricing engine and a facts migration in its own block. Upstream change: feat(usage): show cost by token type, speed, and model detail (#15108)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15q"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "e858ddb65668d54be5de3996f30c0bd5c3149657",

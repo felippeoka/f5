@@ -6247,13 +6247,9 @@
     },
     {
       "upstreamSha": "716357cbbaca914ee1cbaef7b9fe3ea79319d1b6",
-      "classification": "planned:15q",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(provider-antigravity): support subscription quota and usage limits (#17530).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15q-pr-17530"],
-        "targetModules": ["apps/server/src/usage", "apps/web/src/routes/_chat.usage.tsx"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred pending a security review: Antigravity quota reads the CLI's stored OAuth token file (refresh token and client secret), refreshes it with Google and calls private Cloud Code quota endpoints. F5 does not read provider credential files for usage today. Upstream change: feat(provider-antigravity): support subscription quota and usage limits (#17530)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "29e09df979955a22e2ad35bd58a13518861b9551",
@@ -6460,13 +6456,9 @@
     },
     {
       "upstreamSha": "9afde1c6dbe00d2b87829732c88789c10f3429c0",
-      "classification": "planned:15q",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(pi): include native sessions in usage reports (#17848).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15q-pr-17848"],
-        "targetModules": ["apps/server/src/usage", "apps/web/src/routes/_chat.usage.tsx"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred with t3code#10409: Pi native session usage is a scanner on upstream's native history framework (scan cache and transcript streaming), which F5 does not have yet. Upstream change: feat(pi): include native sessions in usage reports (#17848)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6e9c5a851c92c52e2f4a8a80c655e60db133f9ac",
@@ -11475,13 +11467,9 @@
     },
     {
       "upstreamSha": "e8545b293b79cdd73d30ef921db149ef1b5abee0",
-      "classification": "planned:15q",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(usage): show cost by token type, speed, and model detail (#15108).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15q-pr-15108"],
-        "targetModules": ["apps/server/src/usage", "apps/web/src/routes/_chat.usage.tsx"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: upstream's cost split by token type and speed builds on its built-in public price table and a per-record service tier. F5 prices only from user overrides and its usage facts carry no service tier, so this needs a pricing engine and a facts migration in its own block. Upstream change: feat(usage): show cost by token type, speed, and model detail (#15108)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "263097a8da038a143f2b7b7817250f0ad390ea32",
@@ -13024,13 +13012,9 @@
     },
     {
       "upstreamSha": "e5a46d6c5d00b89afba5274a94d42428c8d79763",
-      "classification": "planned:15q",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(usage): read cursor, opencode, and antigravity history (#10409).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15q-pr-10409"],
-        "targetModules": ["apps/server/src/usage", "apps/web/src/routes/_chat.usage.tsx"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred to its own block: importing Cursor, OpenCode and Antigravity history is about 3,000 lines of native store scanners (including Cursor keychain access) plus the plan's usage_native_records table, includeNative contract and f5-turn deduplication. F5's usage reports only its own recorded facts today. Upstream change: feat(usage): read cursor, opencode, and antigravity history (#10409)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1c1270663880903b16568594c4bf5f322407903a",
@@ -13403,13 +13387,9 @@
     },
     {
       "upstreamSha": "3412097bff7ffa62ef79e735c65d1e5cff71c356",
-      "classification": "planned:15q",
-      "reason": "Planned: implement and verify the explicitly approved 15q scenario. Upstream change: feat(server): show and redeem Claude banked resets (#13118).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15q-pr-13118"],
-        "targetModules": ["apps/server/src/usage", "apps/web/src/routes/_chat.usage.tsx"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred pending a security review: redeeming Claude banked resets reads the Claude CLI's OAuth access token from its config directory and calls an undocumented claim endpoint, and upstream does not offer it on macOS because the token is in the keychain. F5 reads Claude limits through the SDK's usage call without touching credentials. Upstream change: feat(server): show and redeem Claude banked resets (#13118)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "7cfb4987fe27da3e1d4e86abacae3a1fc12af5bb",
