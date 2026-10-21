@@ -689,6 +689,11 @@ interface ComposerPromptEditorProps {
   disabled: boolean;
   placeholder: string;
   className?: string;
+  ariaLabel?: string | undefined;
+  /** Identifies an editor with suggestions, even while its list is closed. */
+  suggestionListId?: string | undefined;
+  /** References the highlighted option only while its list is rendered. */
+  activeSuggestionId?: string | undefined;
   onRemoveTerminalContext: (contextId: string) => void;
   onChange: (
     nextValue: string,
@@ -1055,6 +1060,9 @@ function ComposerPromptEditorInner({
   disabled,
   placeholder,
   className,
+  ariaLabel,
+  suggestionListId,
+  activeSuggestionId,
   onRemoveTerminalContext,
   onChange,
   onCommandKeyDown,
@@ -1313,6 +1321,17 @@ function ComposerPromptEditorInner({
                 className,
               )}
               data-testid="composer-editor"
+              ariaMultiline
+              {...(ariaLabel ? { ariaLabel } : {})}
+              {...(suggestionListId
+                ? {
+                    ariaAutoComplete: "list" as const,
+                    "aria-haspopup": "listbox" as const,
+                    ...(activeSuggestionId
+                      ? { ariaControls: suggestionListId, ariaActiveDescendant: activeSuggestionId }
+                      : {}),
+                  }
+                : {})}
               aria-placeholder={placeholder}
               placeholder={<span />}
               onPaste={onPaste}
@@ -1353,6 +1372,9 @@ export const ComposerPromptEditor = forwardRef<
     disabled,
     placeholder,
     className,
+    ariaLabel,
+    suggestionListId,
+    activeSuggestionId,
     onRemoveTerminalContext,
     onChange,
     onCommandKeyDown,
@@ -1397,6 +1419,9 @@ export const ComposerPromptEditor = forwardRef<
         terminalContexts={terminalContexts}
         disabled={disabled}
         placeholder={placeholder}
+        ariaLabel={ariaLabel}
+        suggestionListId={suggestionListId}
+        activeSuggestionId={activeSuggestionId}
         onRemoveTerminalContext={onRemoveTerminalContext}
         onChange={onChange}
         onPaste={onPaste}

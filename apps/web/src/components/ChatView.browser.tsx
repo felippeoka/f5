@@ -2737,6 +2737,30 @@ describe("ChatView timeline (full app)", () => {
       }
     });
 
+    it("points the editor at the highlighted suggestion for screen readers", async () => {
+      const { mounted, editor } = await composerScrollFixture();
+      try {
+        expect(editor.getAttribute("aria-label")).toBe("Message");
+        expect(editor.getAttribute("aria-haspopup")).toBe("listbox");
+        expect(editor.hasAttribute("aria-activedescendant")).toBe(false);
+        await page.elementLocator(editor).fill("/");
+        const list = page.getByRole("listbox", { name: "Commands" });
+        await expect.element(list).toBeVisible();
+        await vi.waitFor(() => {
+          const activeId = editor.getAttribute("aria-activedescendant");
+          expect(editor.getAttribute("aria-controls")).toBe(list.element().id);
+          const option = activeId ? document.getElementById(activeId) : null;
+          expect(option?.getAttribute("role")).toBe("option");
+          expect(option?.getAttribute("aria-selected")).toBe("true");
+          expect(list.element().contains(option)).toBe(true);
+        });
+        await page.elementLocator(editor).fill("");
+        await vi.waitFor(() => expect(editor.hasAttribute("aria-activedescendant")).toBe(false));
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
     it("labels a single hidden attachment and links its expansion control to the tray", async () => {
       const { mounted, form, wheel } = await composerScrollFixture();
       try {

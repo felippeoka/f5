@@ -19,7 +19,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { relativePathForDisplay } from "~/lib/attachedFiles";
 import { ComposerPromptEditor } from "~/components/ComposerPromptEditor";
 import { buildExpandedImagePreview } from "~/components/chat/ExpandedImagePreview";
-import { ComposerCommandMenu } from "~/components/chat/ComposerCommandMenu";
+import {
+  ComposerCommandMenu,
+  composerCommandMenuEmptyText,
+  composerSuggestionOptionId,
+} from "~/components/chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "~/components/chat/ComposerPendingApprovalActions";
 import { ComposerPendingApprovalPanel } from "~/components/chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "~/components/chat/ComposerPendingUserInputPanel";
@@ -131,6 +135,7 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const settings = useAppSettingsSelector(selectComposerSettings);
   const attachmentTrayId = useId();
+  const composerSuggestionListId = `${useId()}-suggestions`;
   const historyPosition = useRef<PromptHistoryPosition | null>(null);
   const sendShortcutLabel = composerSendShortcutLabel(
     settings.sendShortcut,
@@ -146,6 +151,8 @@ export function ChatComposer({
     activePendingProgress,
     isComposerApprovalState,
   } = pendingInteraction;
+  // The editor points at the highlighted option only while the list is on screen.
+  const composerSuggestionsVisible = composerMenuOpen && !isComposerApprovalState;
   const { interactionMode, showPlanFollowUpPrompt, activeProposedPlan } = modeControls;
   const { isConnecting, isPendingTurnDispatchBlocked, phase, revertInProgress } = sendControls;
   const {
@@ -350,7 +357,12 @@ export function ChatComposer({
               hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
             )}
           >
-            {composerMenuOpen && !isComposerApprovalState && (
+            <div role="status" aria-atomic="true" className="sr-only">
+              {composerSuggestionsVisible && composerMenuItems.length === 0
+                ? composerCommandMenuEmptyText(isComposerMenuLoading, composerTriggerKind)
+                : ""}
+            </div>
+            {composerSuggestionsVisible && (
               <div
                 data-composer-command-drawer={redesignEnabled || undefined}
                 className={cn(
@@ -359,6 +371,7 @@ export function ChatComposer({
                 )}
               >
                 <ComposerCommandMenu
+                  listId={composerSuggestionListId}
                   items={composerMenuItems}
                   resolvedTheme={resolvedTheme}
                   isLoading={isComposerMenuLoading}
@@ -543,6 +556,13 @@ export function ChatComposer({
                           : "Ask F5 to build, fix, or explain... (@ files, / commands)"
               }
               disabled={isConnecting || isComposerApprovalState || isPendingTurnDispatchBlocked}
+              ariaLabel="Message"
+              suggestionListId={composerSuggestionListId}
+              activeSuggestionId={
+                composerSuggestionsVisible && composerMenuItems.length > 0 && activeComposerMenuItem
+                  ? composerSuggestionOptionId(composerSuggestionListId, activeComposerMenuItem.id)
+                  : undefined
+              }
             />
           </div>
 
