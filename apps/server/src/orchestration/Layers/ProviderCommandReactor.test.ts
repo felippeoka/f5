@@ -55,6 +55,7 @@ import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 
 import { ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "../../git/Errors.ts";
+import { ThreadTitleRetryDelay } from "../../threadTitle.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import {
   ProjectMcpConfigService,
@@ -779,6 +780,7 @@ describe("ProviderCommandReactor", () => {
         } as unknown as TextGenerationShape),
       ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), stateDir)),
+      Layer.provideMerge(Layer.succeed(ThreadTitleRetryDelay, "1 millis")),
       Layer.provideMerge(tracerLayer),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -4162,7 +4164,8 @@ describe("ProviderCommandReactor", () => {
   it("applies a fallback heuristic title when generation fails", async () => {
     const harness = await createHarness({ threadTitle: DEFAULT_NEW_THREAD_TITLE });
     const now = new Date().toISOString();
-    harness.generateThreadTitle.mockImplementationOnce(() =>
+    // Every attempt fails, including the retries.
+    harness.generateThreadTitle.mockImplementation(() =>
       Effect.fail(
         new TextGenerationError({
           operation: "generateThreadTitle",

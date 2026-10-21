@@ -18,6 +18,7 @@ import {
   resolveBestEffortGeneratedTitle,
   sanitizeThreadTitle,
   stripWrappingQuotes,
+  ThreadTitleRetryDelay,
   THREAD_TITLE_MAX_CHARS,
   THREAD_TITLE_REGENERATION_MAX_CONTEXT_CHARS,
   trimToMaxChars,
@@ -224,7 +225,6 @@ describe("resolveBestEffortGeneratedTitle", () => {
         titleSourceText: "Plan the workflow",
         attachments: [],
         defaultTitle: "New thread",
-        retryDelay: "1 millis",
         textGeneration: {
           generateCommitMessage: () => Effect.die("unsupported"),
           generatePrContent: () => Effect.die("unsupported"),
@@ -233,7 +233,7 @@ describe("resolveBestEffortGeneratedTitle", () => {
           generateStructuredJson: () => Effect.die("unsupported"),
         },
         logPrefix: "threadTitle test",
-      }),
+      }).pipe(Effect.provideService(ThreadTitleRetryDelay, "1 millis")),
     );
 
     expect(title).toBe("Generated after retry");
