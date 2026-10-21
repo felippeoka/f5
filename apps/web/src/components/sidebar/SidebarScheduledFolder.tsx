@@ -1,4 +1,6 @@
 import type { ThreadId } from "@t3tools/contracts";
+import { readNativeApi } from "../../nativeApi";
+import { useStore } from "../../store";
 import { ChevronRightIcon, CircleAlertIcon, FolderClockIcon, LoaderIcon } from "lucide-react";
 
 import { isSnoozedThread } from "../../lib/threadOrdering";
@@ -23,6 +25,22 @@ export function SidebarScheduledFolder(props: {
   indicatorsForThread: (thread: ThreadListItem) => SidebarThreadRowIndicators;
   actions: SidebarThreadActions;
 }) {
+  const markThreadsVisited = useStore((state) => state.markThreadsVisited);
+  const openFolderMenu = async (position: { x: number; y: number }) => {
+    const api = readNativeApi();
+    if (!api) return;
+    const action = await api.contextMenu.show(
+      [
+        {
+          id: "mark-all-read",
+          label: "Mark all as read",
+          disabled: !props.threads.some((thread) => props.indicatorsForThread(thread).isUnread),
+        },
+      ],
+      position,
+    );
+    if (action === "mark-all-read") markThreadsVisited(props.threads.map((thread) => thread.id));
+  };
   let attention = 0;
   let running = 0;
   let unread = 0;
@@ -45,6 +63,18 @@ export function SidebarScheduledFolder(props: {
         aria-expanded={props.expanded}
         className="h-8 w-full translate-x-0 gap-2 rounded-md px-2 text-left"
         onClick={props.onToggle}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void openFolderMenu({ x: event.clientX, y: event.clientY });
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          void openFolderMenu({ x: rect.left, y: rect.bottom });
+        }}
       >
         <ChevronRightIcon
           aria-hidden="true"

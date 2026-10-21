@@ -12,6 +12,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   PR_HUB_WS_METHODS,
   type MessageId,
+  TurnId,
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
@@ -37,6 +38,7 @@ import { COMPOSER_DRAFT_STORAGE_KEY, useComposerDraftStore } from "../composerDr
 import { getRouter } from "../router";
 import { useRecoveryStateStore } from "../recoveryStateStore";
 import { useStore } from "../store";
+import { hasUnseenCompletion } from "../threadStatus";
 import { createTestServerProvider } from "../testServerProvider";
 import {
   createPlanningWorkflow as createPlanningWorkflowFixture,
@@ -1312,6 +1314,85 @@ describe("Thread sidebar", () => {
       await expect
         .element(page.getByRole("menuitem", { name: "Rename thread", exact: true }))
         .toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("marks every Scheduled execution read from the folder menu, including hidden runs", async () => {
+    seedAppSettings({ sidebarThreadPreviewCount: 5 });
+    const completed = {
+      turnId: TurnId.makeUnsafe("completed"),
+      state: "completed" as const,
+      requestedAt: NOW_ISO,
+      startedAt: NOW_ISO,
+      completedAt: "2026-03-11T12:05:00.000Z",
+      assistantMessageId: null,
+    };
+    const run = (index: number) =>
+      createSnapshotThread({
+        id: `bulk-read-run-${index}` as ThreadId,
+        title: `Bulk read run ${index}`,
+        latestTurn: completed,
+        scheduledOrigin: {
+          taskId: ScheduledTaskId.makeUnsafe("bulk-read-task"),
+          runId: ScheduledTaskRunId.makeUnsafe(`run-${index}`),
+        },
+      });
+    const initialThreads = [
+      createSnapshotThread({ id: THREAD_ID, title: "Open conversation" }),
+      createSnapshotThread({
+        id: "other-unread" as ThreadId,
+        title: "Other unread",
+        latestTurn: completed,
+      }),
+      ...Array.from({ length: 8 }, (_, index) => run(index)),
+    ];
+    const mounted = await mountApp({
+      width: 1_400,
+      initialEntries: [`/${THREAD_ID}`],
+      configureFixture: (nextFixture) => {
+        nextFixture.snapshot = createSnapshot(initialThreads);
+      },
+    });
+    try {
+      const folder = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="scheduled-thread-folder"]'),
+        "Scheduled folder should appear",
+      );
+      const toggle = folder.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(folder.textContent).toContain("Unread: 8");
+      toggle.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: 200,
+          clientY: 200,
+        }),
+      );
+      await page.getByRole("menuitem", { name: "Mark all as read", exact: true }).click();
+      await vi.waitFor(() => {
+        const runs = useStore.getState().threads.filter((thread) => thread.scheduledOrigin);
+        expect(runs).toHaveLength(8);
+        expect(runs.every((thread) => !hasUnseenCompletion(thread))).toBe(true);
+        expect(folder.textContent).not.toContain("Unread:");
+      });
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(
+        hasUnseenCompletion(
+          useStore.getState().threads.find((thread) => thread.id === "other-unread")!,
+        ),
+      ).toBe(true);
+      window.dispatchEvent(new Event("beforeunload"));
+      const persisted = JSON.parse(localStorage.getItem("t3code:renderer-state:v8")!);
+      for (let index = 0; index < 8; index++)
+        expect(
+          Date.parse(persisted.lastVisitedAtByThreadId[`bulk-read-run-${index}`]),
+        ).toBeGreaterThanOrEqual(Date.parse(completed.completedAt));
+      useStore.getState().syncServerReadModel(createSnapshot([...initialThreads, run(8)]));
+      await vi.waitFor(() => expect(folder.textContent).toContain("Unread: 1"));
     } finally {
       await mounted.cleanup();
     }
