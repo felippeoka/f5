@@ -524,7 +524,9 @@ export const probeClaudeAccountUsage = (
         if (typeof read !== "function")
           return yield* Effect.fail(new AccountUsageReadError("unsupported"));
         const response = yield* Effect.tryPromise({
-          try: () => read.call(q),
+          // Only the rate limits are read, so skip the local transcript scan that fills
+          // `behaviors`: with a few GB of transcripts it outlasts the deadline.
+          try: () => read.call(q, { skipBehaviors: true }),
           // Only a rejection from this operation can prove unsupported usage RPCs.
           catch: (error) =>
             new AccountUsageReadError(
