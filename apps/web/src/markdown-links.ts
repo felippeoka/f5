@@ -1,3 +1,5 @@
+import { defaultUrlTransform } from "react-markdown";
+
 import { formatWorkspaceRelativePath } from "./filePathDisplay";
 import { resolvePathLinkTarget, splitPathAndPosition } from "./terminal-links";
 import { basenameOfPath } from "./vscode-icons";
@@ -284,4 +286,16 @@ export function rewriteMarkdownFileUriHref(href: string): string {
   const base = parsed.path;
   const withPosition = appendLocalFileUrlPosition(base, parsed.hash);
   return withPosition;
+}
+
+/**
+ * react-markdown's default transform empties any href with a scheme it does not know, which
+ * includes `C:` and `file:`. Local file links keep their destination so they still become
+ * file chips; everything else gets the default sanitizing.
+ */
+export function chatMarkdownUrlTransform(href: string): string {
+  // Destinations arrive percent-encoded, so `C:\me` is `C:%5Cme` here.
+  if (isWindowsAbsolutePath(safeDecodeLocalPath(href))) return href;
+  if (href.toLowerCase().startsWith("file:") && parseLocalFileUrl(href)) return href;
+  return defaultUrlTransform(href);
 }

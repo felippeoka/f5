@@ -4,6 +4,7 @@ import { ChatAssetImage } from "./ChatAssetImage";
 import { useContext } from "react";
 import { RepositoryLinks } from "../repositoryLinkContext";
 import { remarkIssueReferences } from "../lib/remarkIssueReferences";
+import { remarkKeepWindowsPathDestinations } from "../lib/remarkWindowsPathDestinations";
 import { GitHubIcon } from "./Icons";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { CheckIcon, CopyIcon } from "lucide-react";
@@ -42,6 +43,7 @@ import { useFileNavigation } from "../fileNavigationContext";
 import { useTheme } from "../hooks/useTheme";
 import {
   collectMarkdownLinkHrefs,
+  chatMarkdownUrlTransform,
   isMarkdownFileLinkLabel,
   resolveMarkdownFileLinkMeta,
   type MarkdownFileLinkMeta,
@@ -713,7 +715,12 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, [remarkIssueReferences, repositoryLinks]]}
+      remarkPlugins={[
+        remarkGfm,
+        remarkKeepWindowsPathDestinations,
+        [remarkIssueReferences, repositoryLinks],
+      ]}
+      urlTransform={chatMarkdownUrlTransform}
       components={markdownComponents}
     >
       {text}

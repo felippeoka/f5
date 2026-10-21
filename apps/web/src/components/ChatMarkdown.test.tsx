@@ -175,3 +175,50 @@ it("keeps a descriptive file-link label beside the chip and drops a filename lab
   expect(html.match(/chat-markdown-file-link-label">example\.ts</g)).toHaveLength(2);
   expect(html).not.toMatch(/in <span>example\.ts:12/);
 });
+
+it("keeps an unmatched <A> placeholder from linking later blocks", async () => {
+  const { default: ChatMarkdown } = await import("./ChatMarkdown");
+  const html = renderToStaticMarkup(
+    <ChatMarkdown
+      text={`- **"From <A>"** appears in the header.\n\n- **Tests:** cover inheritance.\n\nThe deferred move continues on B.`}
+      cwd="/tmp/project"
+    />,
+  );
+  // Chat markdown renders HTML as literal text, so the placeholder can never open a link.
+  expect(html).toContain("<strong>&quot;From &lt;A&gt;&quot;</strong>");
+  expect(html).not.toContain("<a");
+  expect(html.match(/<li>/g)).toHaveLength(2);
+  expect(html).toContain("<p>The deferred move continues on B.</p>");
+});
+
+it("keeps Windows path backslashes that CommonMark would read as escapes", async () => {
+  const { default: ChatMarkdown } = await import("./ChatMarkdown");
+  const html = renderToStaticMarkup(
+    <ChatMarkdown
+      text={[
+        String.raw`[settings](C:\Users\shawn\.claude\settings.json)`,
+        "[reference][shot]",
+        String.raw`[shot]: C:\Users\shawn\.t3\notes.md`,
+        "[amp](C:/Users/shawn/a&amp;b.md)",
+      ].join("\n\n")}
+      cwd="C:/Users/shawn"
+    />,
+  );
+  // Without the plugin `\.` is an escape, and the paths lose the separator before `.claude`.
+  expect(html).toContain('href="C:%5CUsers%5Cshawn%5C.claude%5Csettings.json"');
+  expect(html).toContain('href="C:%5CUsers%5Cshawn%5C.t3%5Cnotes.md"');
+  expect(html).toContain('href="C:/Users/shawn/a&amp;b.md"');
+  expect(html.match(/chat-markdown-file-link"/g)).toHaveLength(3);
+});
+
+it("renders file URI links as chips but still empties unsafe schemes", async () => {
+  const { default: ChatMarkdown } = await import("./ChatMarkdown");
+  const html = renderToStaticMarkup(
+    <ChatMarkdown
+      text="[a.ts](file:///tmp/project/a.ts) and [run](javascript:alert(1))"
+      cwd="/tmp/project"
+    />,
+  );
+  expect(html).toContain('href="file:///tmp/project/a.ts" class="chat-markdown-file-link"');
+  expect(html).not.toContain("javascript:");
+});
