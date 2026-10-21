@@ -137,9 +137,9 @@
     {
       "upstreamSha": "014016a62344ab03dbccdb73c3c1861bc4f7e349",
       "subject": "fix(web): make copy PR link discoverable in keybindings (#11826)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): make copy PR link discoverable in keybindings.",
+      "reason": "Not applicable: upstream relabels its copy-link command. F5's PR hub command is prHub.copyNumber (packages/shared/src/keybindings.ts:78). Upstream change: fix(web): make copy PR link discoverable in keybindings (#11826)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -296,9 +296,9 @@
     {
       "upstreamSha": "02297e3dbd896ef619d5c916938c751e343e76a8",
       "subject": "fix(ui): color linked pr counts by aggregate status (#11180)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(ui): color linked pr counts by aggregate status.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream colors an aggregate linked-PR count badge; F5 lists each link with its own state. Upstream change: fix(ui): color linked pr counts by aggregate status (#11180)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -503,10 +503,9 @@
     {
       "upstreamSha": "0425c32571e033c068b8caebfd984acce9f8735b",
       "subject": "fix(clients): # suggestions include pull requests linked to the thread (#19357)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(clients): # suggestions include pull requests linked to the thread (#19357).",
+      "reason": "Not applicable: F5's composer has no # pull request suggestions. Upstream change: fix(clients): # suggestions include pull requests linked to the thread (#19357)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "043bc031e485debdba5dcd62e5894a8725ff396b",
@@ -853,17 +852,12 @@
     {
       "upstreamSha": "0681d854994ec0ceed0562ae74549ccf8ef2ec41",
       "subject": "fix(pull-requests): expand code tab diffs by default (#9174)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pull-requests): expand code tab diffs by default.",
+      "reason": "Equivalent: upstream expands code tab diffs by default. F5's PR files tab follows the diffFileDefaultState setting. Upstream change: fix(pull-requests): expand code tab diffs by default (#9174)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"],
+      "evidence": ["apps/web/src/components/prHub/PrFilesTab.tsx:45"]
     },
     {
       "upstreamSha": "06a84de3bd613b00f6a1fc61f7f71ea26534ef09",
@@ -1141,17 +1135,12 @@
     {
       "upstreamSha": "0869ad648b67a286d7a47af878f1d256d0ff689f",
       "subject": "fix(web): let the PR reviewer and label search boxes take keystrokes (#9479)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): let the PR reviewer and label search boxes take keystrokes.",
+      "reason": "Equivalent: upstream lets its reviewer and label search boxes take keystrokes. F5's reviewer picker is a plain input with no popover that could steal them. Upstream change: fix(web): let the PR reviewer and label search boxes take keystrokes (#9479)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"],
+      "evidence": ["apps/web/src/components/prHub/ForgeControls.tsx:249"]
     },
     {
       "upstreamSha": "087cfb8ae262f344f7e409f5a8c0eda6f0ef12f9",
@@ -1198,10 +1187,9 @@
     {
       "upstreamSha": "08b1222d0bae670433c275ec70165c7b5048726f",
       "subject": "refactor(server): GitHub services are named for the API they call, not gh (#16967)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub services are named for the API they call, not gh (#16967).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(server): GitHub services are named for the API they call, not gh (#16967)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "08c715ed93f8a6bfd85d42f5a8b7dbe12404554d",
@@ -1391,9 +1379,9 @@
     {
       "upstreamSha": "0a37240a87bb2fed8f48cf20dc8312ee3b94eba6",
       "subject": "fix(web): remove sidebar pull request link icon (#11179)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): remove sidebar pull request link icon.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. F5's sidebar has no PR link button. Upstream change: fix(web): remove sidebar pull request link icon (#11179)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -1498,10 +1486,9 @@
     {
       "upstreamSha": "0ad3fd64360ef6942ad4b76ece2d8fdd28432a11",
       "subject": "refactor(web): the pull request thread dialog keeps its caching without \"use memo\" hooks (#20742)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request thread dialog keeps its caching without \"use memo\" hooks (#20742).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request thread dialog keeps its caching without \"use memo\" hooks (#20742)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0ad91b6e7fc1fcb6d5f4bc736d84c337e912bc62",
@@ -1633,9 +1620,9 @@
     {
       "upstreamSha": "0bc59bbae391ee45ab3a7cfb2dc703c8b27e5772",
       "subject": "fix(web): let the pull request list use wide screens (#9351)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): let the pull request list use wide screens.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): let the pull request list use wide screens (#9351)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -2148,10 +2135,9 @@
     {
       "upstreamSha": "0fcd5f90611451cca842689faea53b5450c022da",
       "subject": "fix(web): multi-PR badges open the linked pull requests panel (#13211)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): multi-PR badges open the linked pull requests panel (#13211).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. F5 thread links open a per-link menu (apps/web/src/components/prHub/ThreadPrLinks.tsx:156). Upstream change: fix(web): multi-PR badges open the linked pull requests panel (#13211)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "0fd7d2d7d793fc79e865e90f395a0ec4a74d28d4",
@@ -2370,9 +2356,9 @@
     {
       "upstreamSha": "110bbe6b55d684627a2481aebfd7c1ae3396011c",
       "subject": "fix(prs): reuse GitHub data and defer optional reads (#9835)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(prs): reuse GitHub data and defer optional reads.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's GraphQL request budget. Upstream change: fix(prs): reuse GitHub data and defer optional reads (#9835)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -2914,17 +2900,12 @@
     {
       "upstreamSha": "14f15cfed48bc7519e8e5eeac03f483f4b11ef3a",
       "subject": "fix(server): stop titling linked PR threads from local git history (#9191)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): stop titling linked PR threads from local git history.",
+      "reason": "Equivalent: upstream stops titling linked PR threads from local git history. F5 titles a PR thread from the pull request itself. Upstream change: fix(server): stop titling linked PR threads from local git history (#9191)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": ["960265d87b312f0803a4577aeedcf4deede473e0"],
+      "evidence": ["apps/web/src/components/prHub/prF5Thread.ts:222"]
     },
     {
       "upstreamSha": "14fe0158ede3d964f183e281f9fec225d30a6b32",
@@ -3048,9 +3029,9 @@
     {
       "upstreamSha": "15c6167bc48922c9359235d6eee11259f2164d1d",
       "subject": "fix(web): use the configured panel shortcut on the PR page (#11292)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): use the configured panel shortcut on the PR page.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): use the configured panel shortcut on the PR page (#11292)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -3445,10 +3426,12 @@
     {
       "upstreamSha": "18b21325c3ab1ff4f0ee7b017d9c4eefc2b2d307",
       "subject": "feat(server): agents can watch a PR and get woken when checks, reviews, or conflicts need them (#15057)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(server): agents can watch a PR and get woken when checks, reviews, or conflicts need them (#15057).",
+      "reason": "Ported in 15h: agents can watch a PR and are woken when checks, reviews or conflicts need them. Upstream change: feat(server): agents can watch a PR and get woken when checks, reviews, or conflicts need them (#15057)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "ported",
+      "plannedWorkstream": "12a",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": ["apps/server/src/orchestration/Layers/PullRequestWatchService.test.ts:357"]
     },
     {
       "upstreamSha": "18b468871e6a3bfad207109898011ea330afeadb",
@@ -3467,9 +3450,9 @@
     {
       "upstreamSha": "18c5a1d2dfbb02856ec51b54edac82952852a58a",
       "subject": "fix(web): simplify pull request summary sections (#10612)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): simplify pull request summary sections.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): simplify pull request summary sections (#10612)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -3496,9 +3479,9 @@
     {
       "upstreamSha": "18de6bb328059703b5d1b0661610076e3c0fa2d4",
       "subject": "fix(server): background PR sync reads summaries in batches (#13198)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): background PR sync reads summaries in batches.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream batches gh pr view summaries; F5 reads GitHub through its own API client. Upstream change: fix(server): background PR sync reads summaries in batches (#13198)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -4018,10 +4001,9 @@
     {
       "upstreamSha": "1c9e83e67b32c891f53f90827944983446df4111",
       "subject": "perf(web): GitHub token settings compile with the React Compiler (#20496)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): GitHub token settings compile with the React Compiler (#20496).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): GitHub token settings compile with the React Compiler (#20496)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1cb49c3df2e0fb4bc2c6e88b0f102c1f9eb8cee5",
@@ -4293,9 +4275,9 @@
     {
       "upstreamSha": "1eb36b45ef7aa5c028380afb7266bcabf258a55e",
       "subject": "fix(web): show pull request state icons in tabs (#9112)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): show pull request state icons in tabs.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): show pull request state icons in tabs (#9112)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -4463,9 +4445,9 @@
     {
       "upstreamSha": "20363c32c9bfdbf49c2716ef11d1f18483fcc01b",
       "subject": "feat(web): add provider selector to pull request toolbar (#11524)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): add provider selector to pull request toolbar.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The change is to upstream's toolbar provider selector. Upstream change: feat(web): add provider selector to pull request toolbar (#11524)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -4485,10 +4467,11 @@
     {
       "upstreamSha": "207f6a10b05cbdaee6fc650e915ba09dbe39d428",
       "subject": "fix(threads): threads watching a PR stay in Working instead of bouncing to the inbox (#16204)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(threads): threads watching a PR stay in Working instead of bouncing to the inbox (#16204).",
+      "reason": "Equivalent: upstream keeps watching threads in Working. F5 PR watches end when the thread settles, and watching never changes a thread's status. Upstream change: fix(threads): threads watching a PR stay in Working instead of bouncing to the inbox (#16204)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"],
+      "evidence": ["apps/server/src/orchestration/Layers/PullRequestWatchService.ts:568"]
     },
     {
       "upstreamSha": "20851e304eb543acf9cbcd5db5d2161a60212fbf",
@@ -4773,17 +4756,12 @@
     {
       "upstreamSha": "223ff4490f764a74ff911589e97b9bbcd595fee8",
       "subject": "fix(server): link thread PRs without an open client (#10101)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): link thread PRs without an open client.",
+      "reason": "Equivalent: upstream links thread PRs without an open client. F5's server projection writes thread PR links from orchestration events. Upstream change: fix(server): link thread PRs without an open client (#10101)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"],
+      "evidence": ["apps/server/src/orchestration/Layers/ProjectionPipeline.ts:2449"]
     },
     {
       "upstreamSha": "22539f2a428947ab218589c984b2af44e434012e",
@@ -4843,9 +4821,9 @@
     {
       "upstreamSha": "229b05df042f896bbb44660c8524ffe222b85b8d",
       "subject": "fix(server): return fresh live pull request reads (#6472)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): return fresh live pull request reads.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix(server): return fresh live pull request reads (#6472)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -5256,9 +5234,9 @@
     {
       "upstreamSha": "25da986037a99d1e87bf1ed51aa58d7babee064a",
       "subject": "fix(web): keep comment actions visible when pr comments are folded (#11357)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): keep comment actions visible when pr comments are folded.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): keep comment actions visible when pr comments are folded (#11357)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -5408,9 +5386,9 @@
     {
       "upstreamSha": "26af903b9bec7f8da56bb5f545d9980d08d418e1",
       "subject": "fix(web): label pull request merge actions (#7381)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): label pull request merge actions.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): label pull request merge actions (#7381)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -5862,17 +5840,16 @@
     {
       "upstreamSha": "2a337fea92f3232e185e3ecc44e3f1c414a3661c",
       "subject": "perf(web): the pull request linking hook compiles without manual memoization (#20681)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request linking hook compiles without manual memoization (#20681).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request linking hook compiles without manual memoization (#20681)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "2a3cfe456375fd34b906f849b04706109dc74170",
       "subject": "fix(web): collapse PR header actions to icons when narrow (#9334)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): collapse PR header actions to icons when narrow.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): collapse PR header actions to icons when narrow (#9334)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -6093,10 +6070,9 @@
     {
       "upstreamSha": "2b7fa212a89edda7aad8f73fc3b4afd5b56c442c",
       "subject": "fix(web): PR file headers keep the file name in narrow panels (#15562)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR file headers keep the file name in narrow panels (#15562).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR file headers keep the file name in narrow panels (#15562)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "2b8bb0c1881583428adbc07e3b641b21067ab41a",
@@ -6206,9 +6182,9 @@
     {
       "upstreamSha": "2c2fa8cd7ded97be76587ae1cfce54ee0a65f544",
       "subject": "fix(web): pull request embed chip shows the state icon (#12951)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): pull request embed chip shows the state icon.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The change is to upstream's composer embed chips, which F5 does not have. Upstream change: fix(web): pull request embed chip shows the state icon (#12951)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -6290,10 +6266,9 @@
     {
       "upstreamSha": "2c8e85e6626d62d06a3dd13583f3b8c1b05c1895",
       "subject": "fix(web): PR badge tooltip opens after a thread gains a second PR (#18368)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR badge tooltip opens after a thread gains a second PR (#18368).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The change is to upstream's sidebar PR badge tooltip, which F5 does not have. Upstream change: fix(web): PR badge tooltip opens after a thread gains a second PR (#18368)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "2c8e95a4b641898322c7312cb67535612606745e",
@@ -6342,10 +6317,9 @@
     {
       "upstreamSha": "2ce3e4ae74deb63bda7aaf059949a12aaaefed56",
       "subject": "refactor(source-control): PullRequestService reads GitHub resolvers, not its kind (#17619)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): PullRequestService reads GitHub resolvers, not its kind (#17619).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is a resolver refactor inside upstream's PullRequestService. Upstream change: refactor(source-control): PullRequestService reads GitHub resolvers, not its kind (#17619)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "2cf0ff0643e23d13658114fbf3a7e76753559755",
@@ -6669,9 +6643,9 @@
     {
       "upstreamSha": "2ec59ca1fad6d9eb6ae36714b76b6130e63201e6",
       "subject": "fix(web): hide back button for single linked pull requests (#11520)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): hide back button for single linked pull requests.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): hide back button for single linked pull requests (#11520)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -6932,10 +6906,9 @@
     {
       "upstreamSha": "311319e92fa6710bd666cc4731c419eb108b8353",
       "subject": "perf(web): pull request markdown compiles without manual memoization (#20722)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request markdown compiles without manual memoization (#20722).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request markdown compiles without manual memoization (#20722)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "311f05c8e333a9f7adfbbf5681b849888670d00a",
@@ -7113,10 +7086,9 @@
     {
       "upstreamSha": "3236d8ce73d06df91e30532d0a5fd03cb537de8e",
       "subject": "Add esthor to the list of GitHub users",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: Add esthor to the list of GitHub users.",
+      "reason": "Not applicable: upstream repository housekeeping (contributor lists). Upstream change: Add esthor to the list of GitHub users",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "323dc321a2f8bec2160e6e35f94d07c5bb949084",
@@ -7230,9 +7202,9 @@
     {
       "upstreamSha": "33242d0164d47c6935ba5c7725296539384de65d",
       "subject": "fix(server): preserve recent PR reads across server restarts (#11007)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): preserve recent PR reads across server restarts.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5 persists the PR hub list in pr_hub_prs (apps/server/src/prHub/repository.ts:195), and detail reads are a short in-memory cache. Upstream change: fix(server): preserve recent PR reads across server restarts (#11007)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -7380,10 +7352,9 @@
     {
       "upstreamSha": "341738b80a8824dcaf6fbb2401c860135bc9a043",
       "subject": "refactor(web): the pull request stack hook keeps its caching without \"use memo\" (#20741)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request stack hook keeps its caching without \"use memo\" (#20741).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request stack hook keeps its caching without \"use memo\" (#20741)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "3417bc3856a25fa772f969faeaf8428a58010d47",
@@ -7717,9 +7688,9 @@
     {
       "upstreamSha": "371b52d9dad76876f84609a4cd0f80eaa757b69c",
       "subject": "feat(web): answer pull request actions on the row at once (#12843)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): answer pull request actions on the row at once.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): answer pull request actions on the row at once (#12843)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -7996,10 +7967,9 @@
     {
       "upstreamSha": "38f3c62304bfe79ea6c9f75a17afb732b555f48d",
       "subject": "fix(shared): local-path remotes no longer crash legacy PR link projection (#13463)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(shared): local-path remotes no longer crash legacy PR link projection (#13463).",
+      "reason": "Not applicable: upstream fixes its legacy linked-PR projection from remotes. F5 records thread PR links explicitly and never derives them from remotes. Upstream change: fix(shared): local-path remotes no longer crash legacy PR link projection (#13463)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "39167eb1a586ee9e060d6ec3314617e14e0259c0",
@@ -8571,9 +8541,9 @@
     {
       "upstreamSha": "3c73fa7ce02b7ee6b2904ec58e47c06262aebf5d",
       "subject": "perf(web): defer pull request line stats until visible (#6471)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: perf(web): defer pull request line stats until visible.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: perf(web): defer pull request line stats until visible (#6471)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -9049,10 +9019,9 @@
     {
       "upstreamSha": "409140911b59dc72c205148a94b916380ba72744",
       "subject": "perf(web): pull request actions compile with the React Compiler (#20492)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request actions compile with the React Compiler (#20492).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request actions compile with the React Compiler (#20492)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "409bc4fa6f3bb9869052bdba4244b30606457f20",
@@ -9149,9 +9118,9 @@
     {
       "upstreamSha": "411da2a7356dd795b720228e9c834ea9bad0415f",
       "subject": "feat(web): use the linked pull request row layout on the pull requests page (#12536)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): use the linked pull request row layout on the pull requests page.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): use the linked pull request row layout on the pull requests page (#12536)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -9380,10 +9349,9 @@
     {
       "upstreamSha": "42d92ec59775c187af69071c81b2b91180810bdd",
       "subject": "refactor(server): GitHub source control reads GitHubApi directly (#16982)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub source control reads GitHubApi directly (#16982).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(server): GitHub source control reads GitHubApi directly (#16982)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "42da166d131017335a1158d0b379dd68b8985796",
@@ -9417,10 +9385,11 @@
     {
       "upstreamSha": "42f71dfe0768ee768283d50140e7d360a635ee28",
       "subject": "fix(web): PR search keeps the caret where you type (#17675)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR search keeps the caret where you type (#17675).",
+      "reason": "Equivalent: upstream keeps the PR search caret in place. F5's search box is plain local state, so the caret never jumps. Upstream change: fix(web): PR search keeps the caret where you type (#17675)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["3166e4dc5e57987cb8a7e5b6289bb363a1dd0ed2"],
+      "evidence": ["apps/web/src/components/prHub/PullRequestsView.tsx:163"]
     },
     {
       "upstreamSha": "430fbd1ffc98378f6a6a41027ddc6004a79b2e7b",
@@ -9575,9 +9544,9 @@
     {
       "upstreamSha": "443b4ebfe83fcfe64c34b09ecb5a5fffdebb85c7",
       "subject": "fix(pull-requests): missing features & better behaviour (#9188)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pull-requests): missing features & better behaviour.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change adds features to upstream's GitHub CLI and Azure DevOps providers. Upstream change: fix(pull-requests): missing features & better behaviour (#9188)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -9837,10 +9806,9 @@
     {
       "upstreamSha": "462e7f4de4fd4ae14d2b4439fd983fa9ced2790e",
       "subject": "feat(mobile): native-sized pull request action bar (#18527)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(mobile): native-sized pull request action bar (#18527).",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: feat(mobile): native-sized pull request action bar (#18527)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4631000f5a7666c88402ce11a9ebb8cdef7a7dad",
@@ -9852,10 +9820,9 @@
     {
       "upstreamSha": "464fad9a433c246b4a5b73c8640787c174c2c195",
       "subject": "fix(web,mobile): pull request project filter follows the sidebar order (#19180)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web,mobile): pull request project filter follows the sidebar order (#19180).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The mobile half applies to upstream's mobile app, which F5 does not have. Upstream change: fix(web,mobile): pull request project filter follows the sidebar order (#19180)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4664c572a78231611491f63f677f0e007ebaab03",
@@ -10039,9 +10006,9 @@
     {
       "upstreamSha": "47ace94962a714a561d7cfbdbaa4c721ef6b0598",
       "subject": "fix(web): use consistent PR section toggles (#11763)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): use consistent PR section toggles.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): use consistent PR section toggles (#11763)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -10203,9 +10170,9 @@
     {
       "upstreamSha": "48ba76bc26337f23d1f0991bbac51f996a3333dc",
       "subject": "fix(web): collapse oldest pull request comments (#9323)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): collapse oldest pull request comments.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): collapse oldest pull request comments (#9323)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -10287,9 +10254,9 @@
     {
       "upstreamSha": "493fbb58870c912b9cb2ba6c2f1dae938877a59a",
       "subject": "fix(web): reuse pull request list data while loading (#9467)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): reuse pull request list data while loading.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): reuse pull request list data while loading (#9467)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -10344,10 +10311,11 @@
     {
       "upstreamSha": "499a53c307ec6a0fbff5c83efde355729bd7d343",
       "subject": "perf(server): expired PR diffs no longer stay in memory until restart (#17786)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(server): expired PR diffs no longer stay in memory until restart (#17786).",
+      "reason": "Equivalent: upstream drops expired PR diffs from memory. F5's PR detail cache has a 30-second TTL and is bounded by entry count and bytes. Upstream change: perf(server): expired PR diffs no longer stay in memory until restart (#17786)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["3166e4dc5e57987cb8a7e5b6289bb363a1dd0ed2"],
+      "evidence": ["apps/server/src/prHub/detailCache.ts:6"]
     },
     {
       "upstreamSha": "49c0d96edf280f1fe6750a83161a3a2cff0f25ef",
@@ -10433,17 +10401,12 @@
     {
       "upstreamSha": "4a560b4e4ebb37efb7f57805ba79e37f5500bdca",
       "subject": "fix(web): honor whitespace settings in pull request diffs (#12438)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): honor whitespace settings in pull request diffs.",
+      "reason": "Equivalent: upstream honors the whitespace setting in PR diffs. F5's PR diffs already apply diffIgnoreWhitespace. Upstream change: fix(web): honor whitespace settings in pull request diffs (#12438)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": ["3166e4dc5e57987cb8a7e5b6289bb363a1dd0ed2"],
+      "evidence": ["apps/web/src/components/prHub/PrFileDiff.tsx:36"]
     },
     {
       "upstreamSha": "4a5dade3b4915cdfd25729d2c24d5751a282ef7e",
@@ -10797,9 +10760,9 @@
     {
       "upstreamSha": "4d06156dd7821851007e61489105f33dbb241a7f",
       "subject": "fix(web): center pull request unavailable states (#11110)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): center pull request unavailable states.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): center pull request unavailable states (#11110)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -10856,18 +10819,16 @@
     {
       "upstreamSha": "4d679a63244e0f6a2118df6a6488ed1295a87797",
       "subject": "perf(client): equal query refetches no longer re-render PR rows (#20850)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(client): equal query refetches no longer re-render PR rows (#20850).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's client-runtime query store. Upstream change: perf(client): equal query refetches no longer re-render PR rows (#20850)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4d73e1d5cdd32dbfb470e9422421cc40475d5e99",
       "subject": "fix(server): persist only changed pull request links (#19248)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): persist only changed pull request links (#19248).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's orchestration-v2 link persistence. Upstream change: fix(server): persist only changed pull request links (#19248)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4d7683557ad4a2411d6de405e500e4a56b43d0e1",
@@ -10934,10 +10895,9 @@
     {
       "upstreamSha": "4dd6a65abe62f570b80725826b67e1763093140a",
       "subject": "refactor(web): the pull request detail panel keeps its caching with fewer \"use memo\" hooks (#20761)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request detail panel keeps its caching with fewer \"use memo\" hooks (#20761).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request detail panel keeps its caching with fewer \"use memo\" hooks (#20761)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "4df84a7d03ff084ff4c6dd7aef54623984690fb7",
@@ -10981,9 +10941,9 @@
     {
       "upstreamSha": "4e547318b60031eb546d8cf2b84ad9fa0785a87a",
       "subject": "fix(server): find newly opened pull requests after agent turns (#9125)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): find newly opened pull requests after agent turns.",
+      "reason": "Not applicable: F5 links a PR to a thread only when the thread is created or updated with one (apps/server/src/orchestration/Layers/ProjectionPipeline.ts:2435); it does not look for PRs after agent turns. Upstream change: fix(server): find newly opened pull requests after agent turns (#9125)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -11333,10 +11293,9 @@
     {
       "upstreamSha": "507361bc7301982279b9f115bbae8f22268ce9d6",
       "subject": "refactor(source-control): GitHub lives in @t3tools/source-control-github (#17607)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): GitHub lives in @t3tools/source-control-github (#17607).",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): GitHub lives in @t3tools/source-control-github (#17607)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "50791a0530a9c4eed7924dbfedf2fcf430d4ed98",
@@ -11420,25 +11379,22 @@
     {
       "upstreamSha": "51341f2ac1e25032efac13ef6e9652e9c74b48a3",
       "subject": "fix(server): outdated gh no longer reads as \"not authenticated\" (#7588)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): outdated gh no longer reads as \"not authenticated\".",
+      "reason": "Ported: importing the GitHub CLI login with a gh older than 2.81.0 asks for an update instead of reporting a generic read failure. Upstream change: fix(server): outdated gh no longer reads as \"not authenticated\" (#7588)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": [
+        "e073f2654001c9c72cb7a8f78cbec5dc6bf58c85",
+        "577a63b34fec235883cafd0fbbf81792b428132f"
+      ],
+      "evidence": ["apps/server/src/git/GithubCliImport.test.ts:305"]
     },
     {
       "upstreamSha": "51347aca3aa73112bc1e288ae45507ce515f42a2",
       "subject": "refactor(source-control): Forgejo identity and Azure DevOps addressing move into their packages (#17624)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): Forgejo identity and Azure DevOps addressing move into their packages (#17624).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(source-control): Forgejo identity and Azure DevOps addressing move into their packages (#17624)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "51672b6ecb9d927d57d0b12dd071ca0d4a34ef36",
@@ -11552,9 +11508,9 @@
     {
       "upstreamSha": "52ad70ec43b5dcfcdc72ac79c0964da8e4d163db",
       "subject": "fix(web): prioritize linked pull requests over automatic diffs (#12142)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): prioritize linked pull requests over automatic diffs.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): prioritize linked pull requests over automatic diffs (#12142)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -11830,10 +11786,9 @@
     {
       "upstreamSha": "5495cc4445915c3bf4aa92bb57213f1c7cc220ef",
       "subject": "feat(mobile): browse and review pull requests natively (#18126)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(mobile): browse and review pull requests natively (#18126).",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: feat(mobile): browse and review pull requests natively (#18126)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "549d182aaadbf0e1e195d1a8cdc1805200e6751e",
@@ -11974,10 +11929,9 @@
     {
       "upstreamSha": "55ca0bb65ee5b668f309e6f57f9ee7e936173df0",
       "subject": "refactor(web): pull request detail keeps its caching without \"use memo\" (#20811)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): pull request detail keeps its caching without \"use memo\" (#20811).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): pull request detail keeps its caching without \"use memo\" (#20811)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "55dd01612efc51e19de479da5a0e348cbe2521e3",
@@ -12336,9 +12290,9 @@
     {
       "upstreamSha": "57a66608b918d673eeec7e6c94ea5906b756fcd0",
       "subject": "fix(pull-requests): align checkout control with author (#9196)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pull-requests): align checkout control with author.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(pull-requests): align checkout control with author (#9196)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -12593,9 +12547,9 @@
     {
       "upstreamSha": "599c9776eb887d4fff42da7d2daf8aa07ee9a9e2",
       "subject": "fix(web): align pull request state glyph to top of row (#11268)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): align pull request state glyph to top of row.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): align pull request state glyph to top of row (#11268)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -12643,9 +12597,9 @@
     {
       "upstreamSha": "5a39013313a7e6e9d6fbeeb915b8c176ea3dd126",
       "subject": "fix(web): share touch-visible pull request edit actions (#12370)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): share touch-visible pull request edit actions.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): share touch-visible pull request edit actions (#12370)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -12754,10 +12708,9 @@
     {
       "upstreamSha": "5abf7bf6327f13ee32558a756cef0991e85146f2",
       "subject": "perf(web): pull request review annotations compile with the React Compiler (#20493)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request review annotations compile with the React Compiler (#20493).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request review annotations compile with the React Compiler (#20493)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5afe18eaf9d20c1633b4ec9177c6c9309a8f3d99",
@@ -12932,10 +12885,9 @@
     {
       "upstreamSha": "5c5dcbc60b35aae59cbc554231afa9f2c04ad2ce",
       "subject": "perf(web): the pull requests page compiles with the React Compiler (#20539)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull requests page compiles with the React Compiler (#20539).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull requests page compiles with the React Compiler (#20539)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "5c5fa5ffb6ab45cadb6f0d873af0242f4f6d2c1c",
@@ -13002,9 +12954,9 @@
     {
       "upstreamSha": "5cc369b7eb882dbea8d5ad21ba688c73a0058748",
       "subject": "fix(pull-requests): refresh data after thread turns (#9496)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pull-requests): refresh data after thread turns.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's PullRequestSyncReactor. Upstream change: fix(pull-requests): refresh data after thread turns (#9496)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -13136,10 +13088,11 @@
     {
       "upstreamSha": "5da55957d48dbd79c1a05b72bdf2479ae0956b1c",
       "subject": "feat: save Bitbucket credentials from Source Control settings (#14103)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat: save Bitbucket credentials from Source Control settings (#14103).",
+      "reason": "Equivalent: upstream saves Bitbucket credentials from its settings. F5 saves Bitbucket Cloud credentials from the PR hub accounts view. Upstream change: feat: save Bitbucket credentials from Source Control settings (#14103)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"],
+      "evidence": ["apps/web/src/components/prHub/PrAccounts.tsx:14"]
     },
     {
       "upstreamSha": "5dcb59ed6c191589e730fb964aabad005466eb6d",
@@ -13456,10 +13409,11 @@
     {
       "upstreamSha": "6053a7878d24e5fd596d2b417ed94964a4b9c1c6",
       "subject": "fix(web): PR file stats ignore the hide-whitespace toggle (#16162)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR file stats ignore the hide-whitespace toggle (#16162).",
+      "reason": "Equivalent: upstream keeps PR file stats independent of the whitespace toggle. F5's file stats come from the forge, not the filtered patch. Upstream change: fix(web): PR file stats ignore the hide-whitespace toggle (#16162)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"],
+      "evidence": ["apps/web/src/components/prHub/PrFilesTab.tsx:220"]
     },
     {
       "upstreamSha": "605c2bb734bbebed0b19fc1ff6b514f41bd3659b",
@@ -13492,10 +13446,9 @@
     {
       "upstreamSha": "60cb7d180d9ebdd1010460ccd94cdfad1ec83042",
       "subject": "fix(web): unresolved pull request links use the compact link tooltip (#14243)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): unresolved pull request links use the compact link tooltip (#14243).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): unresolved pull request links use the compact link tooltip (#14243)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "60cef47ec983637ddc68faed7b1488b6f3c3a175",
@@ -13521,9 +13474,9 @@
     {
       "upstreamSha": "60eff99f25dbfc9799043ad979537e2da1aea590",
       "subject": "fix(web): save PR body edits with Cmd/Ctrl+Enter (#10660)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): save PR body edits with Cmd/Ctrl+Enter.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. F5 PR edits run through ForgeOperationPanel's preview and confirm step (apps/web/src/components/prHub/ForgeControls.tsx:174), so there is no one-key save. Upstream change: fix(web): save PR body edits with Cmd/Ctrl+Enter (#10660)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -14019,9 +13972,9 @@
     {
       "upstreamSha": "645d58547d282eb2aaf6c48e5907625fc112386a",
       "subject": "fix(web): prioritize authored pull requests (#9453)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): prioritize authored pull requests.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): prioritize authored pull requests (#9453)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -14072,10 +14025,9 @@
     {
       "upstreamSha": "64b16d83a2a91eb07570cb2556861f5ccda01c0a",
       "subject": "refactor(web): the open panel pull request URL keeps its caching without \"use memo\" (#20768)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the open panel pull request URL keeps its caching without \"use memo\" (#20768).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the open panel pull request URL keeps its caching without \"use memo\" (#20768)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "64bf0161919ec0e41470af3304928d9fc8711bf4",
@@ -14130,10 +14082,9 @@
     {
       "upstreamSha": "6530de0339d2ca49957d0039133c49e3a08557f7",
       "subject": "perf(server): pull request sync reads only threads with linked pull requests (#13704)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(server): pull request sync reads only threads with linked pull requests (#13704).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's PullRequestSyncReactor. Upstream change: perf(server): pull request sync reads only threads with linked pull requests (#13704)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "65404eb75de9233c9d1068ddfd09bacfc3b0465b",
@@ -14633,9 +14584,9 @@
     {
       "upstreamSha": "692eb1a5792b9930959b19805acf2bf2611318c9",
       "subject": "fix(web): sync sidebar PR state from open panel (#9092)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): sync sidebar PR state from open panel.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): sync sidebar PR state from open panel (#9092)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -14670,9 +14621,9 @@
     {
       "upstreamSha": "6975efd3dd52c95dd978ff26f591139d8c5c2503",
       "subject": "fix(web): the pull request badge reads at the meta size again (#13175)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): the pull request badge reads at the meta size again.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): the pull request badge reads at the meta size again (#13175)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -14741,9 +14692,9 @@
     {
       "upstreamSha": "6a2d2466673c010a15cb530fa2a8f77b363e046d",
       "subject": "fix(pr): update labels and reviewers without redundant reloads (#11117)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pr): update labels and reviewers without redundant reloads.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(pr): update labels and reviewers without redundant reloads (#11117)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -14791,9 +14742,9 @@
     {
       "upstreamSha": "6a699f0f2fbd8847d7ec2df8d9245ce8c2eb8707",
       "subject": "fix(web): stabilize pull request loading layout (#12721)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): stabilize pull request loading layout.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): stabilize pull request loading layout (#12721)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -15202,10 +15153,9 @@
     {
       "upstreamSha": "6d5ea190a4a54b01dfe6500e032526839e3258d1",
       "subject": "fix(server): thread PR badges catch up when another environment reads the PR (#17729)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): thread PR badges catch up when another environment reads the PR (#17729).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix(server): thread PR badges catch up when another environment reads the PR (#17729)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6d68677ff90915c17de06d78bb498d41a1adfe6a",
@@ -15566,10 +15516,9 @@
     {
       "upstreamSha": "6f8e2534f2d935e6befa7353a003c4b59fe66f6f",
       "subject": "perf(ci): run PR checks side by side and balance server shards (#14025)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(ci): run PR checks side by side and balance server shards (#14025).",
+      "reason": "Not applicable: upstream CI and release pipeline changes. F5 does not use T3's pipeline. Upstream change: perf(ci): run PR checks side by side and balance server shards (#14025)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "6f97b0f66a51fbafabd54a5616da8827ebdf6020",
@@ -15662,9 +15611,9 @@
     {
       "upstreamSha": "706231535ceac8618712913dfdc4a058c2ffb0d8",
       "subject": "fix(web): match composer pull request state icons (#9375)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): match composer pull request state icons.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): match composer pull request state icons (#9375)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -15677,9 +15626,9 @@
     {
       "upstreamSha": "7068e86f76e908c77ff04d1a684840257eab3a8a",
       "subject": "fix(web): open GitHub pull requests in browser when loading fails (#8507)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): open GitHub pull requests in browser when loading fails.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): open GitHub pull requests in browser when loading fails (#8507)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -16346,9 +16295,9 @@
     {
       "upstreamSha": "7445aa733ada33e45289e5aa5055f79142556513",
       "subject": "fix(web): align menu item icons in pull request detail panel (#11263)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): align menu item icons in pull request detail panel.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): align menu item icons in pull request detail panel (#11263)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -16604,10 +16553,9 @@
     {
       "upstreamSha": "75fca7d77cd4a5f72167606f248131edb633bb50",
       "subject": "fix(web): scope PR title collapse to tab scrollers (#14644)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): scope PR title collapse to tab scrollers (#14644).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): scope PR title collapse to tab scrollers (#14644)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7609495bf70a51dd4d8608e3f71da636a7348aa6",
@@ -16840,10 +16788,9 @@
     {
       "upstreamSha": "7812230572f2d7e042d8d14ada2381fc71377560",
       "subject": "fix(server): subagents no longer inherit parent pull-request links (#14918)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): subagents no longer inherit parent pull-request links (#14918).",
+      "reason": "Not applicable: F5 sets a thread's PR link only from an explicit create or meta-update command (apps/server/src/orchestration/decider.ts:664), so nothing inherits one. Upstream change: fix(server): subagents no longer inherit parent pull-request links (#14918)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "781f41ef1f6b5054e75f77237df9eba3b7f61cc9",
@@ -16890,10 +16837,9 @@
     {
       "upstreamSha": "7856908b8492b7a5c381aa2d5a5c4d4292eb976b",
       "subject": "fix(web): keep checkout stable while pr actions load (#16625)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): keep checkout stable while pr actions load (#16625).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): keep checkout stable while pr actions load (#16625)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "7873504964c3008ed2a87ada7be62d611e7a281a",
@@ -16978,10 +16924,9 @@
     {
       "upstreamSha": "78f8d38ebb8c7cabddc2a0c9f114d5aa27c95ab3",
       "subject": "refactor(web): pull request code tab keeps its caching without \"use memo\" (#20816)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): pull request code tab keeps its caching without \"use memo\" (#20816).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): pull request code tab keeps its caching without \"use memo\" (#20816)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "790be6d755026d61bd13a970dd77176c12ca0425",
@@ -17343,10 +17288,11 @@
     {
       "upstreamSha": "7bc161f8692dfb969489f40bf3eb5bd27bc01f10",
       "subject": "fix(web): links to issues no longer strand the pull request viewer (#14242)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): links to issues no longer strand the pull request viewer (#14242).",
+      "reason": "Equivalent: upstream stops issue links stranding its PR viewer. F5 opens only pull request URLs in its in-app preview; issue links open externally. Upstream change: fix(web): links to issues no longer strand the pull request viewer (#14242)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
+      "evidence": ["apps/web/src/components/prHub/PrMarkdown.tsx:53"]
     },
     {
       "upstreamSha": "7bc732804222946c0c9b23af057484e4412698fc",
@@ -17824,10 +17770,9 @@
     {
       "upstreamSha": "805b98e790762e06fe06cd34803e7d502997d138",
       "subject": "refactor(web): the pull requests page keeps its caching without \"use memo\" (#20820)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull requests page keeps its caching without \"use memo\" (#20820).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull requests page keeps its caching without \"use memo\" (#20820)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "80664d5266a1be8c5989bac352ee5e060bbbdf4a",
@@ -18187,10 +18132,9 @@
     {
       "upstreamSha": "82a99f731e7876ef8c6830c108a096f946e85603",
       "subject": "perf(web): the pull request state hooks compile without manual memoization (#20710)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request state hooks compile without manual memoization (#20710).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request state hooks compile without manual memoization (#20710)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "82b76e2138db7fcf8f8c1613184dc94777b2196e",
@@ -18403,10 +18347,9 @@
     {
       "upstreamSha": "843c593ab2dfe432abfba7b928292f3f8e9c7d44",
       "subject": "refactor(web): PR loading skeleton shares the detail panel's layout (#15583)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): PR loading skeleton shares the detail panel's layout (#15583).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: refactor(web): PR loading skeleton shares the detail panel's layout (#15583)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "844203d4fe5f82b4bfd24ff31655307bd201893b",
@@ -18426,9 +18369,9 @@
     {
       "upstreamSha": "8461c25ffd0a11dfb537b081ed8460283d04f033",
       "subject": "fix(web): disable linked pull requests when none are linked (#11348)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): disable linked pull requests when none are linked.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): disable linked pull requests when none are linked (#11348)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -18533,9 +18476,9 @@
     {
       "upstreamSha": "854541a04e07b7960698b381bcfd2fda73eb276c",
       "subject": "fix(pull-requests): shared state + not settling? (#9332)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pull-requests): shared state + not settling?.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5's thread settlement was triaged separately in 15c. Upstream change: fix(pull-requests): shared state + not settling? (#9332)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -18794,9 +18737,9 @@
     {
       "upstreamSha": "871192933fe0a501fd92a1ed3a5d317ba1eea9d3",
       "subject": "fix(web): show pointer cursors on pull request controls (#11283)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): show pointer cursors on pull request controls.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): show pointer cursors on pull request controls (#11283)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -19407,9 +19350,9 @@
     {
       "upstreamSha": "8c628f14993cb159d467e7a0f8c52578dde77005",
       "subject": "fix(web): align pull request action menu rows (#6534)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): align pull request action menu rows.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): align pull request action menu rows (#6534)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -19485,10 +19428,9 @@
     {
       "upstreamSha": "8d1858d9d608d78b67268cdc52bceb4302ae8870",
       "subject": "refactor(source-control): Bitbucket lives in @t3tools/source-control-bitbucket (#17597)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): Bitbucket lives in @t3tools/source-control-bitbucket (#17597).",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): Bitbucket lives in @t3tools/source-control-bitbucket (#17597)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "8d199b4f7b918079161d5f43e0146c099301be08",
@@ -19814,9 +19756,9 @@
     {
       "upstreamSha": "8eec78cf839a6ce507c085f0b4c42042831407c7",
       "subject": "fix(web): remove pr description reactions (#11361)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): remove pr description reactions.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): remove pr description reactions (#11361)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -20188,9 +20130,9 @@
     {
       "upstreamSha": "91c66ac43ddad4f8697887009746f4de11736cb9",
       "subject": "fix(web): center pull request link previews (#9794)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): center pull request link previews.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): center pull request link previews (#9794)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -20248,10 +20190,9 @@
     {
       "upstreamSha": "9220fd73bf2f222ea602b711fd71e7b44d4a2bfd",
       "subject": "perf(web): the pull request panel compiles with the React Compiler (#20526)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request panel compiles with the React Compiler (#20526).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request panel compiles with the React Compiler (#20526)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "922bd692251bc803c12a3fab159efe83c957bb70",
@@ -20325,10 +20266,9 @@
     {
       "upstreamSha": "9302235c5e9ba04d4152f6ebab7bd42bef9de1c6",
       "subject": "refactor(web): move the thread's linked pull request out of ChatView (#20308)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): move the thread's linked pull request out of ChatView (#20308).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: refactor(web): move the thread's linked pull request out of ChatView (#20308)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "930aec13da56f83c404bc00d92486b2409a5cac0",
@@ -20347,9 +20287,9 @@
     {
       "upstreamSha": "931d41f933b2536f699975412169f5318e6adad5",
       "subject": "fix(web): sort equally merge-ready pull requests by diff size (#9887)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): sort equally merge-ready pull requests by diff size.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. F5 orders pull requests by comparePrPriority instead. Upstream change: fix(web): sort equally merge-ready pull requests by diff size (#9887)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -20740,10 +20680,9 @@
     {
       "upstreamSha": "9554194e7e3587b7e08263ba42f869e57aca8d90",
       "subject": "refactor(web): pull request markdown keeps its caching without \"use memo\" hooks (#20744)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): pull request markdown keeps its caching without \"use memo\" hooks (#20744).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): pull request markdown keeps its caching without \"use memo\" hooks (#20744)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "955b787e6b9fb8666e84abfa6868671859d72f7e",
@@ -20821,9 +20760,9 @@
     {
       "upstreamSha": "962bf62921c0ecbc9320f9b071e16b1d41484aad",
       "subject": "fix(web): show author avatars in pull request previews (#12125)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): show author avatars in pull request previews.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): show author avatars in pull request previews (#12125)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -21095,10 +21034,9 @@
     {
       "upstreamSha": "98b5e1bef3c8d933d7ad826f837086a506a3732f",
       "subject": "fix(web): PR commit menu no longer stretches across the window (#15560)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR commit menu no longer stretches across the window (#15560).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR commit menu no longer stretches across the window (#15560)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "98bc998e73ad823cc15df6f110fedec10261a5bc",
@@ -21425,10 +21363,9 @@
     {
       "upstreamSha": "9ac8f33f1685d1d6e843b657829d0d7462a13813",
       "subject": "feat: choose the GitHub account per host, save a GitHub token, and fewer reads per PR action (#16322)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat: choose the GitHub account per host, save a GitHub token, and fewer reads per PR action (#16322).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5 profiles own their GitHub accounts. Upstream change: feat: choose the GitHub account per host, save a GitHub token, and fewer reads per PR action (#16322)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9accc567670da5096e9a694c1adb0d35adb51d9d",
@@ -21440,10 +21377,12 @@
     {
       "upstreamSha": "9ae9f2ba1f30e5fc14f69ba6dff6b08c7bfb401c",
       "subject": "fix(server): reject invalid explicit Bitbucket repositories (#15876)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): reject invalid explicit Bitbucket repositories (#15876).",
+      "reason": "Ported: an explicit Bitbucket repository that is not workspace/repository is refused before any request. Upstream change: fix(server): reject invalid explicit Bitbucket repositories (#15876)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "ported",
+      "plannedWorkstream": "12a",
+      "f5Shas": ["0ef61b3386813dc44967abddae384a5c1f85ac0f"],
+      "evidence": ["apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:515"]
     },
     {
       "upstreamSha": "9af5139f5974281a59f5cd62c11d918d62126313",
@@ -21476,10 +21415,9 @@
     {
       "upstreamSha": "9b150f791b8d3c8b284c3c701d2c1ef8aa14df45",
       "subject": "Add new GitHub user 'bompus' to VOUCHED.td",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: Add new GitHub user 'bompus' to VOUCHED.td.",
+      "reason": "Not applicable: upstream repository housekeeping (contributor lists). Upstream change: Add new GitHub user 'bompus' to VOUCHED.td",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9b2c03ee25321c16928eda74f4036f36f0b1afce",
@@ -22003,9 +21941,9 @@
     {
       "upstreamSha": "9f0c9f725d4553d34e3c91c13d67ebcc58be5b0f",
       "subject": "fix(web): reuse current PR status in the sidebar (#12545)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): reuse current PR status in the sidebar.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix(web): reuse current PR status in the sidebar (#12545)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -22066,10 +22004,9 @@
     {
       "upstreamSha": "9f70fcc7b584f74049e643dc6ae3104df197f4ca",
       "subject": "fix(prs): typed qualifiers filter mobile PR search and sync the draft menu (#19934)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(prs): typed qualifiers filter mobile PR search and sync the draft menu (#19934).",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: fix(prs): typed qualifiers filter mobile PR search and sync the draft menu (#19934)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "9f73ca3677faa975be00f0ac55460279671df726",
@@ -22142,9 +22079,9 @@
     {
       "upstreamSha": "9fdafdf114a88bd7309883b4578e74cbe786d04d",
       "subject": "feat(pull-requests): copy provider checkout commands (#9086)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(pull-requests): copy provider checkout commands.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: feat(pull-requests): copy provider checkout commands (#9086)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -22273,9 +22210,9 @@
     {
       "upstreamSha": "a0eb23993a3bacf96d618918f43ea18f2da72390",
       "subject": "fix(web): prioritize open panel pull request when copying (#9877)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): prioritize open panel pull request when copying.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): prioritize open panel pull request when copying (#9877)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -22471,10 +22408,9 @@
     {
       "upstreamSha": "a21ac5fb153e3bf418ccd2a4abef2787c241813c",
       "subject": "refactor(server): GitHub GraphQL batches use variables and share one pager (#16960)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub GraphQL batches use variables and share one pager (#16960).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(server): GitHub GraphQL batches use variables and share one pager (#16960)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a21b42cec478b093cdc50cc2105b5368ea8b3546",
@@ -22617,10 +22553,9 @@
     {
       "upstreamSha": "a3abb5266080c15b2a675d7f92b517b567c427e2",
       "subject": "fix(ci): pin eas-cli so mobile PR previews deploy again (#14659)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(ci): pin eas-cli so mobile PR previews deploy again (#14659).",
+      "reason": "Not applicable: upstream CI and release pipeline changes. F5 does not use T3's pipeline. Upstream change: fix(ci): pin eas-cli so mobile PR previews deploy again (#14659)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a3c4e9e9360d65225fb726ebfe460427a6874741",
@@ -22764,10 +22699,9 @@
     {
       "upstreamSha": "a4c9494b0e3606775cc5fc929fc138399288bd43",
       "subject": "fix(web): link pull requests to threads in folders that aren't Git repos (#15946)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): link pull requests to threads in folders that aren't Git repos (#15946).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The change is to upstream's LinkPullRequestDialog, which F5 does not have. Upstream change: fix(web): link pull requests to threads in folders that aren't Git repos (#15946)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a4cc1367b03ee0c1dc2b50fceac81ef5e63212e2",
@@ -23174,9 +23108,9 @@
     {
       "upstreamSha": "a850895f6833b99d90fc6c50192b5eaa4966d5c7",
       "subject": "feat(web): refresh pull request details (#7148)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): refresh pull request details.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): refresh pull request details (#7148)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -23261,10 +23195,9 @@
     {
       "upstreamSha": "a908a7ac8780c5b4d6fb0bed8945d640f69d2d1d",
       "subject": "fix(search): find threads by their branch PR number (#14658)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(search): find threads by their branch PR number (#14658).",
+      "reason": "Not applicable: F5's sidebar has no branch PR state. PR threads are titled \"PR #N: title\" (apps/web/src/components/prHub/prF5Thread.ts:222), so title search finds them. Upstream change: fix(search): find threads by their branch PR number (#14658)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a92161a05040c3fcaaa479f1b60d2d45cd368dd4",
@@ -23307,10 +23240,9 @@
     {
       "upstreamSha": "a97a4a9d189f145afe79c3a6f8533bbf9a6b40b1",
       "subject": "Update marketing stats for GitHub stars and users",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: Update marketing stats for GitHub stars and users.",
+      "reason": "Not applicable: upstream marketing site stats. Upstream change: Update marketing stats for GitHub stars and users",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a98dad77e15ef37d7fd6fc21e73434527a1fb21d",
@@ -23322,9 +23254,9 @@
     {
       "upstreamSha": "a9ab9049bbbab89fe23dcfb26c3169ef70a0597e",
       "subject": "feat(web): show the pull request refresh spinning in the detail header (#12833)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): show the pull request refresh spinning in the detail header.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): show the pull request refresh spinning in the detail header (#12833)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -23337,18 +23269,16 @@
     {
       "upstreamSha": "a9c0bb672904c70ea2190cdf7a5bdb27cefda87e",
       "subject": "perf(web): the pull request stack hook compiles without manual memoization (#20620)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request stack hook compiles without manual memoization (#20620).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request stack hook compiles without manual memoization (#20620)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a9c9c7cdb15e695ce72c4afc55fde93f994f6134",
       "subject": "fix(shared): PRs built on the same PR stay in one stack under their parent (#20160)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(shared): PRs built on the same PR stay in one stack under their parent (#20160).",
+      "reason": "Not applicable: F5 reads GitHub's own stack layers (apps/server/src/prHub/githubStacks.ts:9) instead of inferring stacks from branch bases. Upstream change: fix(shared): PRs built on the same PR stay in one stack under their parent (#20160)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a9caf7b7089afb6f1b3b888ea404b75b8f9e88e1",
@@ -23470,10 +23400,9 @@
     {
       "upstreamSha": "aa8c6662e212a4307bd4e585661da99a358e46d4",
       "subject": "fix(web): pr merge actions stay visible while the stack refreshes (#17559)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): pr merge actions stay visible while the stack refreshes (#17559).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): pr merge actions stay visible while the stack refreshes (#17559)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "aab4049646ffa8b9bcff92562992e6c3a8554bf0",
@@ -23900,9 +23829,9 @@
     {
       "upstreamSha": "addfb1390eea5e850fb5e235525f9eb6c4ade100",
       "subject": "fix(web): restore pr list diff counts to the top right (#10609)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): restore pr list diff counts to the top right.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): restore pr list diff counts to the top right (#10609)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -24351,9 +24280,9 @@
     {
       "upstreamSha": "b1e223e2b0d87124883b1410ab52dd6a1338e40d",
       "subject": "perf(server): avoid workspace scans when loading pull requests (#11299)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: perf(server): avoid workspace scans when loading pull requests.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: perf(server): avoid workspace scans when loading pull requests (#11299)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -24421,10 +24350,9 @@
     {
       "upstreamSha": "b24f0fbba09d8623c896081b4ff70aa7190c8fda",
       "subject": "fix(web): PR timeline no longer shifts when its scrollbar appears (#15588)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR timeline no longer shifts when its scrollbar appears (#15588).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR timeline no longer shifts when its scrollbar appears (#15588)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b2577d6eface9589d120bdc53e4ec0431b1e9331",
@@ -24612,10 +24540,9 @@
     {
       "upstreamSha": "b3d05640a4670bd34ec4950d2a60f0616dea6780",
       "subject": "refactor(web): the thread pull requests panel keeps its caching without \"use memo\" hooks (#20740)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the thread pull requests panel keeps its caching without \"use memo\" hooks (#20740).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the thread pull requests panel keeps its caching without \"use memo\" hooks (#20740)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b3de243d5ed44783c4e7990d8e63cb519d390a03",
@@ -24642,9 +24569,9 @@
     {
       "upstreamSha": "b3ed07fb39fb795b9d2c74644e4b0a7f12392ad5",
       "subject": "feat(web): add PR page selections to new draft threads (#11296)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): add PR page selections to new draft threads.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): add PR page selections to new draft threads (#11296)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -25190,10 +25117,9 @@
     {
       "upstreamSha": "b821fa04f1b9fe9c6fdb8d19ab7e4197b94c934b",
       "subject": "fix(server): resolve configured PR bases to branch names (#18754)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): resolve configured PR bases to branch names (#18754).",
+      "reason": "Not applicable: upstream repairs PR bases that older worktree handoffs recorded as checkout revisions. F5 records only the upstream branch name as gh-merge-base (apps/server/src/git/Layers/GitCore.ts:1742). Upstream change: fix(server): resolve configured PR bases to branch names (#18754)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b822420e5074d750e7258ea48568666720cf0415",
@@ -25446,9 +25372,9 @@
     {
       "upstreamSha": "ba30177b5a5e9b47885b59afcc4f00a8a7cc0efd",
       "subject": "fix(server): preserve merged PR badges after branch deletion (#6216)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): preserve merged PR badges after branch deletion.",
+      "reason": "Not applicable: upstream skips the PR lookup for branches it thinks were never published. F5's GitManager has no such shortcut, so a deleted remote branch cannot hide a merged PR. Upstream change: fix(server): preserve merged PR badges after branch deletion (#6216)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -25481,10 +25407,9 @@
     {
       "upstreamSha": "ba3e228d96384976ef4abbaf4855864cb923dcbd",
       "subject": "perf(web): pull request thread links compile with the React Compiler (#20494)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request thread links compile with the React Compiler (#20494).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request thread links compile with the React Compiler (#20494)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ba46f922a271942d42faf305ff833af89cb5c3a1",
@@ -25524,10 +25449,9 @@
     {
       "upstreamSha": "ba9e9f5736364d029866110f0199769a4e721c56",
       "subject": "refactor(web): the pull request code tab keeps its caching with one \"use memo\" hook (#20773)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request code tab keeps its caching with one \"use memo\" hook (#20773).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request code tab keeps its caching with one \"use memo\" hook (#20773)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "baaeda305c60933e5e573b30807ecfc3a0871a80",
@@ -25584,10 +25508,9 @@
     {
       "upstreamSha": "bb30390933ebcc6a2f50bb153ffc155e76d655fa",
       "subject": "perf(web): pull request code tab compiles, with viewed toggles read through context (#20471)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request code tab compiles, with viewed toggles read through context (#20471).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request code tab compiles, with viewed toggles read through context (#20471)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "bb38c3320d0a4eec4e9097fdc400970d881ff559",
@@ -25822,10 +25745,9 @@
     {
       "upstreamSha": "bcd3c12f4683effe78a580ac9c271d104a85c975",
       "subject": "refactor(web): linked pull request status keeps its caching without \"use memo\" hooks (#20781)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): linked pull request status keeps its caching without \"use memo\" hooks (#20781).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): linked pull request status keeps its caching without \"use memo\" hooks (#20781)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "bce680926d38915f3590242c0d1a4309e7ca1b9a",
@@ -26148,10 +26070,9 @@
     {
       "upstreamSha": "bf725cb80d79334601c2833cb599524a3669e03b",
       "subject": "fix(server): GitLab merge requests can expand unchanged lines (#17528)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): GitLab merge requests can expand unchanged lines (#17528).",
+      "reason": "Not applicable: F5 forge diffs have no expand-unchanged-lines action. Upstream change: fix(server): GitLab merge requests can expand unchanged lines (#17528)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "bf8ffe81a63c82d3de5fbaa9991fd5f30034a452",
@@ -26203,10 +26124,9 @@
     {
       "upstreamSha": "bfe40e6d2574447b0651bdb41337db743ddbe12c",
       "subject": "fix(server): the PR cache sweep only removes real entry files (#16285)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): the PR cache sweep only removes real entry files (#16285).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5 has no on-disk PR read cache. Upstream change: fix(server): the PR cache sweep only removes real entry files (#16285)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "bfe804d319555eb63daf3873b6af348525ddc50b",
@@ -26472,9 +26392,9 @@
     {
       "upstreamSha": "c12ba7581ac00ba2a623ad23283da5d03d34c2d8",
       "subject": "feat(web): make pull request comments easier to scan (#12150)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): make pull request comments easier to scan.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): make pull request comments easier to scan (#12150)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -26861,10 +26781,9 @@
     {
       "upstreamSha": "c3a36af8728c8a25933cb5fd46c7a6426ed5e49d",
       "subject": "refactor(github): all GitHub GraphQL on effect/graphql, one request policy for REST and GraphQL (#19224)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(github): all GitHub GraphQL on effect/graphql, one request policy for REST and GraphQL (#19224).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(github): all GitHub GraphQL on effect/graphql, one request policy for REST and GraphQL (#19224)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "c3b8825bf476cbce5e061c0f99570cf1f6723b89",
@@ -27303,9 +27222,9 @@
     {
       "upstreamSha": "c7e6d711d3f2982e54854258987509e8f69b31cd",
       "subject": "feat(web): make review verdicts legible in the pull request detail (#7077)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): make review verdicts legible in the pull request detail.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): make review verdicts legible in the pull request detail (#7077)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -27402,10 +27321,11 @@
     {
       "upstreamSha": "c899a0c06ab2b0ec8fe8d6a497bb345ac72a5e5e",
       "subject": "fix(azure-devops): list pull requests with token sign-in and check out into worktrees (#17725)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(azure-devops): list pull requests with token sign-in and check out into worktrees (#17725).",
+      "reason": "Equivalent: upstream checks out Azure DevOps PRs by head branch when there is no pull ref, and lists them with token sign-in. F5 fetches same-repository forge PRs other than GitHub by head branch, and its forge adapters list PRs with the saved token. Upstream change: fix(azure-devops): list pull requests with token sign-in and check out into worktrees (#17725)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"],
+      "evidence": ["apps/server/src/git/Layers/GitManager.ts:658"]
     },
     {
       "upstreamSha": "c89e3e12a41e13e09e0103d08a41d0688a99fb49",
@@ -27699,10 +27619,9 @@
     {
       "upstreamSha": "ca952677321abf9f3762ae4bb0129454e5a63955",
       "subject": "fix(server): finished outbox rows and old PR cache files are pruned (#16247)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): finished outbox rows and old PR cache files are pruned (#16247).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5 has no orchestration-v2 outbox or on-disk PR cache. Upstream change: fix(server): finished outbox rows and old PR cache files are pruned (#16247)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "caa8a0db98f9d32e98a1645caa7f7dd37b14f187",
@@ -27723,9 +27642,9 @@
     {
       "upstreamSha": "caab2fdbac041ac2e851ad4fa3ac4a40a1d4a8f6",
       "subject": "fix(web): render draft PRs in gray (#9537)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): render draft PRs in gray.",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: fix(web): render draft PRs in gray (#9537)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -27795,10 +27714,9 @@
     {
       "upstreamSha": "cb1a3f34670b06148d88806a9534772879c30ecd",
       "subject": "fix(web): show repository names on linked pull requests (#13061)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): show repository names on linked pull requests (#13061).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): show repository names on linked pull requests (#13061)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cb293fe790fef3acba6220404f30c1665cde5fdb",
@@ -28124,9 +28042,9 @@
     {
       "upstreamSha": "cde12790d721ab2a90471750fd75d9f5bf13f57d",
       "subject": "fix(contracts): accept legacy pull request checkout results (#8238)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(contracts): accept legacy pull request checkout results.",
+      "reason": "Not applicable: upstream accepts its own legacy checkout result shape. Upstream change: fix(contracts): accept legacy pull request checkout results (#8238)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -28146,10 +28064,9 @@
     {
       "upstreamSha": "ce29ba9cd774ae996d51ca444d1e0165e5d7d527",
       "subject": "perf(web): the pull request link hooks compile without manual memoization (#20705)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request link hooks compile without manual memoization (#20705).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request link hooks compile without manual memoization (#20705)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ce467da9cfae3d7952ce13a9e2450e2908e9f224",
@@ -28169,10 +28086,9 @@
     {
       "upstreamSha": "ce6f8ce36e240d1c615e2130fc017652cbc1ec58",
       "subject": "fix(pr): keep known state in sync across controls (#18408)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(pr): keep known state in sync across controls (#18408).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(pr): keep known state in sync across controls (#18408)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ce71c04f0aa9d2e5cd340e2a04cb1b0d5e24419d",
@@ -28248,17 +28164,16 @@
     {
       "upstreamSha": "ced865c224ebb7dd2cbd0f2931d6e33559b9343a",
       "subject": "fix(web): PR checks status collapses to its icon instead of wrapping (#14700)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR checks status collapses to its icon instead of wrapping (#14700).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR checks status collapses to its icon instead of wrapping (#14700)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cefec32d6fc5d14f03e110ebdde534bdbcc9b62b",
       "subject": "fix(web): prevent pull request metadata overlap (#8790)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): prevent pull request metadata overlap.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): prevent pull request metadata overlap (#8790)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -28468,10 +28383,9 @@
     {
       "upstreamSha": "d07a07f33c0a1b317dea6234636976231c3688b5",
       "subject": "feat(mobile): keep pull requests available offline (#18351)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(mobile): keep pull requests available offline (#18351).",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: feat(mobile): keep pull requests available offline (#18351)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d07ffbe351a10e1001f6d8eafa5b7533b8bd7e23",
@@ -28602,9 +28516,9 @@
     {
       "upstreamSha": "d115a96763b76d00f06b06272688cf68eebe8206",
       "subject": "fix(web): stop empty diffs replacing pull requests (#9753)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): stop empty diffs replacing pull requests.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): stop empty diffs replacing pull requests (#9753)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -28718,10 +28632,9 @@
     {
       "upstreamSha": "d2213c8be56a913fcbe5e535d1b6b526b2d316b0",
       "subject": "perf(web): the pull request guide tab compiles without manual memoization (#20716)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request guide tab compiles without manual memoization (#20716).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request guide tab compiles without manual memoization (#20716)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d22709f759ced90b0ae7b7cb73d7ad22c2ce962b",
@@ -28771,9 +28684,9 @@
     {
       "upstreamSha": "d29c56a5c404cb0f58d3b2ac41762fa0d0ac28d4",
       "subject": "fix(server): resolve project identity before legacy pr relinks (#11045)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): resolve project identity before legacy pr relinks.",
+      "reason": "Not applicable: upstream fixes its legacy PR relinks, which F5 does not have. Upstream change: fix(server): resolve project identity before legacy pr relinks (#11045)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -28816,10 +28729,9 @@
     {
       "upstreamSha": "d2c9281b8112dc3b2991642c4bdb985e4b08b9bb",
       "subject": "fix(web): pull request badge sits on the sidebar row's baseline (#14007)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): pull request badge sits on the sidebar row's baseline (#14007).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): pull request badge sits on the sidebar row's baseline (#14007)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d2d40b6c1aa2464b38357d52b7f991cfb422a669",
@@ -28891,9 +28803,9 @@
     {
       "upstreamSha": "d35c71d1b975660ec6a71bbceb6aa7dfd0e8c3d5",
       "subject": "feat(web): add pull request list filters (#8809)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): add pull request list filters.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): add pull request list filters (#8809)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -29106,10 +29018,9 @@
     {
       "upstreamSha": "d5139979d427d94d71714e9e59bca1b47832c9a7",
       "subject": "perf(web): virtualize a thread's linked pull requests (#20107)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): virtualize a thread's linked pull requests (#20107).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: perf(web): virtualize a thread's linked pull requests (#20107)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d514a8c6176ace9057dc8c7619f0b5f0d81d1bd0",
@@ -29138,9 +29049,9 @@
     {
       "upstreamSha": "d5465aebf2746b8d5f327be3b2424d9412a29075",
       "subject": "fix(web): retain terminal PR badges after checkout switch (#4755)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): retain terminal PR badges after checkout switch.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): retain terminal PR badges after checkout switch (#4755)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -29237,9 +29148,9 @@
     {
       "upstreamSha": "d612d12b8bb278af97b0029f8d48b2403a5f9ee6",
       "subject": "fix(web): reuse cached GitHub PR details across entry points (#12168)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): reuse cached GitHub PR details across entry points.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): reuse cached GitHub PR details across entry points (#12168)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -29313,10 +29224,9 @@
     {
       "upstreamSha": "d6df197b438a858dc9a0dd3ff1a671e7fc27b572",
       "subject": "perf(web): the pull request thread dialog compiles without manual memoization (#20615)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request thread dialog compiles without manual memoization (#20615).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request thread dialog compiles without manual memoization (#20615)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d6e29dc9dee943b34d6b0d11441fa944c7bff7c9",
@@ -29370,10 +29280,9 @@
     {
       "upstreamSha": "d720210996a514368ba99f4860063110033d93fa",
       "subject": "refactor(server): GitHub rate limits read the response headers (#16986)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub rate limits read the response headers (#16986).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(server): GitHub rate limits read the response headers (#16986)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d765d03cb7f980794c409c38e6ea5e25d89fde33",
@@ -29427,10 +29336,9 @@
     {
       "upstreamSha": "d793dddd7ae562e469b4e4390d153bf0ddb0802d",
       "subject": "perf(web): the link pull request dialog compiles with the React Compiler (#20495)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the link pull request dialog compiles with the React Compiler (#20495).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the link pull request dialog compiles with the React Compiler (#20495)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d7950ac153c6fdd788ef63699a5d061243bb4997",
@@ -29475,9 +29383,9 @@
     {
       "upstreamSha": "d7c71f91d61e68ae35fcc0032847cb42324a8b51",
       "subject": "feat(web): float the pull request comment composer (#11531)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): float the pull request comment composer.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: feat(web): float the pull request comment composer (#11531)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -29588,9 +29496,9 @@
     {
       "upstreamSha": "d897641d738c67dd7c12cbb3a273b43fe17a5eb1",
       "subject": "fix(pull-requests): keep cached PR chrome on reopen (#9294)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pull-requests): keep cached PR chrome on reopen.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix(pull-requests): keep cached PR chrome on reopen (#9294)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -29707,10 +29615,9 @@
     {
       "upstreamSha": "d94ea2c47f415202653ddfb7176ed8cf7c5497da",
       "subject": "perf(web): the PR guide diff loader compiles with the React Compiler (#20543)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the PR guide diff loader compiles with the React Compiler (#20543).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the PR guide diff loader compiles with the React Compiler (#20543)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "d94fbda344398bd266b9f6645e531eb17d3c9e4e",
@@ -29739,9 +29646,9 @@
     {
       "upstreamSha": "d99bc5a4d707df2506e60cbb411b8d30022bbf89",
       "subject": "feat(web): sort pull requests by what is blocked on me (#12508)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: feat(web): sort pull requests by what is blocked on me.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. F5 buckets pull requests by attention (comparePrPriority) instead of a sort mode. Upstream change: feat(web): sort pull requests by what is blocked on me (#12508)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -29902,10 +29809,11 @@
     {
       "upstreamSha": "dacd2cb649eea06a00244bd181eb400735e923d5",
       "subject": "fix(source-control): stop Forgejo status refresh from scanning every pull request (#12223)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(source-control): stop Forgejo status refresh from scanning every pull request (#12223).",
+      "reason": "Equivalent: upstream filters Forgejo branch lookups by head. F5's Forgejo lookup already passes head=. Upstream change: fix(source-control): stop Forgejo status refresh from scanning every pull request (#12223)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
+      "evidence": ["apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1087"]
     },
     {
       "upstreamSha": "dadba6d95d2c4515956a6c7fef184378987e13b7",
@@ -30146,10 +30054,9 @@
     {
       "upstreamSha": "dcbaf05279984187b96c99edc2416abf91e77b96",
       "subject": "perf(server): idle status polls and PR sweeps start fewer git processes (#16272)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(server): idle status polls and PR sweeps start fewer git processes (#16272).",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's VcsDriverRegistry. Upstream change: perf(server): idle status polls and PR sweeps start fewer git processes (#16272)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "dcdb0348e4091ebdc69c8ebfaa8537aa319b3c9a",
@@ -30232,9 +30139,9 @@
     {
       "upstreamSha": "dd6879ffea24da9fc16cb62d7d6072d2c5b2bae3",
       "subject": "fix(pull-requests): reuse github api reads (#9176)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(pull-requests): reuse github api reads.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix(pull-requests): reuse github api reads (#9176)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -30472,10 +30379,9 @@
     {
       "upstreamSha": "de9756a4fc3388e5257c5f188bd3f0cdcedd9e60",
       "subject": "perf(web): the open panel pull request URL hook compiles without manual memoization (#20679)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the open panel pull request URL hook compiles without manual memoization (#20679).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the open panel pull request URL hook compiles without manual memoization (#20679)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "deb901d6381e0c86ef326946c8fb45ee323db708",
@@ -30531,10 +30437,9 @@
     {
       "upstreamSha": "df26ef99859ac757409f5332b185a89cc7f40267",
       "subject": "fix(web): a numeric q in the pull requests URL no longer crashes the page (#18666)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): a numeric q in the pull requests URL no longer crashes the page (#18666).",
+      "reason": "Not applicable: F5's PR search is local state, not a URL parameter. Upstream change: fix(web): a numeric q in the pull requests URL no longer crashes the page (#18666)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "df2f1273e9e1f1c6f342eecbf3539a5e992163e1",
@@ -30553,9 +30458,9 @@
     {
       "upstreamSha": "df466c79810046d20c0f3ccc4e51709c5703814e",
       "subject": "fix(web): fall back when pull request avatars fail (#11728)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): fall back when pull request avatars fail.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. F5's PR hub shows no avatars. Upstream change: fix(web): fall back when pull request avatars fail (#11728)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -30610,10 +30515,11 @@
     {
       "upstreamSha": "df8df0d53b39bfd6a5d8d69fabade19bd668e0a5",
       "subject": "fix(server): bound Bitbucket API requests with 30s timeout (#14140)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): bound Bitbucket API requests with 30s timeout (#14140).",
+      "reason": "Equivalent: upstream bounds Bitbucket requests with a 30-second timeout. Every F5 forge request, Bitbucket included, times out after 30 seconds. Upstream change: fix(server): bound Bitbucket API requests with 30s timeout (#14140)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["57c1f66f615d8b4e8150d592b46ca4001974d41a"],
+      "evidence": ["apps/server/src/sourceControl/ForgeSourceControlProvider.ts:342"]
     },
     {
       "upstreamSha": "df8e0eb46bca3dc01c17cc74a53b19aaacbe252b",
@@ -30791,9 +30697,9 @@
     {
       "upstreamSha": "e0adcc8a24db604c522282edea2823e3ef7a2bc6",
       "subject": "fix(server): capture checkpoints before refreshing PR status (#10347)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): capture checkpoints before refreshing PR status.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream refreshes PR status from its CheckpointReactor; F5 does not. Upstream change: fix(server): capture checkpoints before refreshing PR status (#10347)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -31028,9 +30934,9 @@
     {
       "upstreamSha": "e26af33b228792bb72349ca4e849a96381578a57",
       "subject": "fix(web): keep PR panel actions in the current thread (#12320)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): keep PR panel actions in the current thread.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): keep PR panel actions in the current thread (#12320)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -31238,10 +31144,9 @@
     {
       "upstreamSha": "e407f9bb090d0cec231df21ad30e9e13186d9518",
       "subject": "fix(ci): shard release tests like pull request CI (#13321)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(ci): shard release tests like pull request CI (#13321).",
+      "reason": "Not applicable: upstream CI and release pipeline changes. F5 does not use T3's pipeline. Upstream change: fix(ci): shard release tests like pull request CI (#13321)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e408cac0d7d903ccfcecfb906d4e48292294ab55",
@@ -31412,9 +31317,9 @@
     {
       "upstreamSha": "e5a87e8b9ca9db21e0291ddbd54438c5fe56b277",
       "subject": "fix(web): deduplicate PR project filter choices (#9948)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): deduplicate PR project filter choices.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): deduplicate PR project filter choices (#9948)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -31734,9 +31639,9 @@
     {
       "upstreamSha": "e784975bbec7c54ed75fc6da3d4ffd4038fae041",
       "subject": "fix(ui): simplify multiple linked pull request badges (#11104)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(ui): simplify multiple linked pull request badges.",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: fix(ui): simplify multiple linked pull request badges (#11104)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -31821,9 +31726,9 @@
     {
       "upstreamSha": "e84f23a97d587e0e58215f1fba2eab12717bec28",
       "subject": "fix(web): speed up PR previews with fewer GitHub requests (#11825)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): speed up PR previews with fewer GitHub requests.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix(web): speed up PR previews with fewer GitHub requests (#11825)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -31954,17 +31859,12 @@
     {
       "upstreamSha": "e9c4775e8738381140af4e5248507b15fc1cd491",
       "subject": "fix(web): mark pull request links as external (#8856)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): mark pull request links as external.",
+      "reason": "Equivalent: upstream marks PR links as external. F5's PR detail links render through OpenLinkAnchor with target=_blank. Upstream change: fix(web): mark pull request links as external (#8856)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": ["5c1905c433673b48aa152789b2a98cda20cdb090"],
+      "evidence": ["apps/web/src/components/prHub/PrDetailPanel.tsx:322"]
     },
     {
       "upstreamSha": "e9db39ce05c706122bb747fd5e7e70e1aac78935",
@@ -32018,9 +31918,9 @@
     {
       "upstreamSha": "ea2983afbbcd5ad6ee2e7db80c2a9270ff4964a9",
       "subject": "fix(web): copy selected pull request link from PR page (#10615)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): copy selected pull request link from PR page.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): copy selected pull request link from PR page (#10615)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -32215,10 +32115,9 @@
     {
       "upstreamSha": "eb459b5afaf42621a6cb2e698715fa017e26e5d7",
       "subject": "refactor(source-control): GitLab lives in @t3tools/source-control-gitlab (#17594)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): GitLab lives in @t3tools/source-control-gitlab (#17594).",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): GitLab lives in @t3tools/source-control-gitlab (#17594)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "eb6c170c42eaec20d063ce80ff810e97d4dddb37",
@@ -32268,9 +32167,9 @@
     {
       "upstreamSha": "ebb9b9fda03d33a81cad3ce7f4d1106adba3044b",
       "subject": "fix(client-runtime): refresh edited pull request comments (#8094)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(client-runtime): refresh edited pull request comments.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's client-runtime PR state. Upstream change: fix(client-runtime): refresh edited pull request comments (#8094)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -32297,10 +32196,9 @@
     {
       "upstreamSha": "ec1313c8f8333292506f05a355bb72d308a455d8",
       "subject": "fix(server): use workspace-scoped Bitbucket permissions API (#10984)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): use workspace-scoped Bitbucket permissions API (#10984).",
+      "reason": "Not applicable: F5's Bitbucket adapter never reads the repository permissions API. Upstream change: fix(server): use workspace-scoped Bitbucket permissions API (#10984)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ec141c125726ae70f31f392e780afa8de446fdc4",
@@ -32495,10 +32393,9 @@
     {
       "upstreamSha": "ed27eb724b4d7963b59de8fd2e51d6b877004163",
       "subject": "fix(web): PR code toolbar no longer overlaps in narrow panels (#15561)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR code toolbar no longer overlaps in narrow panels (#15561).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR code toolbar no longer overlaps in narrow panels (#15561)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ed2bdbb278c4fedf6ce79d4925908b759f7fd992",
@@ -32809,10 +32706,9 @@
     {
       "upstreamSha": "ef78932dc867d7ae836f0a37dc03bd2fb9d76ad9",
       "subject": "perf(web): GitHub account settings compile with the React Compiler (#20497)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): GitHub account settings compile with the React Compiler (#20497).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): GitHub account settings compile with the React Compiler (#20497)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ef84bc9873a6c4565fbeb64dce3f552570e95a2d",
@@ -33012,9 +32908,9 @@
     {
       "upstreamSha": "f0a0ead946ca3f3f310460a91b7dabb0e3fe4834",
       "subject": "fix(web): keep PR controls readable in narrow panels (#11962)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): keep PR controls readable in narrow panels.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): keep PR controls readable in narrow panels (#11962)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -33209,10 +33105,9 @@
     {
       "upstreamSha": "f1dccf2d1b59609f59d2458bdf0b153e0c430bb0",
       "subject": "perf(web): the pull request label and reviewer pickers compile without manual memoization (#20719)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request label and reviewer pickers compile without manual memoization (#20719).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request label and reviewer pickers compile without manual memoization (#20719)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f1dcd93931b322d587a7253856f44625a6afbce0",
@@ -33373,10 +33268,9 @@
     {
       "upstreamSha": "f29640d3e1369e08e35e4a7791f83ea652713cf4",
       "subject": "perf(web): the linked pull requests panel compiles without manual memoization (#20723)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the linked pull requests panel compiles without manual memoization (#20723).",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the linked pull requests panel compiles without manual memoization (#20723)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f2a914b8588bf3038472c14b129fbc5ddb3a2992",
@@ -33613,10 +33507,9 @@
     {
       "upstreamSha": "f43f6ddde06047d8d53da0abb355b41d703562ce",
       "subject": "fix(web): even 4px inset around rows in the PR badge tooltip (#18352)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): even 4px inset around rows in the PR badge tooltip (#18352).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): even 4px inset around rows in the PR badge tooltip (#18352)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f459165344bbe3072f2db185cf17afe1a29d840d",
@@ -33628,24 +33521,22 @@
     {
       "upstreamSha": "f45c6b4a755905485431872f4a4188de3ed05974",
       "subject": "fix(web): submit PR comments with Cmd/Ctrl+Enter (#11994)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): submit PR comments with Cmd/Ctrl+Enter.",
+      "reason": "Ported: Cmd/Ctrl+Enter prepares the timeline comment preview (a confirm step still follows) and posts a review thread reply. Upstream change: fix(web): submit PR comments with Cmd/Ctrl+Enter (#11994)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "12a",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": [
+        "e073f2654001c9c72cb7a8f78cbec5dc6bf58c85",
+        "4b9953405404c61670e56119a694e30b06cb641f"
+      ],
+      "evidence": ["apps/web/src/components/prHub/PrQuickReview.browser.tsx:97"]
     },
     {
       "upstreamSha": "f4600d77dd7c2fa9f10e8f4500882e427fcc7e26",
       "subject": "fix: reduce GitHub quota use with sharing enabled (#11888)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix: reduce GitHub quota use with sharing enabled.",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix: reduce GitHub quota use with sharing enabled (#11888)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -33986,10 +33877,9 @@
     {
       "upstreamSha": "f6e45028efb69d208a45aee8c2fa514adde44977",
       "subject": "refactor(source-control): Forgejo lives in @t3tools/source-control-forgejo (#17581)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): Forgejo lives in @t3tools/source-control-forgejo (#17581).",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): Forgejo lives in @t3tools/source-control-forgejo (#17581)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f6f2be32d8bc072e87753e41ad77c7c67e8b0b95",
@@ -34127,9 +34017,9 @@
     {
       "upstreamSha": "f814983c262b42bd79247bae377a709925c70d63",
       "subject": "fix(web): emphasize primary pull request actions (#11105)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(web): emphasize primary pull request actions.",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): emphasize primary pull request actions (#11105)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12a",
       "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
       "evidence": [
@@ -34265,10 +34155,9 @@
     {
       "upstreamSha": "f90b77d80971ea4855a42abfc89ce85466e1accb",
       "subject": "fix(web): Pull request panel entry works for linked PRs (#15061)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): Pull request panel entry works for linked PRs (#15061).",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): Pull request panel entry works for linked PRs (#15061)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f90e2f2bd26e22b77ccf781cccdf95afd3c3ac1c",
@@ -34427,10 +34316,11 @@
     {
       "upstreamSha": "f9db42d14fd36e7d21f5dcbf0027f267d53c2989",
       "subject": "fix(server): avoid inferring forgejo conflicts from mergeability (#15441)",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): avoid inferring forgejo conflicts from mergeability (#15441).",
+      "reason": "Equivalent: upstream stops inferring Forgejo conflicts from mergeable=false. F5 marks a forge PR conflicting only from has_conflicts. Upstream change: fix(server): avoid inferring forgejo conflicts from mergeability (#15441)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "12a"
+      "disposition": "equivalent",
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"],
+      "evidence": ["apps/server/src/prHub/forgeModel.ts:94"]
     },
     {
       "upstreamSha": "f9e16b3f66476ad1e213152708c9aa8b035085a3",

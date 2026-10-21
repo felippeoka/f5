@@ -3054,3 +3054,49 @@ checkpoint store, project script keybinding and file view suites, and the
 server, web and desktop typechecks pass. Electron cannot launch in this
 environment, so the download, permission and debugger changes were checked by
 unit tests and typecheck only, not in a running desktop window.
+
+## September set 12a triage log: pull requests
+
+All 192 open set 12a records are classified: 102 October follow-ups and 90
+September members, which change only in the ledger and keep their `12a` id.
+The result is 4 ported, 16 equivalent and 172 not applicable. F5's PR hub
+(`apps/web/src/components/prHub`, `apps/server/src/prHub`) shares no code
+with upstream's pull request pages, `PullRequestService` or sync reactor, so
+83 upstream layout and control fixes and 33 service changes have nothing to
+land on. The rest are 32 React Compiler and memoization refactors, 4 moves of
+forge providers into their own packages, the mobile app, CI and contributor
+housekeeping, and a handful of thread-link fixes for upstream behavior F5
+does not have: F5 links a PR to a thread only through an explicit command and
+never infers one from a branch.
+
+New ports:
+
+- [t3code#7588](https://github.com/pingdotgg/t3code/pull/7588): importing the
+  GitHub CLI login with a `gh` older than 2.81.0, which rejects
+  `auth status --json`, now asks for an update instead of reporting a generic
+  read failure.
+- [t3code#11994](https://github.com/pingdotgg/t3code/pull/11994): Cmd/Ctrl+Enter
+  prepares the timeline comment preview and posts a review thread reply. A
+  comment still needs its confirm step, and the shortcut is ignored while an
+  IME is composing.
+- [t3code#15876](https://github.com/pingdotgg/t3code/pull/15876): an explicit
+  Bitbucket repository that is not `workspace/repository` is refused before
+  any request. Before, `repo` was requested as `/repositories/repo`, which
+  Bitbucket answers with a workspace listing.
+- [t3code#15057](https://github.com/pingdotgg/t3code/pull/15057) was already
+  ported in 15h as PR watches and is now recorded against that work.
+
+Equivalent, among others: PR diffs already honor the whitespace setting while
+file stats keep the forge's totals
+([t3code#12438](https://github.com/pingdotgg/t3code/pull/12438),
+[t3code#16162](https://github.com/pingdotgg/t3code/pull/16162)); every forge
+request, Bitbucket included, times out after 30 seconds
+([t3code#14140](https://github.com/pingdotgg/t3code/pull/14140)); a forge PR
+reads as conflicting only from `has_conflicts`
+([t3code#15441](https://github.com/pingdotgg/t3code/pull/15441)); and only
+pull request URLs open the in-app preview, so issue links cannot strand it
+([t3code#14242](https://github.com/pingdotgg/t3code/pull/14242)).
+
+Validation: the GitHub CLI import, forge source control and PR hub composer
+and review thread suites pass, and each new test failed before its fix. The
+server and web typechecks pass.

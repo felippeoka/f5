@@ -35,13 +35,9 @@
     },
     {
       "upstreamSha": "4d679a63244e0f6a2118df6a6488ed1295a87797",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(client): equal query refetches no longer re-render PR rows (#20850).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20850"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's client-runtime query store. Upstream change: perf(client): equal query refetches no longer re-render PR rows (#20850)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "edb21555667dc926bec3f8b2fac41db817b16ae9",
@@ -296,13 +292,9 @@
     },
     {
       "upstreamSha": "78f8d38ebb8c7cabddc2a0c9f114d5aa27c95ab3",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): pull request code tab keeps its caching without \"use memo\" (#20816).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20816"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): pull request code tab keeps its caching without \"use memo\" (#20816)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "44ecfd65b6b1ed4d9163f886e7118fe4258454de",
@@ -318,13 +310,9 @@
     },
     {
       "upstreamSha": "805b98e790762e06fe06cd34803e7d502997d138",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull requests page keeps its caching without \"use memo\" (#20820).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20820"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull requests page keeps its caching without \"use memo\" (#20820)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1c33a198c45c88c5fef33b53d27581ac0341a547",
@@ -340,13 +328,9 @@
     },
     {
       "upstreamSha": "55ca0bb65ee5b668f309e6f57f9ee7e936173df0",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): pull request detail keeps its caching without \"use memo\" (#20811).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20811"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): pull request detail keeps its caching without \"use memo\" (#20811)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b30f0df44acf8e41bc45e75451057138db1635bd",
@@ -421,13 +405,9 @@
     },
     {
       "upstreamSha": "bcd3c12f4683effe78a580ac9c271d104a85c975",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): linked pull request status keeps its caching without \"use memo\" hooks (#20781).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20781"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): linked pull request status keeps its caching without \"use memo\" hooks (#20781)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1e436990c2a0b437ccab8ce442568b40a7b8d192",
@@ -491,13 +471,9 @@
     },
     {
       "upstreamSha": "ba9e9f5736364d029866110f0199769a4e721c56",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request code tab keeps its caching with one \"use memo\" hook (#20773).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20773"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request code tab keeps its caching with one \"use memo\" hook (#20773)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8dbfd927f9c46502472d5a62199d0f2f7f8b0a49",
@@ -537,33 +513,21 @@
     },
     {
       "upstreamSha": "64b16d83a2a91eb07570cb2556861f5ccda01c0a",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the open panel pull request URL keeps its caching without \"use memo\" (#20768).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20768"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the open panel pull request URL keeps its caching without \"use memo\" (#20768)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4dd6a65abe62f570b80725826b67e1763093140a",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request detail panel keeps its caching with fewer \"use memo\" hooks (#20761).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20761"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request detail panel keeps its caching with fewer \"use memo\" hooks (#20761)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9554194e7e3587b7e08263ba42f869e57aca8d90",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): pull request markdown keeps its caching without \"use memo\" hooks (#20744).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20744"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): pull request markdown keeps its caching without \"use memo\" hooks (#20744)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0a3806ca57f69c7a95a21a2eaafb1d2a65001e4c",
@@ -596,23 +560,15 @@
     },
     {
       "upstreamSha": "0ad3fd64360ef6942ad4b76ece2d8fdd28432a11",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request thread dialog keeps its caching without \"use memo\" hooks (#20742).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20742"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request thread dialog keeps its caching without \"use memo\" hooks (#20742)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "341738b80a8824dcaf6fbb2401c860135bc9a043",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the pull request stack hook keeps its caching without \"use memo\" (#20741).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20741"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the pull request stack hook keeps its caching without \"use memo\" (#20741)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "3af41edb71e73075a475a445681e3e3ce778cc67",
@@ -634,13 +590,9 @@
     },
     {
       "upstreamSha": "b3d05640a4670bd34ec4950d2a60f0616dea6780",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): the thread pull requests panel keeps its caching without \"use memo\" hooks (#20740).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20740"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(web): the thread pull requests panel keeps its caching without \"use memo\" hooks (#20740)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8653c8f09bb691e4ebdd1a2e62258f8911873ac7",
@@ -818,13 +770,9 @@
     },
     {
       "upstreamSha": "d94ea2c47f415202653ddfb7176ed8cf7c5497da",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the PR guide diff loader compiles with the React Compiler (#20543).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20543"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the PR guide diff loader compiles with the React Compiler (#20543)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "687f1e94872e7b7191355a536aac3f3070379f1c",
@@ -1218,13 +1166,9 @@
     },
     {
       "upstreamSha": "d6df197b438a858dc9a0dd3ff1a671e7fc27b572",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request thread dialog compiles without manual memoization (#20615).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20615"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request thread dialog compiles without manual memoization (#20615)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1b13922a25ffab315639b636d101fd8406e2e34a",
@@ -1254,13 +1198,9 @@
     },
     {
       "upstreamSha": "a9c0bb672904c70ea2190cdf7a5bdb27cefda87e",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request stack hook compiles without manual memoization (#20620).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20620"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request stack hook compiles without manual memoization (#20620)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "99544c9c1904473e234323c90c0a18af62aae4a6",
@@ -1618,13 +1558,9 @@
     },
     {
       "upstreamSha": "de9756a4fc3388e5257c5f188bd3f0cdcedd9e60",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the open panel pull request URL hook compiles without manual memoization (#20679).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20679"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the open panel pull request URL hook compiles without manual memoization (#20679)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8e49f230d8a6267e2ccea9c72f358096d605fa53",
@@ -1661,13 +1597,9 @@
     },
     {
       "upstreamSha": "2a337fea92f3232e185e3ecc44e3f1c414a3661c",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request linking hook compiles without manual memoization (#20681).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20681"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request linking hook compiles without manual memoization (#20681)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2ff8e7413b75de485066c4754cf3cb85f950b12e",
@@ -1823,13 +1755,9 @@
     },
     {
       "upstreamSha": "ce29ba9cd774ae996d51ca444d1e0165e5d7d527",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request link hooks compile without manual memoization (#20705).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20705"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request link hooks compile without manual memoization (#20705)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "dab2d5c771e2fff27e55d8f23e940702793456b8",
@@ -1847,13 +1775,9 @@
     },
     {
       "upstreamSha": "82a99f731e7876ef8c6830c108a096f946e85603",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request state hooks compile without manual memoization (#20710).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20710"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request state hooks compile without manual memoization (#20710)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6805b64e3917f974708f9a104971db4face70b2d",
@@ -1887,13 +1811,9 @@
     },
     {
       "upstreamSha": "d2213c8be56a913fcbe5e535d1b6b526b2d316b0",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request guide tab compiles without manual memoization (#20716).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20716"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request guide tab compiles without manual memoization (#20716)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "0241bbfc22cdde08d482a97eb6ef079f20749bf6",
@@ -1903,33 +1823,21 @@
     },
     {
       "upstreamSha": "f1dccf2d1b59609f59d2458bdf0b153e0c430bb0",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request label and reviewer pickers compile without manual memoization (#20719).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20719"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request label and reviewer pickers compile without manual memoization (#20719)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "311319e92fa6710bd666cc4731c419eb108b8353",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request markdown compiles without manual memoization (#20722).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20722"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request markdown compiles without manual memoization (#20722)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f29640d3e1369e08e35e4a7791f83ea652713cf4",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the linked pull requests panel compiles without manual memoization (#20723).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20723"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the linked pull requests panel compiles without manual memoization (#20723)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "a7025639c0e16aad3081106c935bf3025f601a1e",
@@ -1953,13 +1861,9 @@
     },
     {
       "upstreamSha": "5c5dcbc60b35aae59cbc554231afa9f2c04ad2ce",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull requests page compiles with the React Compiler (#20539).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20539"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull requests page compiles with the React Compiler (#20539)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "79ad856b4e72b6d6f1409aca98bf439c1d170a94",
@@ -2023,13 +1927,9 @@
     },
     {
       "upstreamSha": "9220fd73bf2f222ea602b711fd71e7b44d4a2bfd",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the pull request panel compiles with the React Compiler (#20526).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20526"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the pull request panel compiles with the React Compiler (#20526)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "404c261e8a4b79a8d3259d3ac304b64c851428f7",
@@ -2170,63 +2070,39 @@
     },
     {
       "upstreamSha": "ef78932dc867d7ae836f0a37dc03bd2fb9d76ad9",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): GitHub account settings compile with the React Compiler (#20497).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20497"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): GitHub account settings compile with the React Compiler (#20497)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1c9e83e67b32c891f53f90827944983446df4111",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): GitHub token settings compile with the React Compiler (#20496).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20496"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): GitHub token settings compile with the React Compiler (#20496)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d793dddd7ae562e469b4e4390d153bf0ddb0802d",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): the link pull request dialog compiles with the React Compiler (#20495).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20495"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): the link pull request dialog compiles with the React Compiler (#20495)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ba3e228d96384976ef4abbaf4855864cb923dcbd",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request thread links compile with the React Compiler (#20494).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20494"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request thread links compile with the React Compiler (#20494)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5abf7bf6327f13ee32558a756cef0991e85146f2",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request review annotations compile with the React Compiler (#20493).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20493"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request review annotations compile with the React Compiler (#20493)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "409140911b59dc72c205148a94b916380ba72744",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request actions compile with the React Compiler (#20492).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20492"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request actions compile with the React Compiler (#20492)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "c1caac81ab32ec5912ee318aa23c8a2f5119dd8e",
@@ -2258,13 +2134,9 @@
     },
     {
       "upstreamSha": "9f70fcc7b584f74049e643dc6ae3104df197f4ca",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(prs): typed qualifiers filter mobile PR search and sync the draft menu (#19934).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-19934"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: fix(prs): typed qualifiers filter mobile PR search and sync the draft menu (#19934)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e10f5d1b5ebe8493b8d88790646967c031c2e14e",
@@ -2365,13 +2237,9 @@
     },
     {
       "upstreamSha": "bb30390933ebcc6a2f50bb153ffc155e76d655fa",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): pull request code tab compiles, with viewed toggles read through context (#20471).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20471"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: perf(web): pull request code tab compiles, with viewed toggles read through context (#20471)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "7f4142e5b07bd1027d513c88311347101b294b52",
@@ -2636,13 +2504,9 @@
     },
     {
       "upstreamSha": "9302235c5e9ba04d4152f6ebab7bd42bef9de1c6",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): move the thread's linked pull request out of ChatView (#20308).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20308"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: refactor(web): move the thread's linked pull request out of ChatView (#20308)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4a7083f2b7bc020185b6531988064a407d982434",
@@ -2790,13 +2654,9 @@
     },
     {
       "upstreamSha": "a9c9c7cdb15e695ce72c4afc55fde93f994f6134",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(shared): PRs built on the same PR stay in one stack under their parent (#20160).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20160"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-stacks",
+      "reason": "Not applicable: F5 reads GitHub's own stack layers (apps/server/src/prHub/githubStacks.ts:9) instead of inferring stacks from branch bases. Upstream change: fix(shared): PRs built on the same PR stay in one stack under their parent (#20160)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2577baf8b0dc541283fa93d6919b0e354effadf4",
@@ -2854,13 +2714,9 @@
     },
     {
       "upstreamSha": "9b150f791b8d3c8b284c3c701d2c1ef8aa14df45",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: Add new GitHub user 'bompus' to VOUCHED.td.",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-9b150f791b"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream repository housekeeping (contributor lists). Upstream change: Add new GitHub user 'bompus' to VOUCHED.td",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "dcdb0348e4091ebdc69c8ebfaa8537aa319b3c9a",
@@ -2934,13 +2790,9 @@
     },
     {
       "upstreamSha": "d5139979d427d94d71714e9e59bca1b47832c9a7",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(web): virtualize a thread's linked pull requests (#20107).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-20107"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: perf(web): virtualize a thread's linked pull requests (#20107)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "bb4e4e7eca1d0de27efbc9fb9eab69e5463b9374",
@@ -3284,13 +3136,9 @@
     },
     {
       "upstreamSha": "c3a36af8728c8a25933cb5fd46c7a6426ed5e49d",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(github): all GitHub GraphQL on effect/graphql, one request policy for REST and GraphQL (#19224).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-19224"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(github): all GitHub GraphQL on effect/graphql, one request policy for REST and GraphQL (#19224)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "17e1087d36aa2ed7b6ca6b1a3775a2fe2a9f15c6",
@@ -3627,13 +3475,9 @@
     },
     {
       "upstreamSha": "ec1313c8f8333292506f05a355bb72d308a455d8",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): use workspace-scoped Bitbucket permissions API (#10984).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-10984"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: F5's Bitbucket adapter never reads the repository permissions API. Upstream change: fix(server): use workspace-scoped Bitbucket permissions API (#10984)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ab3a3cd162d90fd9f01ac62efdb9d4ad55c33639",
@@ -3746,13 +3590,9 @@
     },
     {
       "upstreamSha": "464fad9a433c246b4a5b73c8640787c174c2c195",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web,mobile): pull request project filter follows the sidebar order (#19180).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-19180"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The mobile half applies to upstream's mobile app, which F5 does not have. Upstream change: fix(web,mobile): pull request project filter follows the sidebar order (#19180)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "cb395ee13b5b5ddd4352e7c3d4216181501cc2e5",
@@ -3778,13 +3618,9 @@
     },
     {
       "upstreamSha": "ce6f8ce36e240d1c615e2130fc017652cbc1ec58",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(pr): keep known state in sync across controls (#18408).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18408"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(pr): keep known state in sync across controls (#18408)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "cae6c6627a323d1d33a340842b0eb384807daedb",
@@ -3876,13 +3712,10 @@
     },
     {
       "upstreamSha": "df8df0d53b39bfd6a5d8d69fabade19bd668e0a5",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): bound Bitbucket API requests with 30s timeout (#14140).",
+      "classification": "equivalent:apps/server/src/sourceControl/ForgeSourceControlProvider.ts:342",
+      "reason": "Equivalent: upstream bounds Bitbucket requests with a 30-second timeout. Every F5 forge request, Bitbucket included, times out after 30 seconds. Upstream change: fix(server): bound Bitbucket API requests with 30s timeout (#14140)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14140"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["57c1f66f615d8b4e8150d592b46ca4001974d41a"]
     },
     {
       "upstreamSha": "7d5a42912a4036549ac4c70d0195f02af432115a",
@@ -4037,13 +3870,9 @@
     },
     {
       "upstreamSha": "0425c32571e033c068b8caebfd984acce9f8735b",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(clients): # suggestions include pull requests linked to the thread (#19357).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-19357"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:composer-pr-suggestions",
+      "reason": "Not applicable: F5's composer has no # pull request suggestions. Upstream change: fix(clients): # suggestions include pull requests linked to the thread (#19357)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "3417bc3856a25fa772f969faeaf8428a58010d47",
@@ -4410,13 +4239,9 @@
     },
     {
       "upstreamSha": "4d73e1d5cdd32dbfb470e9422421cc40475d5e99",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): persist only changed pull request links (#19248).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-19248"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's orchestration-v2 link persistence. Upstream change: fix(server): persist only changed pull request links (#19248)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d765d03cb7f980794c409c38e6ea5e25d89fde33",
@@ -4831,13 +4656,9 @@
     },
     {
       "upstreamSha": "df26ef99859ac757409f5332b185a89cc7f40267",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): a numeric q in the pull requests URL no longer crashes the page (#18666).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18666"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: F5's PR search is local state, not a URL parameter. Upstream change: fix(web): a numeric q in the pull requests URL no longer crashes the page (#18666)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "41d86c1b1c273ed662d59c90aa9685476bac962c",
@@ -4944,13 +4765,9 @@
     },
     {
       "upstreamSha": "b821fa04f1b9fe9c6fdb8d19ab7e4197b94c934b",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): resolve configured PR bases to branch names (#18754).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18754"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:worktree-handoff",
+      "reason": "Not applicable: upstream repairs PR bases that older worktree handoffs recorded as checkout revisions. F5 records only the upstream branch name as gh-merge-base (apps/server/src/git/Layers/GitCore.ts:1742). Upstream change: fix(server): resolve configured PR bases to branch names (#18754)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9e552285bae9c9b0707e7ebeb77bf126f0c0a16b",
@@ -5068,13 +4885,9 @@
     },
     {
       "upstreamSha": "462e7f4de4fd4ae14d2b4439fd983fa9ced2790e",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(mobile): native-sized pull request action bar (#18527).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18527"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: feat(mobile): native-sized pull request action bar (#18527)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6f6197c4657f9e2e44a7e8f2fa759d00a15c1cbd",
@@ -5280,13 +5093,10 @@
     },
     {
       "upstreamSha": "499a53c307ec6a0fbff5c83efde355729bd7d343",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(server): expired PR diffs no longer stay in memory until restart (#17786).",
+      "classification": "equivalent:apps/server/src/prHub/detailCache.ts:6",
+      "reason": "Equivalent: upstream drops expired PR diffs from memory. F5's PR detail cache has a 30-second TTL and is bounded by entry count and bytes. Upstream change: perf(server): expired PR diffs no longer stay in memory until restart (#17786)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17786"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["3166e4dc5e57987cb8a7e5b6289bb363a1dd0ed2"]
     },
     {
       "upstreamSha": "8569ce962a072cfd3943519f81645d6e51d8a03f",
@@ -5372,13 +5182,9 @@
     },
     {
       "upstreamSha": "2c8e85e6626d62d06a3dd13583f3b8c1b05c1895",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR badge tooltip opens after a thread gains a second PR (#18368).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18368"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The change is to upstream's sidebar PR badge tooltip, which F5 does not have. Upstream change: fix(web): PR badge tooltip opens after a thread gains a second PR (#18368)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "aaf83eedd50f487adf95141c22cee03c814959bf",
@@ -5466,13 +5272,9 @@
     },
     {
       "upstreamSha": "f43f6ddde06047d8d53da0abb355b41d703562ce",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): even 4px inset around rows in the PR badge tooltip (#18352).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18352"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): even 4px inset around rows in the PR badge tooltip (#18352)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1d270bec29d74ed31b69577f7f8aee5541457d21",
@@ -5495,13 +5297,9 @@
     },
     {
       "upstreamSha": "d07a07f33c0a1b317dea6234636976231c3688b5",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(mobile): keep pull requests available offline (#18351).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18351"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: feat(mobile): keep pull requests available offline (#18351)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5cbe82a87006a7ee472f0f9c9fce5d5f24caa795",
@@ -5517,13 +5315,9 @@
     },
     {
       "upstreamSha": "5495cc4445915c3bf4aa92bb57213f1c7cc220ef",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat(mobile): browse and review pull requests natively (#18126).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-18126"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:mobile",
+      "reason": "Not applicable: upstream's mobile app. F5 has no mobile app. Upstream change: feat(mobile): browse and review pull requests natively (#18126)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ac2cc78d4a4aa9508acb65ad5e9dab319dd1962a",
@@ -5765,13 +5559,9 @@
     },
     {
       "upstreamSha": "bf725cb80d79334601c2833cb599524a3669e03b",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): GitLab merge requests can expand unchanged lines (#17528).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17528"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: F5 forge diffs have no expand-unchanged-lines action. Upstream change: fix(server): GitLab merge requests can expand unchanged lines (#17528)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "119e61b6c1ee642fa48b4447812fb77f17b0bfe5",
@@ -5859,13 +5649,9 @@
     },
     {
       "upstreamSha": "a908a7ac8780c5b4d6fb0bed8945d640f69d2d1d",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(search): find threads by their branch PR number (#14658).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14658"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-links",
+      "reason": "Not applicable: F5's sidebar has no branch PR state. PR threads are titled \"PR #N: title\" (apps/web/src/components/prHub/prF5Thread.ts:222), so title search finds them. Upstream change: fix(search): find threads by their branch PR number (#14658)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6cf05264257093476a41f73439b1fa745427a007",
@@ -5879,13 +5665,9 @@
     },
     {
       "upstreamSha": "75fca7d77cd4a5f72167606f248131edb633bb50",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): scope PR title collapse to tab scrollers (#14644).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14644"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): scope PR title collapse to tab scrollers (#14644)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6c130163941618480da333979bf6fc675d803e4f",
@@ -6432,13 +6214,10 @@
     },
     {
       "upstreamSha": "dacd2cb649eea06a00244bd181eb400735e923d5",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(source-control): stop Forgejo status refresh from scanning every pull request (#12223).",
+      "classification": "equivalent:apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1087",
+      "reason": "Equivalent: upstream filters Forgejo branch lookups by head. F5's Forgejo lookup already passes head=. Upstream change: fix(source-control): stop Forgejo status refresh from scanning every pull request (#12223)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-12223"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"]
     },
     {
       "upstreamSha": "50647de0143e68fde051eb1a0ccf4fe63f9947b2",
@@ -6680,23 +6459,16 @@
     },
     {
       "upstreamSha": "6d5ea190a4a54b01dfe6500e032526839e3258d1",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): thread PR badges catch up when another environment reads the PR (#17729).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17729"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: fix(server): thread PR badges catch up when another environment reads the PR (#17729)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "42f71dfe0768ee768283d50140e7d360a635ee28",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR search keeps the caret where you type (#17675).",
+      "classification": "equivalent:apps/web/src/components/prHub/PullRequestsView.tsx:163",
+      "reason": "Equivalent: upstream keeps the PR search caret in place. F5's search box is plain local state, so the caret never jumps. Upstream change: fix(web): PR search keeps the caret where you type (#17675)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17675"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["3166e4dc5e57987cb8a7e5b6289bb363a1dd0ed2"]
     },
     {
       "upstreamSha": "500cb4266f2bb290aba2c2038295500ff7b25188",
@@ -6762,13 +6534,10 @@
     },
     {
       "upstreamSha": "c899a0c06ab2b0ec8fe8d6a497bb345ac72a5e5e",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(azure-devops): list pull requests with token sign-in and check out into worktrees (#17725).",
+      "classification": "equivalent:apps/server/src/git/Layers/GitManager.ts:658",
+      "reason": "Equivalent: upstream checks out Azure DevOps PRs by head branch when there is no pull ref, and lists them with token sign-in. F5 fetches same-repository forge PRs other than GitHub by head branch, and its forge adapters list PRs with the saved token. Upstream change: fix(azure-devops): list pull requests with token sign-in and check out into worktrees (#17725)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17725"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"]
     },
     {
       "upstreamSha": "4107930420cffe14776ad80783f7060236b5868b",
@@ -7236,23 +7005,15 @@
     },
     {
       "upstreamSha": "51347aca3aa73112bc1e288ae45507ce515f42a2",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): Forgejo identity and Azure DevOps addressing move into their packages (#17624).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17624"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(source-control): Forgejo identity and Azure DevOps addressing move into their packages (#17624)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2ce3e4ae74deb63bda7aaf059949a12aaaefed56",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): PullRequestService reads GitHub resolvers, not its kind (#17619).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17619"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is a resolver refactor inside upstream's PullRequestService. Upstream change: refactor(source-control): PullRequestService reads GitHub resolvers, not its kind (#17619)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "49f849ecce3667abab7ce9e6aaa42dfd2e3c45d7",
@@ -7310,33 +7071,21 @@
     },
     {
       "upstreamSha": "507361bc7301982279b9f115bbae8f22268ce9d6",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): GitHub lives in @t3tools/source-control-github (#17607).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17607"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): GitHub lives in @t3tools/source-control-github (#17607)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8d1858d9d608d78b67268cdc52bceb4302ae8870",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): Bitbucket lives in @t3tools/source-control-bitbucket (#17597).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17597"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): Bitbucket lives in @t3tools/source-control-bitbucket (#17597)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "eb459b5afaf42621a6cb2e698715fa017e26e5d7",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): GitLab lives in @t3tools/source-control-gitlab (#17594).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17594"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): GitLab lives in @t3tools/source-control-gitlab (#17594)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "d01febb509a376d93af2d298a7787449792b5fcb",
@@ -7346,13 +7095,9 @@
     },
     {
       "upstreamSha": "f6e45028efb69d208a45aee8c2fa514adde44977",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(source-control): Forgejo lives in @t3tools/source-control-forgejo (#17581).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17581"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream moves a source control provider into its own package. F5 keeps its forge adapters in apps/server/src/sourceControl. Upstream change: refactor(source-control): Forgejo lives in @t3tools/source-control-forgejo (#17581)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "28f11ed7a5a2251ebe4689643b64425760ee5fe4",
@@ -7398,13 +7143,9 @@
     },
     {
       "upstreamSha": "7856908b8492b7a5c381aa2d5a5c4d4292eb976b",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): keep checkout stable while pr actions load (#16625).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16625"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): keep checkout stable while pr actions load (#16625)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ecfb7342edde9160b7df4231d4f145c7e4a30530",
@@ -7420,13 +7161,9 @@
     },
     {
       "upstreamSha": "aa8c6662e212a4307bd4e585661da99a358e46d4",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): pr merge actions stay visible while the stack refreshes (#17559).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-17559"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): pr merge actions stay visible while the stack refreshes (#17559)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "64972461c0606a4eafdd3cd08056155b6a2fea95",
@@ -8053,13 +7790,9 @@
     },
     {
       "upstreamSha": "a4c9494b0e3606775cc5fc929fc138399288bd43",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): link pull requests to threads in folders that aren't Git repos (#15946).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15946"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. The change is to upstream's LinkPullRequestDialog, which F5 does not have. Upstream change: fix(web): link pull requests to threads in folders that aren't Git repos (#15946)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5e2225671f705fcd33f1ea5591b79ba612fb6974",
@@ -8297,23 +8030,15 @@
     },
     {
       "upstreamSha": "98b5e1bef3c8d933d7ad826f837086a506a3732f",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR commit menu no longer stretches across the window (#15560).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15560"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR commit menu no longer stretches across the window (#15560)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "ed27eb724b4d7963b59de8fd2e51d6b877004163",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR code toolbar no longer overlaps in narrow panels (#15561).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15561"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR code toolbar no longer overlaps in narrow panels (#15561)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e803242d936af3e052757d59ab32bc7c4fcc2390",
@@ -8341,13 +8066,10 @@
     },
     {
       "upstreamSha": "6053a7878d24e5fd596d2b417ed94964a4b9c1c6",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR file stats ignore the hide-whitespace toggle (#16162).",
+      "classification": "equivalent:apps/web/src/components/prHub/PrFilesTab.tsx:220",
+      "reason": "Equivalent: upstream keeps PR file stats independent of the whitespace toggle. F5's file stats come from the forge, not the filtered patch. Upstream change: fix(web): PR file stats ignore the hide-whitespace toggle (#16162)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16162"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"]
     },
     {
       "upstreamSha": "c28cd905572e2a28934a6229d88bcf2975963032",
@@ -8363,33 +8085,21 @@
     },
     {
       "upstreamSha": "b24f0fbba09d8623c896081b4ff70aa7190c8fda",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR timeline no longer shifts when its scrollbar appears (#15588).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15588"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR timeline no longer shifts when its scrollbar appears (#15588)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2b7fa212a89edda7aad8f73fc3b4afd5b56c442c",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR file headers keep the file name in narrow panels (#15562).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15562"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR file headers keep the file name in narrow panels (#15562)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "843c593ab2dfe432abfba7b928292f3f8e9c7d44",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(web): PR loading skeleton shares the detail panel's layout (#15583).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15583"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: refactor(web): PR loading skeleton shares the detail panel's layout (#15583)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6f83358ae6d85b5dee7d3280e645e0e9a0aeff62",
@@ -8439,43 +8149,27 @@
     },
     {
       "upstreamSha": "d720210996a514368ba99f4860063110033d93fa",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub rate limits read the response headers (#16986).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16986"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(server): GitHub rate limits read the response headers (#16986)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "42d92ec59775c187af69071c81b2b91180810bdd",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub source control reads GitHubApi directly (#16982).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16982"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(server): GitHub source control reads GitHubApi directly (#16982)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "a21ac5fb153e3bf418ccd2a4abef2787c241813c",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub GraphQL batches use variables and share one pager (#16960).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16960"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. Upstream change: refactor(server): GitHub GraphQL batches use variables and share one pager (#16960)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "08b1222d0bae670433c275ec70165c7b5048726f",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: refactor(server): GitHub services are named for the API they call, not gh (#16967).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16967"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption or a memoization refactor of an upstream component, which the plan classifies as maintenance. F5's preview and file views are their own components; there is no behavior to port. Upstream change: refactor(server): GitHub services are named for the API they call, not gh (#16967)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "14fe0158ede3d964f183e281f9fec225d30a6b32",
@@ -9137,13 +8831,9 @@
     },
     {
       "upstreamSha": "9ac8f33f1685d1d6e843b657829d0d7462a13813",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat: choose the GitHub account per host, save a GitHub token, and fewer reads per PR action (#16322).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16322"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5 profiles own their GitHub accounts. Upstream change: feat: choose the GitHub account per host, save a GitHub token, and fewer reads per PR action (#16322)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "649418f01fcb4ae5ebbc07739e0bfee8fae3aaec",
@@ -9435,13 +9125,9 @@
     },
     {
       "upstreamSha": "bfe40e6d2574447b0651bdb41337db743ddbe12c",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): the PR cache sweep only removes real entry files (#16285).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16285"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5 has no on-disk PR read cache. Upstream change: fix(server): the PR cache sweep only removes real entry files (#16285)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "327a29ef56e215c69a5db5d0b6f8df89f04f5d5b",
@@ -9457,13 +9143,9 @@
     },
     {
       "upstreamSha": "3236d8ce73d06df91e30532d0a5fd03cb537de8e",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: Add esthor to the list of GitHub users.",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-3236d8ce73"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: upstream repository housekeeping (contributor lists). Upstream change: Add esthor to the list of GitHub users",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "255ac27d5200b01c50acef105ab0ec8bb6ab8345",
@@ -9711,13 +9393,9 @@
     },
     {
       "upstreamSha": "dcbaf05279984187b96c99edc2416abf91e77b96",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(server): idle status polls and PR sweeps start fewer git processes (#16272).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16272"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's VcsDriverRegistry. Upstream change: perf(server): idle status polls and PR sweeps start fewer git processes (#16272)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1024941575067f68d909c6b98f56b02edac25b37",
@@ -9763,13 +9441,9 @@
     },
     {
       "upstreamSha": "ca952677321abf9f3762ae4bb0129454e5a63955",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): finished outbox rows and old PR cache files are pruned (#16247).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16247"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. F5 has no orchestration-v2 outbox or on-disk PR cache. Upstream change: fix(server): finished outbox rows and old PR cache files are pruned (#16247)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "27ab45593fdcaffe718c1fa54dcbb2df4bd769a2",
@@ -9880,13 +9554,10 @@
     },
     {
       "upstreamSha": "207f6a10b05cbdaee6fc650e915ba09dbe39d428",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(threads): threads watching a PR stay in Working instead of bouncing to the inbox (#16204).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/PullRequestWatchService.ts:568",
+      "reason": "Equivalent: upstream keeps watching threads in Working. F5 PR watches end when the thread settles, and watching never changes a thread's status. Upstream change: fix(threads): threads watching a PR stay in Working instead of bouncing to the inbox (#16204)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-16204"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["fc5e96ff556aae3cb5b0c839246d4f63fc92adb8"]
     },
     {
       "upstreamSha": "f5eb25071c042c4a729ddae9fd07bd81804907da",
@@ -10154,13 +9825,9 @@
     },
     {
       "upstreamSha": "7812230572f2d7e042d8d14ada2381fc71377560",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): subagents no longer inherit parent pull-request links (#14918).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14918"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-links",
+      "reason": "Not applicable: F5 sets a thread's PR link only from an explicit create or meta-update command (apps/server/src/orchestration/decider.ts:664), so nothing inherits one. Upstream change: fix(server): subagents no longer inherit parent pull-request links (#14918)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "cf3e714b0f58e29c8fa8660db50d2187e3263b65",
@@ -10411,13 +10078,10 @@
     },
     {
       "upstreamSha": "f9db42d14fd36e7d21f5dcbf0027f267d53c2989",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(server): avoid inferring forgejo conflicts from mergeability (#15441).",
+      "classification": "equivalent:apps/server/src/prHub/forgeModel.ts:94",
+      "reason": "Equivalent: upstream stops inferring Forgejo conflicts from mergeable=false. F5 marks a forge PR conflicting only from has_conflicts. Upstream change: fix(server): avoid inferring forgejo conflicts from mergeability (#15441)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15441"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"]
     },
     {
       "upstreamSha": "253dea360ef0c743c5de8ba04f8412a7eb4694ac",
@@ -10676,13 +10340,9 @@
     },
     {
       "upstreamSha": "f90b77d80971ea4855a42abfc89ce85466e1accb",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): Pull request panel entry works for linked PRs (#15061).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-15061"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): Pull request panel entry works for linked PRs (#15061)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "237d51e6cd2f935d3ddced4efe8fcd4a5d697e43",
@@ -10692,13 +10352,10 @@
     },
     {
       "upstreamSha": "7bc161f8692dfb969489f40bf3eb5bd27bc01f10",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): links to issues no longer strand the pull request viewer (#14242).",
+      "classification": "equivalent:apps/web/src/components/prHub/PrMarkdown.tsx:53",
+      "reason": "Equivalent: upstream stops issue links stranding its PR viewer. F5 opens only pull request URLs in its in-app preview; issue links open externally. Upstream change: fix(web): links to issues no longer strand the pull request viewer (#14242)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14242"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"]
     },
     {
       "upstreamSha": "2b8bb0c1881583428adbc07e3b641b21067ab41a",
@@ -11427,13 +11084,9 @@
     },
     {
       "upstreamSha": "ced865c224ebb7dd2cbd0f2931d6e33559b9343a",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): PR checks status collapses to its icon instead of wrapping (#14700).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14700"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): PR checks status collapses to its icon instead of wrapping (#14700)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b33eda13998b5b0571daaf266c87f6f31af41f7d",
@@ -11465,13 +11118,9 @@
     },
     {
       "upstreamSha": "a3abb5266080c15b2a675d7f92b517b567c427e2",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(ci): pin eas-cli so mobile PR previews deploy again (#14659).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14659"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:release-ci",
+      "reason": "Not applicable: upstream CI and release pipeline changes. F5 does not use T3's pipeline. Upstream change: fix(ci): pin eas-cli so mobile PR previews deploy again (#14659)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "094fb230e90ffb0af303a318ca716fecefd66c80",
@@ -11487,13 +11136,9 @@
     },
     {
       "upstreamSha": "a97a4a9d189f145afe79c3a6f8533bbf9a6b40b1",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: Update marketing stats for GitHub stars and users.",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-a97a4a9d18"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:marketing",
+      "reason": "Not applicable: upstream marketing site stats. Upstream change: Update marketing stats for GitHub stars and users",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "5a574a77d1bef579b01d137b81888f68eabf7d4b",
@@ -11637,13 +11282,9 @@
     },
     {
       "upstreamSha": "6f8e2534f2d935e6befa7353a003c4b59fe66f6f",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(ci): run PR checks side by side and balance server shards (#14025).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14025"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:release-ci",
+      "reason": "Not applicable: upstream CI and release pipeline changes. F5 does not use T3's pipeline. Upstream change: perf(ci): run PR checks side by side and balance server shards (#14025)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "67b175a4c916ac0d5dbac809da22271db3f542d7",
@@ -11745,13 +11386,9 @@
     },
     {
       "upstreamSha": "0fcd5f90611451cca842689faea53b5450c022da",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): multi-PR badges open the linked pull requests panel (#13211).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-13211"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. F5 thread links open a per-link menu (apps/web/src/components/prHub/ThreadPrLinks.tsx:156). Upstream change: fix(web): multi-PR badges open the linked pull requests panel (#13211)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2a23c30ea60854cb17bec1a9d248032207c5d6b2",
@@ -11790,13 +11427,9 @@
     },
     {
       "upstreamSha": "60cb7d180d9ebdd1010460ccd94cdfad1ec83042",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): unresolved pull request links use the compact link tooltip (#14243).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14243"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): unresolved pull request links use the compact link tooltip (#14243)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "63b61e647c8d973e4378a360cbf576d914f5564d",
@@ -11857,13 +11490,9 @@
     },
     {
       "upstreamSha": "d2c9281b8112dc3b2991642c4bdb985e4b08b9bb",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): pull request badge sits on the sidebar row's baseline (#14007).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14007"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): pull request badge sits on the sidebar row's baseline (#14007)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "76fa23df2ef09c8d9624cc6ce1273d32452b3d1c",
@@ -11877,13 +11506,10 @@
     },
     {
       "upstreamSha": "5da55957d48dbd79c1a05b72bdf2479ae0956b1c",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: feat: save Bitbucket credentials from Source Control settings (#14103).",
+      "classification": "equivalent:apps/web/src/components/prHub/PrAccounts.tsx:14",
+      "reason": "Equivalent: upstream saves Bitbucket credentials from its settings. F5 saves Bitbucket Cloud credentials from the PR hub accounts view. Upstream change: feat: save Bitbucket credentials from Source Control settings (#14103)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-14103"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "f5Shas": ["320de0a4a15e2f21fd7cbe49cccb70d58cefa504"]
     },
     {
       "upstreamSha": "e518866d28603da273a9357516dd1aef919f1353",
@@ -11899,13 +11525,9 @@
     },
     {
       "upstreamSha": "38f3c62304bfe79ea6c9f75a17afb732b555f48d",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(shared): local-path remotes no longer crash legacy PR link projection (#13463).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-13463"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-links",
+      "reason": "Not applicable: upstream fixes its legacy linked-PR projection from remotes. F5 records thread PR links explicitly and never derives them from remotes. Upstream change: fix(shared): local-path remotes no longer crash legacy PR link projection (#13463)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b21f3b71913370a1a650a61fd9082f992d40e657",
@@ -12354,13 +11976,9 @@
     },
     {
       "upstreamSha": "6530de0339d2ca49957d0039133c49e3a08557f7",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: perf(server): pull request sync reads only threads with linked pull requests (#13704).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-13704"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-service",
+      "reason": "Not applicable: upstream changes its PullRequestService, GitHub provider, sync reactor or client-runtime PR state. F5's PR hub runs on its own server modules (apps/server/src/prHub) and forge adapters, so there is no shared code to port. The change is to upstream's PullRequestSyncReactor. Upstream change: perf(server): pull request sync reads only threads with linked pull requests (#13704)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "75bf92e652f72cb0062c102236aeb130d1d714b3",
@@ -12913,13 +12531,9 @@
     },
     {
       "upstreamSha": "cb1a3f34670b06148d88806a9534772879c30ecd",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(web): show repository names on linked pull requests (#13061).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-13061"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:pull-request-ui",
+      "reason": "Not applicable: upstream fixes the layout or controls of its own pull request pages and badges. F5's PR hub is a separate UI (apps/web/src/components/prHub) with its own components, so there is no shared code to port. Upstream change: fix(web): show repository names on linked pull requests (#13061)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b2b43bef73447c483ceae486890cb79f01c369cb",
@@ -13011,13 +12625,9 @@
     },
     {
       "upstreamSha": "e407f9bb090d0cec231df21ad30e9e13186d9518",
-      "classification": "planned:12a",
-      "reason": "Planned: verify this follow-up with its September feature, preserving existing proof. Upstream change: fix(ci): shard release tests like pull request CI (#13321).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["12a-pr-13321"],
-        "targetModules": ["apps/server/src/prHub"]
-      }
+      "classification": "not-applicable:release-ci",
+      "reason": "Not applicable: upstream CI and release pipeline changes. F5 does not use T3's pipeline. Upstream change: fix(ci): shard release tests like pull request CI (#13321)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "68fb7f4b850991ba0ca5bd0d7c4aa13d4e5d6bb7",
