@@ -1,6 +1,15 @@
+// @effect-diagnostics nodeBuiltinImport:off - real proxy tunnel and TLS origin.
+import * as Http from "node:http";
+import * as Https from "node:https";
+import * as Net from "node:net";
 import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
-import { makeGitHubHttpTransport } from "./githubHttpTransport.ts";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { LOCALHOST_TEST_CERT, LOCALHOST_TEST_KEY } from "../testUtils/localhostTls.ts";
+import {
+  githubTrustedCertificates,
+  makeGitHubFetch,
+  makeGitHubHttpTransport,
+} from "./githubHttpTransport.ts";
 import { parseGitHubApiResponse } from "./githubApi.ts";
 
 describe("GitHub HTTP transport", () => {
@@ -131,4 +140,103 @@ it("preserves diff text and sends only the fixed diff media type", async () => {
     "application/vnd.github.diff",
   );
   expect(result.stdout).toContain("diff --git a/a b/a\n+hello\n");
+});
+
+describe("GitHub fetch parity with gh", () => {
+  const sockets = new Set<Net.Socket>();
+  const track = (socket: Net.Socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  };
+  const listen = (server: Net.Server) =>
+    new Promise<number>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve((server.address() as Net.AddressInfo).port)),
+    );
+  const origin = Https.createServer(
+    { key: LOCALHOST_TEST_KEY, cert: LOCALHOST_TEST_CERT },
+    (request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ path: request.url, auth: request.headers.authorization }));
+    },
+  );
+  const proxy = Http.createServer();
+  const connects: string[] = [];
+  let proxyUrl = "";
+
+  beforeAll(async () => {
+    origin.on("connection", track);
+    proxy.on("connection", track);
+    const originPort = await listen(origin);
+    // Every CONNECT tunnels to the local origin, whatever port it names.
+    proxy.on("connect", (request, socket, head) => {
+      connects.push(request.url ?? "");
+      const upstream = Net.connect(originPort, "127.0.0.1", () => {
+        socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        upstream.write(head);
+        upstream.pipe(socket);
+        socket.pipe(upstream);
+      });
+      track(upstream);
+      upstream.on("error", () => socket.destroy());
+      socket.on("error", () => upstream.destroy());
+    });
+    proxyUrl = `http://127.0.0.1:${await listen(proxy)}`;
+  });
+  afterAll(async () => {
+    for (const socket of sockets) socket.destroy();
+    await Promise.all([origin, proxy].map((server) => new Promise((done) => server.close(done))));
+  });
+
+  const request = (fetcher: ReturnType<typeof makeGitHubFetch>) =>
+    makeGitHubHttpTransport(fetcher)({
+      cwd: ".",
+      args: ["api", "repos/o/r", "--hostname", "127.0.0.1", "--include"],
+      env: { GH_ENTERPRISE_TOKEN: "enterprise-secret" },
+    });
+
+  it("tunnels through HTTPS_PROXY and trusts a root outside Node's bundle", async () => {
+    connects.length = 0;
+    const fetcher = makeGitHubFetch({
+      env: { HTTPS_PROXY: proxyUrl },
+      ca: [...(githubTrustedCertificates() ?? []), LOCALHOST_TEST_CERT],
+    });
+
+    const result = await Effect.runPromise(request(fetcher));
+
+    expect(connects).toEqual(["127.0.0.1:443"]);
+    expect(result.code).toBe(0);
+    expect(parseGitHubApiResponse(result.stdout).body).toEqual({
+      path: "/api/v3/repos/o/r",
+      auth: "Bearer enterprise-secret",
+    });
+  });
+
+  it("honors NO_PROXY and rejects a root it was not given", async () => {
+    connects.length = 0;
+    const fetcher = makeGitHubFetch({
+      env: { HTTPS_PROXY: proxyUrl, NO_PROXY: "127.0.0.1" },
+      ca: githubTrustedCertificates() ?? [],
+    });
+
+    const result = await Effect.runPromise(Effect.flip(request(fetcher)));
+
+    expect(connects).toEqual([]);
+    expect(result.kind).toBe("network");
+  });
+
+  it("adds the system store to Node's default roots", () => {
+    expect(
+      githubTrustedCertificates((store) => (store === "default" ? ["a", "b"] : ["b", "c"])),
+    ).toEqual(["a", "b", "c"]);
+    expect(
+      githubTrustedCertificates(
+        "unavailable" as unknown as Parameters<typeof githubTrustedCertificates>[0],
+      ),
+    ).toBeUndefined();
+    expect(
+      githubTrustedCertificates(() => {
+        throw new Error("unsupported store");
+      }),
+    ).toBeUndefined();
+  });
 });

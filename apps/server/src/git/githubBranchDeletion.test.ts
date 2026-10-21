@@ -5,6 +5,11 @@ import { deleteGitHubPullRequestBranch } from "./githubBranchDeletion.ts";
 import { makeGitHubRequestScheduler } from "./githubRequestScheduler.ts";
 import { GitHubRequestPolicy } from "./githubRequestPolicy.ts";
 import { GitHubCliError } from "./Errors.ts";
+vi.mock("../outboundHttp.ts", async (importOriginal) =>
+  (await import("../testUtils/undiciFetchThroughGlobal.ts")).undiciFetchThroughGlobal(
+    importOriginal,
+  ),
+);
 const sha = "a".repeat(40),
   other = "b".repeat(40);
 const input = { cwd: "/repo", url: "https://github.com/team/repo/pull/7", expectedHeadOid: sha };

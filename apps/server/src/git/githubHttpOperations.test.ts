@@ -6,6 +6,11 @@ import { GitHubCredentialScope } from "./githubApi.ts";
 import { makeGitHubRequestScheduler } from "./githubRequestScheduler.ts";
 import { runProcess } from "../processRunner.ts";
 vi.mock("../processRunner.ts", () => ({ runProcess: vi.fn() }));
+vi.mock("../outboundHttp.ts", async (importOriginal) =>
+  (await import("../testUtils/undiciFetchThroughGlobal.ts")).undiciFetchThroughGlobal(
+    importOriginal,
+  ),
+);
 const processMock = vi.mocked(runProcess);
 const url = "https://github.com/octo/repo/pull/7";
 const pr = {

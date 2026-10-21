@@ -9,6 +9,12 @@ vi.mock("../../processRunner", () => ({
   runProcess: vi.fn(),
 }));
 
+vi.mock("../../outboundHttp.ts", async (importOriginal) =>
+  (await import("../../testUtils/undiciFetchThroughGlobal.ts")).undiciFetchThroughGlobal(
+    importOriginal,
+  ),
+);
+
 import { runProcess } from "../../processRunner";
 import { GitHubCli } from "../Services/GitHubCli.ts";
 import * as ProfileGithubAccount from "../ProfileGithubAccount";

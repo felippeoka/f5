@@ -1,10 +1,68 @@
+// @effect-diagnostics nodeBuiltinImport:off - GitHub requests need the system trust store.
+import * as Tls from "node:tls";
 import { Effect } from "effect";
+import type * as Undici from "undici";
+import { requireUndici } from "../outboundHttp.ts";
 import { GitHubCliError } from "./Errors.ts";
 import type { GitHubCliShape } from "./Services/GitHubCli.ts";
 
+type GitHubFetch = (...args: Parameters<typeof fetch>) => Promise<Response>;
+
+/**
+ * Roots a GitHub request trusts: Node's defaults, which include
+ * NODE_EXTRA_CA_CERTS, plus the system store `gh` trusts, where a
+ * TLS-inspecting proxy installs its CA. Undefined on a runtime that cannot
+ * list them, which keeps Node's defaults.
+ */
+export function githubTrustedCertificates(
+  read: ((store: "default" | "system") => string[]) | undefined = Tls.getCACertificates,
+): string[] | undefined {
+  if (typeof read !== "function") return undefined;
+  try {
+    return [...new Set([...read("default"), ...read("system")])];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The fetch GitHub requests use. Like `gh`, it honors HTTP(S)_PROXY and
+ * NO_PROXY and trusts the system store, which Node's own fetch does only when
+ * the process starts with env-proxy or system-CA flags.
+ */
+export function makeGitHubFetch(
+  options: { readonly env?: NodeJS.ProcessEnv; readonly ca?: readonly string[] } = {},
+): GitHubFetch {
+  const env = options.env ?? process.env;
+  const ca = options.ca ?? githubTrustedCertificates();
+  const tls = ca ? { ca: [...ca] } : {};
+  let dispatcher: Undici.Dispatcher | undefined;
+  return (input, init) => {
+    const undici = requireUndici();
+    dispatcher ??= new undici.EnvHttpProxyAgent({
+      // Empty values keep an unset variable from falling back to process.env.
+      httpProxy: env.http_proxy ?? env.HTTP_PROXY ?? "",
+      httpsProxy: env.https_proxy ?? env.HTTPS_PROXY ?? "",
+      noProxy: env.no_proxy ?? env.NO_PROXY ?? "",
+      allowH2: false,
+      connect: tls,
+      requestTls: tls,
+      proxyTls: tls,
+    });
+    return undici.fetch(input as Undici.RequestInfo, {
+      ...(init as unknown as Undici.RequestInit),
+      dispatcher,
+    }) as unknown as Promise<Response>;
+  };
+}
+
+let defaultGitHubFetch: GitHubFetch | undefined;
+const githubFetch: GitHubFetch = (input, init) =>
+  (defaultGitHubFetch ??= makeGitHubFetch())(input, init);
+
 /** Keep the existing captured-request boundary; its scheduler and cache remain authoritative. */
 export function makeGitHubHttpTransport(
-  fetcher: (...args: Parameters<typeof fetch>) => Promise<Response> = globalThis.fetch,
+  fetcher: GitHubFetch = githubFetch,
 ): GitHubCliShape["execute"] {
   return (input) =>
     Effect.suspend(() => {
