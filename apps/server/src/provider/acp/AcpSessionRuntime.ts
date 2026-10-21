@@ -303,6 +303,9 @@ const makeAcpSessionRuntime = (
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const toolEmissions = new Map<string, { length: number | undefined; skipped: number }>();
+    // Recently shown tool calls. A late update to a finished call is not a new
+    // boundary in the answer, although its progress state is gone.
+    const shownToolCallIds = new Set<string>();
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
     const configOptionsRef = yield* Ref.make(sessionConfigOptionsFromSetup(undefined));
     const startStateRef = yield* Ref.make<AcpStartState>({ _tag: "NotStarted" });
@@ -457,6 +460,7 @@ const makeAcpSessionRuntime = (
           modeStateRef,
           toolCallsRef,
           toolEmissions,
+          shownToolCallIds,
           assistantSegmentRef,
           params: normalized,
           ...(hardeningEnabled
@@ -888,6 +892,7 @@ const makeAcpSessionRuntime = (
           modeStateRef,
           toolCallsRef,
           toolEmissions,
+          shownToolCallIds,
           assistantSegmentRef,
           params: commands,
         });
@@ -1092,11 +1097,14 @@ function configOptionCurrentValueMatches(
   return currentValue.trim() === String(value).trim();
 }
 
+const MAX_SHOWN_TOOL_CALL_IDS = 256;
+
 const handleSessionUpdate = ({
   queue,
   modeStateRef,
   toolCallsRef,
   toolEmissions,
+  shownToolCallIds,
   assistantSegmentRef,
   params,
   onActivity,
@@ -1105,6 +1113,7 @@ const handleSessionUpdate = ({
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly toolEmissions: Map<string, { length: number | undefined; skipped: number }>;
+  readonly shownToolCallIds: Set<string>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly params: EffectAcpSchema.SessionNotification;
   readonly onActivity?: Effect.Effect<void>;
@@ -1119,10 +1128,19 @@ const handleSessionUpdate = ({
     }
     for (const event of parsed.events) {
       if (event._tag === "ToolCallUpdated") {
-        yield* closeActiveAssistantSegment({
-          queue,
-          assistantSegmentRef,
-        });
+        // A new tool call is a boundary in the prose. Progress on a call that
+        // is already shown, such as a background command finishing, is not.
+        const toolCallId = event.toolCall.toolCallId;
+        if (!shownToolCallIds.has(toolCallId)) {
+          shownToolCallIds.add(toolCallId);
+          // Only recent calls get late updates; keep a long session bounded.
+          if (shownToolCallIds.size > MAX_SHOWN_TOOL_CALL_IDS) {
+            shownToolCallIds.delete(shownToolCallIds.values().next().value!);
+          }
+          // A call still running is already on screen, even if it aged out.
+          const running = (yield* Ref.get(toolCallsRef)).has(toolCallId);
+          if (!running) yield* closeActiveAssistantSegment({ queue, assistantSegmentRef });
+        }
         const { previous, merged } = yield* Ref.modify(toolCallsRef, (current) => {
           const previous = current.get(event.toolCall.toolCallId);
           const nextToolCall = mergeToolCallState(previous, event.toolCall);
