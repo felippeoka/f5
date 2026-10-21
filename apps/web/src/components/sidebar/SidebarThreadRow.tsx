@@ -20,6 +20,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { synchronizeStatusPulse } from "../../lib/statusPulse";
 import { cn } from "../../lib/utils";
+import { selectThreadTerminalState, useTerminalStateStore } from "../../terminalStateStore";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import type { ThreadStatusPill } from "../../threadStatus";
 import type { ThreadListItem } from "../../types";
@@ -355,6 +356,16 @@ export function PinnedThreadDragHandle({ threadId }: { threadId: ThreadId }) {
   );
 }
 
+/** Opens the thread's terminal drawer on a running terminal, including one in a split. */
+function revealRunningTerminal(threadId: ThreadId) {
+  const store = useTerminalStateStore.getState();
+  const terminalId = selectThreadTerminalState(store.terminalStateByThreadId, threadId)
+    .runningTerminalIds[0];
+  if (!terminalId) return;
+  store.setActiveTerminal(threadId, terminalId);
+  store.setTerminalOpen(threadId, true);
+}
+
 export function ThreadRowTrailingMeta(props: {
   thread: Pick<ThreadListItem, "id" | "branch" | "worktreePath" | "titleRegeneration">;
   lastInteractionAt: string;
@@ -403,11 +414,16 @@ export function ThreadRowTrailingMeta(props: {
       ) : null}
       <ThreadWorktreeIndicator thread={props.thread} />
       {props.terminalStatus ? (
-        <span
-          role="img"
-          aria-label={props.terminalStatus.label}
+        <button
+          type="button"
+          aria-label={`${props.terminalStatus.label}. Show terminal`}
           title={props.terminalStatus.label}
-          className={cn("inline-flex items-center justify-center", props.terminalStatus.colorClass)}
+          className={cn(
+            "inline-flex items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            props.terminalStatus.colorClass,
+          )}
+          // The row's own click then opens the thread; this picks which terminal shows.
+          onClick={() => revealRunningTerminal(props.thread.id)}
         >
           <TerminalIcon
             className={cn(
@@ -416,7 +432,7 @@ export function ThreadRowTrailingMeta(props: {
             )}
             onAnimationStart={synchronizeStatusPulse}
           />
-        </span>
+        </button>
       ) : null}
       <span className="relative flex shrink-0 items-center justify-end">
         <span
