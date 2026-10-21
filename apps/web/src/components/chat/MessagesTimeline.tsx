@@ -73,6 +73,7 @@ import { ComposerDockSpacer } from "./composer/ComposerDock";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { useFileNavigation } from "../../fileNavigationContext";
 import { Button } from "../ui/button";
+import { TooltipScrollDismissArea } from "../ui/tooltip";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import type { ImageAttachmentActionItem } from "./imageAttachmentActions";
@@ -1198,7 +1199,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   return (
     <TimelineRowContext.Provider value={timelineRowContext}>
-      <div className="relative h-full min-h-0">
+      <TooltipScrollDismissArea className="relative h-full min-h-0">
         <LegendList<TimelineRow>
           ref={listRef}
           data={rows}
@@ -1292,7 +1293,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             onWheel={forwardOverlayWheel}
           />
         ) : null}
-      </div>
+      </TooltipScrollDismissArea>
     </TimelineRowContext.Provider>
   );
 });

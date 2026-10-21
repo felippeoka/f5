@@ -1,4 +1,5 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import { createContext, use, useEffect, useRef, type ComponentProps, type RefObject } from "react";
 
 import { isElectron } from "~/env";
 import { cn, isMacPlatform } from "~/lib/utils";
@@ -29,10 +30,82 @@ const TooltipCreateHandle = TooltipPrimitive.createHandle;
 
 const TooltipProvider = TooltipPrimitive.Provider;
 
-const Tooltip = TooltipPrimitive.Root;
+type TooltipActionsRef = RefObject<TooltipPrimitive.Root.Actions | null>;
+type HoveredTooltip = { trigger: HTMLElement; actionsRef: TooltipActionsRef };
+const TooltipHoverContext = createContext<TooltipActionsRef | null>(null);
+const TooltipScrollContext = createContext<RefObject<HoveredTooltip | null> | null>(null);
+
+/**
+ * Closes the hovered descendant tooltip when the area scrolls. A scroll moves the trigger
+ * away from a still pointer without a mouseleave, which left the tooltip floating over
+ * unrelated rows. Tracking lives in a ref, so scrolling never rerenders the area.
+ */
+function TooltipScrollDismissArea({ onScrollCapture, ...props }: ComponentProps<"div">) {
+  const hovered = useRef<HoveredTooltip | null>(null);
+  return (
+    <TooltipScrollContext value={hovered}>
+      <div
+        {...props}
+        onScrollCapture={(event) => {
+          onScrollCapture?.(event);
+          const tooltip = hovered.current;
+          // A keyboard-focused trigger keeps its tooltip.
+          if (!tooltip || tooltip.trigger.contains(tooltip.trigger.ownerDocument.activeElement)) {
+            return;
+          }
+          hovered.current = null;
+          // Base UI also cancels delayed hover opens through this action.
+          tooltip.actionsRef.current?.close();
+        }}
+      />
+    </TooltipScrollContext>
+  );
+}
+
+function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
+  const hovered = use(TooltipScrollContext);
+  const localActionsRef = useRef<TooltipPrimitive.Root.Actions | null>(null);
+  const actionsRef = props.actionsRef ?? localActionsRef;
+  useEffect(
+    () => () => {
+      if (hovered?.current?.actionsRef === actionsRef) hovered.current = null;
+    },
+    [actionsRef, hovered],
+  );
+
+  if (!hovered) return <TooltipPrimitive.Root {...props} />;
+  return (
+    <TooltipHoverContext value={actionsRef}>
+      <TooltipPrimitive.Root
+        {...props}
+        actionsRef={actionsRef}
+        onOpenChange={(open, details) => {
+          props.onOpenChange?.(open, details);
+          if (!open && !details.isCanceled && hovered.current?.actionsRef === actionsRef) {
+            hovered.current = null;
+          }
+        }}
+      />
+    </TooltipHoverContext>
+  );
+}
 
 function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+  const hovered = use(TooltipScrollContext);
+  const actionsRef = use(TooltipHoverContext);
+  if (!hovered || !actionsRef) {
+    return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+  }
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      {...props}
+      onMouseEnter={(event) => {
+        props.onMouseEnter?.(event);
+        hovered.current = { trigger: event.currentTarget, actionsRef };
+      }}
+    />
+  );
 }
 
 function TooltipPopup({
@@ -80,4 +153,11 @@ function TooltipPopup({
   );
 }
 
-export { TooltipCreateHandle, TooltipProvider, Tooltip, TooltipTrigger, TooltipPopup };
+export {
+  TooltipCreateHandle,
+  TooltipProvider,
+  Tooltip,
+  TooltipTrigger,
+  TooltipPopup,
+  TooltipScrollDismissArea,
+};
