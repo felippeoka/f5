@@ -49,6 +49,7 @@ import {
   resolveClaudeCliInvocation,
   resolveClaudeSdkExecutableOptions,
 } from "../claudeSdkExecutable.ts";
+import { hasClaudeManagedMcpConfig } from "../claudeInventory.ts";
 import { AccountUsageReadError, accountUsageErrorCode } from "../../usage/accountUsageErrors.ts";
 import { normalizeClaudeAccountUsage } from "../../usage/claudeAccountUsage.ts";
 import { CommandNotFoundError } from "../../spawn/resolveCommand.ts";
@@ -417,7 +418,9 @@ export function withClaudeProbeQuery<A>(
               allowedTools: [],
               settings: { disableAllHooks: true },
               mcpServers: {},
-              strictMcpConfig: true,
+              // Claude refuses the strict flag next to a managed-mcp.json,
+              // which already excludes every other MCP source.
+              ...(hasClaudeManagedMcpConfig() ? {} : { strictMcpConfig: true }),
               env: {
                 ...claudeEnvironment,
                 ENABLE_CLAUDEAI_MCP_SERVERS: "false",

@@ -10,6 +10,7 @@
 import { Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { resolveClaudeCliInvocation } from "../../provider/claudeSdkExecutable.ts";
+import { hasClaudeManagedMcpConfig } from "../../provider/claudeInventory.ts";
 import {
   claudeThinkingCliArgs,
   claudeThinkingConfig,
@@ -182,7 +183,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         "--tools",
         "",
         "--disable-slash-commands",
-        "--strict-mcp-config",
+        // Claude refuses the strict flag next to a managed-mcp.json, which
+        // already excludes every other MCP source.
+        ...(hasClaudeManagedMcpConfig() ? [] : ["--strict-mcp-config"]),
       ];
       const invocation = yield* Effect.try({
         try: () => resolveClaudeCliInvocation(binaryPath, args, claudeEnvironment, { cwd }),
