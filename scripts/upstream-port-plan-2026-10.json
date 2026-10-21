@@ -4007,13 +4007,9 @@
     },
     {
       "upstreamSha": "28732b4787261609c4d20b82b244cb6eef0c442e",
-      "classification": "planned:15b",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): SQL spans show lock wait and connection; stalls keep their own history (#19425).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15b-pr-19425"],
-        "targetModules": ["apps/server/src/observability"]
-      }
+      "classification": "deferred",
+      "reason": "Deferred: stalls already keep their own bounded history (apps/server/src/observability/Metrics.test.ts:205). The SQL half needs Statement.SpanPropagationEnabled, which F5's pinned effect-smol lacks. Without it the statement and transaction spans are not current while the connection is acquired, so F5's existing db.connection.wait_ms annotation (apps/server/src/persistence/NodeSqliteClient.ts:310) lands on the caller's span rather than on the sql.execute or sql.transaction span. Revisit with the next effect-smol upgrade. Upstream change: feat(observability): SQL spans show lock wait and connection; stalls keep their own history (#19425)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "36f91c45687f97fc8e12ff89eaa8cff6f23abe8b",
@@ -12726,23 +12722,16 @@
     },
     {
       "upstreamSha": "8b873eab0d74b731bc0f387be84a8561eace789f",
-      "classification": "planned:15b",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: perf(server): opening Diagnostics no longer loads the whole trace ring into memory (#13763).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15b-pr-13763"],
-        "targetModules": ["apps/server/src/observability"]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:trace-diagnostics",
+      "reason": "Not applicable: upstream stops its Diagnostics trace view from loading the whole trace ring. F5's Diagnostics has no trace view, and its trace summary command already streams the file. Upstream change: perf(server): opening Diagnostics no longer loads the whole trace ring into memory (#13763)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "99efaeab58297c7e346ee91a4f28044faed03c59",
-      "classification": "planned:15b",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: perf(observability): stop writing empty spans on spawns, projected events, and idle polls (#13756).",
+      "classification": "equivalent:apps/server/src/orchestration/Layers/ProjectionPipeline.ts:437",
+      "reason": "Equivalent: the spans upstream removes have no F5 counterpart. F5's attachment side effects use an unnamed Effect.fn, which writes no span, and its port scanner, spawn helpers and Git commands have no per-spawn helper spans. Upstream change: perf(observability): stop writing empty spans on spawns, projected events, and idle polls (#13756)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15b-pr-13756"],
-        "targetModules": ["apps/server/src/observability"]
-      }
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "daafcc4a972b25eb762962cb72575b1a2e583d61",
@@ -13006,13 +12995,10 @@
     },
     {
       "upstreamSha": "20885cecf77e205b8931ca1b29f0a2832836a157",
-      "classification": "planned:15b",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): name the command on subprocess spans (#13701).",
+      "classification": "equivalent:apps/server/src/git/Layers/GitCore.ts:358",
+      "reason": "Equivalent: upstream names the command on its process-runner spans. F5's only subprocess spans are Git's, which always run git and name the operation; its process runner and provider probes write no spans. Upstream change: feat(observability): name the command on subprocess spans (#13701)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15b-pr-13701"],
-        "targetModules": ["apps/server/src/observability"]
-      }
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "5660ab5cb55633a1657e715b0af9bd1e449c8a63",
@@ -13073,13 +13059,11 @@
     },
     {
       "upstreamSha": "2598ce7a5ab0b25e32e0b67b084a9ec23cd8144f",
-      "classification": "planned:15b",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(desktop): honor the standard OTLP variables in the main process and WSL backends (#13641).",
+      "classification": "equivalent:apps/desktop/src/backendEnv.ts:73",
+      "reason": "Equivalent: the desktop backend inherits the desktop's whole environment, so the standard OTLP variables reach the server, which honors them. F5's desktop main process has no tracer of its own, and F5 has no WSL backends. Upstream change: feat(desktop): honor the standard OTLP variables in the main process and WSL backends (#13641)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15b-pr-13641"],
-        "targetModules": ["apps/server/src/observability"]
-      }
+      "evidence": ["apps/desktop/src/backendEnv.test.ts:12"],
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"]
     },
     {
       "upstreamSha": "4293433eccbe6c6661acd020e584ae5d2234bf1e",

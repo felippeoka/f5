@@ -2359,3 +2359,48 @@ backend's kill grace. F5 kills the backend 2 seconds after asking it to
 stop, while its service launcher waits 5. Raising the grace also means
 retuning the stop timeouts and the 6-second quit cap. None of that can be
 exercised here without a runnable Electron build.
+
+## 15b triage log: observability
+
+All 15 open 15b records are classified: 10 ported, 3 equivalent, 1 not
+applicable and 1 deferred.
+
+Most of 15b was already implemented in the work-in-progress commit
+`f46c26cd2c` and the trace-writer change in `aaff303849`. That covers OTLP
+export of traces and metrics over both protocols, the standard endpoint,
+header and protocol variables, the SDK and per-signal kill switches, lenient
+resource attributes, the SIGUSR2 heap snapshot, the trace summary command,
+event-loop stall spans and the Diagnostics OTLP card with secret-backed
+headers. Their tests pass, and the records now cite them.
+
+Two gaps were fixed in this batch:
+
+- [t3code#19370](https://github.com/pingdotgg/t3code/pull/19370): the OTLP
+  resource took its version from `npm_package_version` and reported 0.1.0
+  for any server not started by a package script. It also overrode a
+  `host.name` set in `OTEL_RESOURCE_ATTRIBUTES`. It now uses the server's
+  package version, and an explicit host name wins.
+- [t3code#19430](https://github.com/pingdotgg/t3code/pull/19430): trace
+  writes already ran in a separate process, but provider event logs, which
+  are always on, still appended synchronously on the event loop. They now
+  use an asynchronous rotating sink with the same per-chunk rotation. It
+  makes one write at a time and bounds the chunks waiting behind a slow
+  write. Drops and failures are counted, and closing drains for at most 2
+  seconds.
+
+Equivalent: F5's only subprocess spans are Git's, which name the operation
+([t3code#13701](https://github.com/pingdotgg/t3code/pull/13701)). The empty
+spans upstream removes have no F5 counterpart
+([t3code#13756](https://github.com/pingdotgg/t3code/pull/13756)). The
+desktop backend inherits the OTLP variables
+([t3code#13641](https://github.com/pingdotgg/t3code/pull/13641)). Not
+applicable: F5's Diagnostics has no trace view
+([t3code#13763](https://github.com/pingdotgg/t3code/pull/13763)).
+
+Deferred: [t3code#19425](https://github.com/pingdotgg/t3code/pull/19425).
+Stalls already keep their own history. The SQL half relies on
+`Statement.SpanPropagationEnabled`, which F5's pinned effect-smol does not
+have. A probe showed that F5's existing `db.connection.wait_ms` annotation
+lands on the caller's span, not on the `sql.execute` or `sql.transaction` span,
+because those spans are not current while the connection is acquired. The
+wait-time metric itself is correct.

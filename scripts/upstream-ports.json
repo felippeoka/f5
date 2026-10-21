@@ -4109,10 +4109,15 @@
     {
       "upstreamSha": "1dc8cbe6d14a7b4e131a2806f43bde8b60d6aaa7",
       "subject": "feat(observability): write a server heap snapshot on SIGUSR2 (#13694)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): write a server heap snapshot on SIGUSR2 (#13694).",
+      "reason": "Ported: SIGUSR2 writes a heap snapshot to the observability logs directory, one at a time, with the handler removed when the scope closes and write errors reported without their contents. Not installed on Windows. Upstream change: feat(observability): write a server heap snapshot on SIGUSR2 (#13694)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/server/src/observability/heapSnapshot.test.ts:4",
+        "apps/server/src/observability/Layers/Observability.ts:87"
+      ]
     },
     {
       "upstreamSha": "1de563c1491c7d82563e4553bf5bf689ce6adbb9",
@@ -4450,10 +4455,11 @@
     {
       "upstreamSha": "20885cecf77e205b8931ca1b29f0a2832836a157",
       "subject": "feat(observability): name the command on subprocess spans (#13701)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): name the command on subprocess spans (#13701).",
+      "reason": "Equivalent: upstream names the command on its process-runner spans. F5's only subprocess spans are Git's, which always run git and name the operation; its process runner and provider probes write no spans. Upstream change: feat(observability): name the command on subprocess spans (#13701)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/server/src/git/Layers/GitCore.ts:358"]
     },
     {
       "upstreamSha": "20a70420a85aecab0bde1a58921197f423e401cc",
@@ -5183,10 +5189,11 @@
     {
       "upstreamSha": "2598ce7a5ab0b25e32e0b67b084a9ec23cd8144f",
       "subject": "feat(desktop): honor the standard OTLP variables in the main process and WSL backends (#13641)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(desktop): honor the standard OTLP variables in the main process and WSL backends (#13641).",
+      "reason": "Equivalent: the desktop backend inherits the desktop's whole environment, so the standard OTLP variables reach the server, which honors them. F5's desktop main process has no tracer of its own, and F5 has no WSL backends. Upstream change: feat(desktop): honor the standard OTLP variables in the main process and WSL backends (#13641)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/desktop/src/backendEnv.ts:73", "apps/desktop/src/backendEnv.test.ts:12"]
     },
     {
       "upstreamSha": "25cbcd62d9750d3e8903fd752078e66c7943ecdb",
@@ -5549,10 +5556,9 @@
     {
       "upstreamSha": "28732b4787261609c4d20b82b244cb6eef0c442e",
       "subject": "feat(observability): SQL spans show lock wait and connection; stalls keep their own history (#19425)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): SQL spans show lock wait and connection; stalls keep their own history (#19425).",
+      "reason": "Deferred: stalls already keep their own bounded history (apps/server/src/observability/Metrics.test.ts:205). The SQL half needs Statement.SpanPropagationEnabled, which F5's pinned effect-smol lacks. Without it the statement and transaction spans are not current while the connection is acquired, so F5's existing db.connection.wait_ms annotation (apps/server/src/persistence/NodeSqliteClient.ts:310) lands on the caller's span rather than on the sql.execute or sql.transaction span. Revisit with the next effect-smol upgrade. Upstream change: feat(observability): SQL spans show lock wait and connection; stalls keep their own history (#19425)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "deferred"
     },
     {
       "upstreamSha": "288d8e3457f0466da2cbef2eab648331c969b8a7",
@@ -9309,10 +9315,18 @@
     {
       "upstreamSha": "42da166d131017335a1158d0b379dd68b8985796",
       "subject": "fix(server): OTLP exports say which machine and build they came from (#19370)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: fix(server): OTLP exports say which machine and build they came from (#19370).",
+      "reason": "Ported: OTLP exports carry the server's package version, the profile and host.name, and a non-empty host.name set in OTEL_RESOURCE_ATTRIBUTES wins. The version previously fell back to 0.1.0 outside package scripts, and the host name overrode an explicit one; the fixture fails before the fix. Upstream change: fix(server): OTLP exports say which machine and build they came from (#19370)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": [
+        "f46c26cd2cfc43fa846d701fd48c411656e3b7ab",
+        "8dd65fa14f822fd604eba5b459a10fd437e6227f"
+      ],
+      "evidence": [
+        "apps/server/src/observability/OtlpExport.test.ts:24",
+        "apps/server/src/observability/Layers/Observability.ts:30"
+      ]
     },
     {
       "upstreamSha": "42e1a0fba2938bd56761db63f466962342d7b779",
@@ -10562,10 +10576,19 @@
     {
       "upstreamSha": "4befc863f54a3341911c346c8822286ec37e54af",
       "subject": "perf(server): traces keep ~40% more history and no longer block the event loop (#19430)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: perf(server): traces keep ~40% more history and no longer block the event loop (#19430).",
+      "reason": "Ported: trace writes and rotation run in a separate writer process, and provider event logs now use an asynchronous rotating sink with one write at a time, a bound on chunks waiting behind a slow write, counted drops and failures, and a 2-second drain on close. Upstream's orchestration-v2 event-sink span change does not apply. Upstream change: perf(server): traces keep ~40% more history and no longer block the event loop (#19430)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": [
+        "aaff30384947534dfdd2634ced62f0e3cc797b5c",
+        "9488e883b38cb81b0b64ac058fba425c53278ff3"
+      ],
+      "evidence": [
+        "apps/server/src/observability/TraceSink.test.ts:222",
+        "packages/shared/src/logging.test.ts:19",
+        "apps/server/src/provider/Layers/EventNdjsonLogger.ts:149"
+      ]
     },
     {
       "upstreamSha": "4c1d99d7f3e722c5e88c0dda6a96f9de8f296115",
@@ -16347,10 +16370,12 @@
     {
       "upstreamSha": "74ee5153e05eb183dabec413ff9025d83d2058e4",
       "subject": "feat(observability): honor OTEL_*_EXPORTER=none per signal (#13736)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): honor OTEL_*_EXPORTER=none per signal (#13736).",
+      "reason": "Ported: OTEL_TRACES_EXPORTER=none and OTEL_METRICS_EXPORTER=none each disable only their own signal, over saved settings. Upstream change: feat(observability): honor OTEL_*_EXPORTER=none per signal (#13736)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["packages/shared/src/observability.test.ts:44"]
     },
     {
       "upstreamSha": "74f7b434865c2d758c7b1cd5f52f4c96b76d03fb",
@@ -16463,10 +16488,15 @@
     {
       "upstreamSha": "75bf92e652f72cb0062c102236aeb130d1d714b3",
       "subject": "feat(cli): summarize the server trace file from the command line (#13698)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(cli): summarize the server trace file from the command line (#13698).",
+      "reason": "Ported: the `trace summarize` command streams the trace file and prints span, failure, stall and malformed-line counts with the slowest spans, bounding the malformed lines and the top list. Upstream change: feat(cli): summarize the server trace file from the command line (#13698)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/server/src/observability/traceSummary.test.ts:7",
+        "apps/server/src/main.ts:770"
+      ]
     },
     {
       "upstreamSha": "75c439f4ecc5431f4b1ae95ddd620245ff57bb27",
@@ -18756,10 +18786,12 @@
     {
       "upstreamSha": "87d84280192195b338e27acf2333771a13d04e61",
       "subject": "fix(observability): a malformed OTEL_RESOURCE_ATTRIBUTES no longer stops startup (#13469)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: fix(observability): a malformed OTEL_RESOURCE_ATTRIBUTES no longer stops startup (#13469).",
+      "reason": "Ported: OTEL_RESOURCE_ATTRIBUTES is parsed leniently. Malformed entries and bad percent-encoding are skipped with bounded key and value sizes, so startup continues. Upstream change: fix(observability): a malformed OTEL_RESOURCE_ATTRIBUTES no longer stops startup (#13469)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["packages/shared/src/observability.test.ts:65"]
     },
     {
       "upstreamSha": "8824f8f24f8b81fd6aed6f228a57a1d4013d01d9",
@@ -19199,10 +19231,9 @@
     {
       "upstreamSha": "8b873eab0d74b731bc0f387be84a8561eace789f",
       "subject": "perf(server): opening Diagnostics no longer loads the whole trace ring into memory (#13763)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: perf(server): opening Diagnostics no longer loads the whole trace ring into memory (#13763).",
+      "reason": "Not applicable: upstream stops its Diagnostics trace view from loading the whole trace ring. F5's Diagnostics has no trace view, and its trace summary command already streams the file. Upstream change: perf(server): opening Diagnostics no longer loads the whole trace ring into memory (#13763)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "8b9f6d3d5596f2d9990697ebb1e9b8afa4a1dafd",
@@ -21174,10 +21205,11 @@
     {
       "upstreamSha": "99efaeab58297c7e346ee91a4f28044faed03c59",
       "subject": "perf(observability): stop writing empty spans on spawns, projected events, and idle polls (#13756)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: perf(observability): stop writing empty spans on spawns, projected events, and idle polls (#13756).",
+      "reason": "Equivalent: the spans upstream removes have no F5 counterpart. F5's attachment side effects use an unnamed Effect.fn, which writes no span, and its port scanner, spawn helpers and Git commands have no per-spawn helper spans. Upstream change: perf(observability): stop writing empty spans on spawns, projected events, and idle polls (#13756)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "equivalent",
+      "f5Shas": ["8168bd456ae23521e21bf68b08d0d860a6abd901"],
+      "evidence": ["apps/server/src/orchestration/Layers/ProjectionPipeline.ts:437"]
     },
     {
       "upstreamSha": "99fac2687d43d50d523b440b06f20750c362f06b",
@@ -31454,10 +31486,15 @@
     {
       "upstreamSha": "e67abcf798f8c4d8458755e3b4dde02c2c1f628b",
       "subject": "feat(observability): honor the OpenTelemetry kill switch (#13355)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): honor the OpenTelemetry kill switch (#13355).",
+      "reason": "Ported: OTEL_SDK_DISABLED=true turns off the server's observability layer and disables both OTLP signals over saved settings. Upstream change: feat(observability): honor the OpenTelemetry kill switch (#13355)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "packages/shared/src/observability.test.ts:44",
+        "apps/server/src/observability/Layers/Observability.ts:21"
+      ]
     },
     {
       "upstreamSha": "e688034b5f5505f92fcf1d78ba853c9c0107f9f1",
@@ -31640,10 +31677,15 @@
     {
       "upstreamSha": "e7db61f6799faf9d72a898567c52b1c954f2826e",
       "subject": "feat(web): configure OpenTelemetry exports in diagnostics (#12538)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(web): configure OpenTelemetry exports in diagnostics (#12538).",
+      "reason": "Ported: a Diagnostics card configures OTLP trace and metric URLs and collector headers, shows each signal's effective source, and says changes apply after a restart. Header values are stored as secrets and never returned to the client. Upstream change: feat(web): configure OpenTelemetry exports in diagnostics (#12538)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "apps/web/src/components/settings/DiagnosticsSettings.browser.tsx:35",
+        "apps/server/src/serverSettingsPasswords.test.ts:136"
+      ]
     },
     {
       "upstreamSha": "e7deb2aaf4d4d089618dc0c8f393fa0b8b6c77e9",
@@ -32532,10 +32574,12 @@
     {
       "upstreamSha": "ee18e56f902f2ccd74dffdc50363051be02ae0ab",
       "subject": "feat(observability): record event loop stalls in the server trace (#13697)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): record event loop stalls in the server trace (#13697).",
+      "reason": "Ported: an event-loop stall of 50 ms or more is recorded as its own root span with the measured duration. Upstream change: feat(observability): record event loop stalls in the server trace (#13697)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": ["apps/server/src/observability/Metrics.test.ts:205"]
     },
     {
       "upstreamSha": "ee2763e9b20f937de0c2adffff8dddfe2d5af3b3",
@@ -34703,10 +34747,16 @@
     {
       "upstreamSha": "fd996d15e220144ac6e66670169aa87d074ce846",
       "subject": "feat(observability): honor the standard OTLP endpoint, headers, and protocol variables (#13492)",
-      "reason": "Planned: implement and verify the explicitly approved 15b scenario. Upstream change: feat(observability): honor the standard OTLP endpoint, headers, and protocol variables (#13492).",
+      "reason": "Ported: the endpoint resolves from settings, then OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT, then OTEL_EXPORTER_OTLP_ENDPOINT, and the standard _HEADERS and _PROTOCOL variables apply, with header names normalized before precedence. Both http/json and http/protobuf export without a new dependency. Upstream change: feat(observability): honor the standard OTLP endpoint, headers, and protocol variables (#13492)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15b"
+      "disposition": "ported",
+      "plannedWorkstream": "15b",
+      "f5Shas": ["f46c26cd2cfc43fa846d701fd48c411656e3b7ab"],
+      "evidence": [
+        "packages/shared/src/observability.test.ts:9",
+        "packages/shared/src/observability.test.ts:34",
+        "apps/server/src/observability/OtlpCompatibility.test.ts:11"
+      ]
     },
     {
       "upstreamSha": "fd9cdaed17f615e364ee113829ec39b2bd2ed6fa",
