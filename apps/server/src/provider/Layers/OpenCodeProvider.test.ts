@@ -126,6 +126,18 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("marks OpenCode 2 unsupported instead of probing it", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "opencode 2.0.1\n";
+      const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
+
+      assert.equal(snapshot.status, "error");
+      assert.equal(snapshot.installed, true);
+      assert.equal(snapshot.version, "2.0.1");
+      assert.match(snapshot.message ?? "", /OpenCode v2\.0\.1 is not supported yet/);
+    }),
+  );
+
   it.effect("hides generic Effect.tryPromise text for local CLI probe failures", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionError = new Error("An error occurred in Effect.tryPromise");

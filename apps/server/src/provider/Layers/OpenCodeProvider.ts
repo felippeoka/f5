@@ -30,6 +30,7 @@ const OPENCODE_PRESENTATION = {
   showInteractionModeToggle: false,
 } as const;
 const MINIMUM_OPENCODE_VERSION = "1.14.19";
+const FIRST_UNSUPPORTED_OPENCODE_VERSION = "2.0.0";
 
 class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{
   readonly cause: unknown;
@@ -381,7 +382,10 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         null,
       );
     }
-    if (compareCliVersions(version, MINIMUM_OPENCODE_VERSION) < 0) {
+    const tooOld = compareCliVersions(version, MINIMUM_OPENCODE_VERSION) < 0;
+    // OpenCode 2 changed its server protocol, and F5 only speaks the 1.x one.
+    const tooNew = compareCliVersions(version, FIRST_UNSUPPORTED_OPENCODE_VERSION) >= 0;
+    if (tooOld || tooNew) {
       return buildServerProvider({
         presentation: OPENCODE_PRESENTATION,
         enabled: openCodeSettings.enabled,
@@ -397,7 +401,9 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           version,
           status: "error",
           auth: { status: "unknown" },
-          message: `OpenCode v${version} is too old. Upgrade to v${MINIMUM_OPENCODE_VERSION} or newer.`,
+          message: tooOld
+            ? `OpenCode v${version} is too old. Upgrade to v${MINIMUM_OPENCODE_VERSION} or newer.`
+            : `OpenCode v${version} is not supported yet. Install an OpenCode 1.x release (v${MINIMUM_OPENCODE_VERSION} or newer).`,
         },
       });
     }
