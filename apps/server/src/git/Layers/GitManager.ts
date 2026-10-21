@@ -759,6 +759,33 @@ export const makeGitManager = Effect.gen(function* () {
       };
     });
 
+  // A branch pushed without `-u` (often to a fork) names no remote. Prefer the
+  // one remote whose tip is exactly the branch, then the one whose tip is in its
+  // history (local commits after the last push); never break a tie by remote
+  // order, and let a failed probe reject the inference.
+  const findPublishedBranchRemote = (cwd: string, branch: string) =>
+    Effect.gen(function* () {
+      const localOid = yield* gitCore.resolveCommit(cwd, `refs/heads/${branch}`);
+      if (localOid === null) return null;
+      const remotes = yield* gitCore.listRemotes(cwd);
+      const tips = (yield* Effect.forEach(
+        remotes.filter((remote) => remote.url !== null),
+        (remote) =>
+          gitCore
+            .resolveCommit(cwd, `refs/remotes/${remote.name}/${branch}`)
+            .pipe(Effect.map((oid) => (oid === null ? [] : [{ name: remote.name, oid }]))),
+        { concurrency: "unbounded" },
+      )).flat();
+      const exact = tips.filter((tip) => tip.oid === localOid);
+      if (exact.length > 0) return exact.length === 1 ? exact[0]!.name : null;
+      const ancestors = yield* Effect.filter(
+        tips,
+        (tip) => gitCore.isAncestor(cwd, tip.oid, localOid),
+        { concurrency: "unbounded" },
+      );
+      return ancestors.length === 1 ? ancestors[0]!.name : null;
+    });
+
   const resolveBranchHeadContext = (
     cwd: string,
     details: { branch: string; upstreamRef: string | null; remoteName?: string },
@@ -766,7 +793,12 @@ export const makeGitManager = Effect.gen(function* () {
     Effect.gen(function* () {
       const remoteName =
         details.remoteName ??
-        (yield* readConfigValueNullable(cwd, `branch.${details.branch}.remote`));
+        (yield* readConfigValueNullable(cwd, `branch.${details.branch}.remote`)) ??
+        (details.upstreamRef === null
+          ? yield* findPublishedBranchRemote(cwd, details.branch).pipe(
+              Effect.orElseSucceed(() => null),
+            )
+          : null);
       const headBranchFromUpstream = details.upstreamRef
         ? extractBranchNameFromRemoteRef(details.upstreamRef, { remoteName })
         : "";

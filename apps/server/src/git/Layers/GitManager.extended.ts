@@ -821,6 +821,89 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     180_000,
   );
 
+  const forkPullRequest = (headOwner: string) =>
+    JSON.stringify([
+      {
+        number: 77,
+        title: "Fork change",
+        url: "https://github.com/pingdotgg/codething-mvp/pull/77",
+        baseRefName: "main",
+        headRefName: "fork-change",
+        isCrossRepository: true,
+        headRepository: { nameWithOwner: `${headOwner}/codething-mvp` },
+        headRepositoryOwner: { login: headOwner },
+        state: "OPEN",
+        updatedAt: "2026-03-10T07:00:00Z",
+      },
+    ]);
+
+  const pushForkBranchWithoutUpstream = (repoDir: string, remotes: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      yield* runGit(repoDir, [
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:pingdotgg/codething-mvp.git",
+      ]);
+      yield* runGit(repoDir, ["checkout", "-b", "fork-change"]);
+      fs.writeFileSync(path.join(repoDir, "fork-change.txt"), "fork change\n");
+      yield* runGit(repoDir, ["add", "fork-change.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Fork change"]);
+      for (const remote of remotes) {
+        const forkDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", remote, forkDir]);
+        // No -u: the branch names no upstream or remote.
+        yield* runGit(repoDir, ["push", remote, "fork-change"]);
+        yield* configureCrossRepoRemote(
+          repoDir,
+          remote,
+          forkDir,
+          `git@github.com:${remote}/codething-mvp.git`,
+        );
+      }
+    });
+
+  it.effect(
+    "finds a fork PR for a branch pushed without an upstream, after a later local commit",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        yield* pushForkBranchWithoutUpstream(repoDir, ["jasonLaster"]);
+        fs.writeFileSync(path.join(repoDir, "fork-change.txt"), "unpushed follow-up\n");
+        yield* runGit(repoDir, ["commit", "-am", "Unpushed follow-up"]);
+
+        const { manager } = yield* makeManager({
+          ghScenario: { prListSequence: [forkPullRequest("jasonLaster")] },
+        });
+
+        const status = yield* manager.status({ cwd: repoDir });
+        expect(status.pr).toMatchObject({ number: 77, headBranch: "fork-change" });
+        expect(status.changeRequest).toMatchObject({
+          isCrossRepository: true,
+          headRepository: "jasonLaster/codething-mvp",
+        });
+      }),
+    180_000,
+  );
+
+  it.effect(
+    "attaches no fork PR when two remotes hold the branch's exact tip",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        yield* pushForkBranchWithoutUpstream(repoDir, ["jasonLaster", "otherFork"]);
+
+        const { manager } = yield* makeManager({
+          ghScenario: { prListSequence: [forkPullRequest("jasonLaster")] },
+        });
+
+        expect((yield* manager.status({ cwd: repoDir })).pr).toBeNull();
+      }),
+    180_000,
+  );
+
   it.effect("looks up the local feature branch instead of inheriting its base branch PR", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("f5-pr-base-");
