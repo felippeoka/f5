@@ -33,6 +33,11 @@ function makeFakeCodexBinary(dir: string) {
 const fs = require("node:fs");
 const env = process.env;
 const args = process.argv.slice(2);
+if (args.includes("mcp") && args.includes("list")) {
+  if (env.T3_FAKE_CODEX_MCP_LOG) fs.appendFileSync(env.T3_FAKE_CODEX_MCP_LOG, args.join(" ") + "\\n");
+  process.stdout.write(env.T3_FAKE_CODEX_MCP_LIST ?? "[]");
+  process.exit(0);
+}
 const input = fs.readFileSync(0, "utf8");
 function fail(message, code) { console.error(message); process.exit(code); }
 const schemaIndex = args.indexOf("--output-schema");
@@ -316,6 +321,31 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
         });
         expect(generated.subject).toBe("Add important change");
       }),
+    ),
+  );
+
+  it.effect("turns off each MCP server the user's Codex config would start", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ subject: "Add important change", body: "" }),
+        argsMustContain:
+          '--config mcp_servers={"github"={enabled=false},"my.server"={enabled=false}} exec',
+      },
+      Effect.gen(function* () {
+        process.env.T3_FAKE_CODEX_MCP_LIST = JSON.stringify([
+          { name: "github", enabled: true },
+          { name: "off", enabled: false },
+          { name: "my.server", enabled: true },
+        ]);
+        const textGeneration = yield* TextGeneration;
+        const generated = yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/codex-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+        });
+        expect(generated.subject).toBe("Add important change");
+      }).pipe(Effect.ensuring(Effect.sync(() => delete process.env.T3_FAKE_CODEX_MCP_LIST))),
     ),
   );
 
