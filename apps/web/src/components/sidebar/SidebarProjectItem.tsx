@@ -10,7 +10,7 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronRightIcon, EllipsisIcon, SquarePenIcon, WorkflowIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import type { DraftThreadState } from "../../composerDraftStore";
 import { getVisibleThreadsWithPinnedDraft, isDraftThreadId } from "../../lib/draftThreads";
@@ -43,6 +43,7 @@ import {
   workflowEntryKey,
 } from "./sidebarLists";
 import { SidebarThreadRow } from "./SidebarThreadRow";
+import { SidebarScheduledFolder } from "./SidebarScheduledFolder";
 import {
   SidebarArchivedWorkflowRow,
   SidebarWorkflowItem,
@@ -246,7 +247,24 @@ export function SidebarProjectItem(props: SidebarProjectItemProps) {
     prependUnseenKeys: sidebarLists.projectDraftThreadId ? [sidebarLists.projectDraftThreadId] : [],
   });
   const snoozedThreads = sidebarLists.snoozedThreads;
-  const projectPinnedSortableIds = activeThreads
+  const scheduledThreads = reconcileFrozenOrder({
+    items: sidebarLists.scheduledThreads,
+    getKey: (thread) => thread.id,
+    frozenOrder: freezeSnapshot?.scheduledThreadIdsByProjectId[project.id],
+  });
+  const selectedScheduledThread = scheduledThreads.some((thread) => thread.id === routeThreadId);
+  const [scheduledExpanded, setScheduledExpanded] = useState(selectedScheduledThread);
+  const [scheduledShowingAll, setScheduledShowingAll] = useState(false);
+  useEffect(() => {
+    if (selectedScheduledThread) setScheduledExpanded(true);
+  }, [routeThreadId, selectedScheduledThread]);
+  const visibleScheduledThreads = scheduledExpanded
+    ? scheduledThreads.filter(
+        (thread, index) =>
+          scheduledShowingAll || index < threadPreviewLimit || thread.id === routeThreadId,
+      )
+    : [];
+  const projectPinnedSortableIds = [...activeThreads, ...visibleScheduledThreads]
     .filter((thread) => thread.pinnedAt != null)
     .map((thread) => pinnedThreadSortableId(thread.id));
   const archivedSidebarItems = reconcileFrozenOrder({
@@ -273,6 +291,7 @@ export function SidebarProjectItem(props: SidebarProjectItemProps) {
     ...visibleActiveThreads
       .filter((thread) => !isDraftThreadId(thread.id, draftThreadsByThreadId, persistedThreadIds))
       .map((thread) => thread.id),
+    ...visibleScheduledThreads.map((thread) => thread.id),
     ...(!snoozedSectionCollapsed ? snoozedThreads.map((thread) => thread.id) : []),
     ...(!archivedSectionCollapsed
       ? visibleArchivedItems.flatMap((item) => (item.kind === "thread" ? [item.thread.id] : []))
@@ -280,12 +299,14 @@ export function SidebarProjectItem(props: SidebarProjectItemProps) {
   ];
   const activeCount = project.expanded
     ? 0
-    : [...activeThreads, ...[...sidebarLists.workflowThreadsByKey.values()].flat()].filter(
-        (thread) => {
-          const label = indicatorsForThread(thread).threadStatus?.label;
-          return label !== undefined && ACTIVE_STATUS_LABELS.has(label);
-        },
-      ).length;
+    : [
+        ...activeThreads,
+        ...scheduledThreads.filter((thread) => thread.archivedAt === null),
+        ...[...sidebarLists.workflowThreadsByKey.values()].flat(),
+      ].filter((thread) => {
+        const label = indicatorsForThread(thread).threadStatus?.label;
+        return label !== undefined && ACTIVE_STATUS_LABELS.has(label);
+      }).length;
 
   return (
     <SortableProjectItem projectId={project.id}>
@@ -512,6 +533,22 @@ export function SidebarProjectItem(props: SidebarProjectItemProps) {
                       }}
                     />
                   ) : null}
+
+                  {scheduledThreads.length > 0 && (
+                    <SidebarScheduledFolder
+                      threads={scheduledThreads}
+                      visibleThreads={visibleScheduledThreads}
+                      expanded={scheduledExpanded}
+                      showingAll={scheduledShowingAll}
+                      previewLimit={threadPreviewLimit}
+                      onToggle={() => setScheduledExpanded((expanded) => !expanded)}
+                      onToggleShowAll={() => setScheduledShowingAll((showing) => !showing)}
+                      routeThreadId={routeThreadId}
+                      orderedIds={orderedProjectThreadIds}
+                      indicatorsForThread={indicatorsForThread}
+                      actions={threadActions}
+                    />
+                  )}
 
                   {snoozedThreads.length > 0 ? (
                     <SectionToggleRow

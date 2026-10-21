@@ -444,6 +444,8 @@ export interface ContextMenuItem<T extends string = string> {
   id: T;
   label: string;
   destructive?: boolean;
+  disabled?: boolean;
+  separatorBefore?: boolean;
 }
 
 export type DesktopUpdateChannel = "stable" | "beta";

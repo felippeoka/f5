@@ -6850,6 +6850,7 @@ export default function ChatView({
     () => (activeThread ? threadActionController.menuItemsForThread(activeThread) : []),
     [
       activeThread?.archivedAt,
+      activeThread?.scheduledOrigin,
       activeThread?.id,
       activeThread?.pinnedAt,
       activeThread?.pinOrderKey,

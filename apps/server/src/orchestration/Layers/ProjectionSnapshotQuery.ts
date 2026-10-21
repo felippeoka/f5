@@ -480,7 +480,7 @@ function buildThreadSnapshot(params: {
     checkpoints: params.checkpointsByThread.get(row.threadId) ?? [],
     compaction: detailRow?.compaction ?? null,
     sessionNotes: detailRow?.sessionNotes ?? null,
-    ...(detailRow?.scheduledOrigin ? { scheduledOrigin: detailRow.scheduledOrigin } : {}),
+    ...(row.scheduledOrigin ? { scheduledOrigin: row.scheduledOrigin } : {}),
     threadReferences: detailRow?.threadReferences ?? [],
     session: params.sessionsByThread.get(row.threadId) ?? null,
   };

@@ -460,9 +460,10 @@ export const ChatHeader = memo(function ChatHeader({
                 key={item.id}
                 item={item}
                 separatorBefore={
-                  item.destructive === true &&
-                  index > 0 &&
-                  threadActionItems[index - 1]?.destructive !== true
+                  item.separatorBefore === true ||
+                  (item.destructive === true &&
+                    index > 0 &&
+                    threadActionItems[index - 1]?.destructive !== true)
                 }
                 onSelect={() => {
                   if (item.id === "rename") {

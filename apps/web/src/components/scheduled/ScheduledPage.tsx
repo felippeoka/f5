@@ -11,26 +11,15 @@ import { describeSchedule } from "@t3tools/shared/cronSchedule";
 import { ensureNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
-import { useWsConnectionState } from "../../wsConnectionState";
+import { scheduledQueryKey, scheduledTasksQueryOptions } from "../../lib/scheduledTasksQuery";
 import { Button } from "../ui/button";
 import { ScheduledTaskDialog } from "./ScheduledTaskDialog";
-import { toastManager } from "../ui/toast";
+import { Switch } from "../ui/switch";
+import { Input } from "../ui/input";
+import { SettingsCard, SettingsRow } from "../settings/SettingsCard";
+import { isElectron } from "../../env";
+import { requestNotificationPermission, useNotificationPermissionState } from "../../notifications";
 
-export const scheduledQueryKey = ["scheduled-tasks"] as const;
-export function useScheduledInvalidation() {
-  const client = useQueryClient();
-  const connection = useWsConnectionState();
-  useEffect(
-    () =>
-      ensureNativeApi().scheduledTasks.onChanged(() => {
-        void client.invalidateQueries({ queryKey: scheduledQueryKey });
-      }),
-    [client],
-  );
-  useEffect(() => {
-    if (connection.synchronized) void client.invalidateQueries({ queryKey: scheduledQueryKey });
-  }, [client, connection.synchronized, connection.connectedAt]);
-}
 function scheduleSummary(task: ScheduledTask) {
   try {
     return describeSchedule(task.cron, task.timezone);
@@ -38,8 +27,15 @@ function scheduleSummary(task: ScheduledTask) {
     return `${task.cron} (${task.timezone})`;
   }
 }
-export function ScheduledPage({ selectedTaskId }: { selectedTaskId?: ScheduledTaskId }) {
-  useScheduledInvalidation();
+export function ScheduledPage({
+  selectedTaskId,
+  editTaskId,
+  onEditRequestHandled,
+}: {
+  selectedTaskId?: ScheduledTaskId;
+  editTaskId?: ScheduledTaskId;
+  onEditRequestHandled?: () => void;
+}) {
   const client = useQueryClient();
   const projects = useStore((s) => s.projects);
   const [projectId, setProjectId] = useState<ProjectId | undefined>(projects[0]?.id);
@@ -47,10 +43,15 @@ export function ScheduledPage({ selectedTaskId }: { selectedTaskId?: ScheduledTa
   const [history, setHistory] = useState<ScheduledTaskId | undefined>(selectedTaskId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const list = useQuery({
-    queryKey: scheduledQueryKey,
-    queryFn: () => ensureNativeApi().scheduledTasks.list({}),
-  });
+  const list = useQuery(scheduledTasksQueryOptions());
+  useEffect(() => setHistory(selectedTaskId), [selectedTaskId]);
+  useEffect(() => {
+    if (!editTaskId || !list.data) return;
+    const task = list.data.tasks.find((entry) => entry.task.id === editTaskId)?.task;
+    if (task) setEditing(task);
+    onEditRequestHandled?.();
+  }, [editTaskId, list.data, onEditRequestHandled]);
+  const permission = useNotificationPermissionState();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const run = async (action: () => Promise<unknown>) => {
@@ -84,60 +85,80 @@ export function ScheduledPage({ selectedTaskId }: { selectedTaskId?: ScheduledTa
           New task
         </Button>
       </div>
-      <div className="flex flex-wrap items-center gap-4 rounded-md border p-3">
-        <label className="flex gap-2">
-          <input
-            type="checkbox"
-            checked={settings.scheduledTasks.enabled}
-            disabled={busy}
-            onChange={(e) =>
-              void run(() =>
-                updateSettings({
-                  scheduledTasks: { ...settings.scheduledTasks, enabled: e.target.checked },
-                }),
+      <SettingsCard title="Scheduler">
+        <SettingsRow
+          title="Scheduler enabled"
+          description="Allow scheduled runs while this F5 server is running."
+          control={
+            <Switch
+              aria-label="Scheduler enabled"
+              checked={settings.scheduledTasks.enabled}
+              disabled={busy}
+              onCheckedChange={(enabled) =>
+                void run(() =>
+                  updateSettings({ scheduledTasks: { ...settings.scheduledTasks, enabled } }),
+                )
+              }
+            />
+          }
+        />
+        <SettingsRow
+          title="Concurrent runs"
+          description="Maximum scheduled runs preparing or running at the same time."
+          control={
+            <Input
+              aria-label="Concurrent scheduled runs"
+              className="w-20"
+              type="number"
+              min={1}
+              max={10}
+              value={settings.scheduledTasks.maxConcurrentRuns}
+              disabled={busy}
+              onChange={(e) => {
+                const cap = Number(e.target.value);
+                if (Number.isInteger(cap) && cap >= 1 && cap <= 10)
+                  void run(() =>
+                    updateSettings({
+                      scheduledTasks: { ...settings.scheduledTasks, maxConcurrentRuns: cap },
+                    }),
+                  );
+              }}
+            />
+          }
+        />
+        {!isElectron && (
+          <SettingsRow
+            title="Browser notifications"
+            description={
+              permission === "denied"
+                ? "Notifications are blocked. Allow them in your browser’s site settings."
+                : permission === "unsupported"
+                  ? "System notifications are unavailable in this browser."
+                  : "Receive system notifications when runs finish, fail or need your attention. Each task has its own notification preference."
+            }
+            control={
+              permission === "default" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void run(requestNotificationPermission)}
+                >
+                  Allow notifications
+                </Button>
+              ) : (
+                <span className="text-sm text-muted-foreground">
+                  {permission === "granted"
+                    ? "Allowed"
+                    : permission === "denied"
+                      ? "Blocked"
+                      : "Unavailable"}
+                </span>
               )
             }
           />
-          Scheduler enabled
-        </label>
-        <label>
-          Concurrent runs{" "}
-          <input
-            aria-label="Concurrent scheduled runs"
-            className="w-14 rounded border p-1"
-            type="number"
-            min={1}
-            max={10}
-            value={settings.scheduledTasks.maxConcurrentRuns}
-            disabled={busy}
-            onChange={(e) => {
-              const cap = Number(e.target.value);
-              if (Number.isInteger(cap) && cap >= 1 && cap <= 10)
-                void run(() =>
-                  updateSettings({
-                    scheduledTasks: { ...settings.scheduledTasks, maxConcurrentRuns: cap },
-                  }),
-                );
-            }}
-          />
-        </label>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            if ("Notification" in window)
-              void Notification.requestPermission().then((permission) =>
-                toastManager.add({
-                  title:
-                    permission === "granted"
-                      ? "Scheduled notifications enabled"
-                      : "Attention remains visible in F5",
-                }),
-              );
-          }}
-        >
-          Enable browser notifications
-        </Button>
-      </div>
+        )}
+      </SettingsCard>
       {error && <p role="alert">{error}</p>}
       {list.isError && <p role="alert">Unable to load scheduled tasks. {list.error.message}</p>}
       {list.isPending && <p role="status">Loading tasks…</p>}
@@ -169,24 +190,23 @@ export function ScheduledPage({ selectedTaskId }: { selectedTaskId?: ScheduledTa
                   </p>
                 )}
               </div>
-              <label className="flex gap-2">
-                <input
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Enabled</span>
+                <Switch
                   aria-label={`Enable ${task.name}`}
-                  type="checkbox"
                   checked={task.enabled}
                   disabled={busy}
-                  onChange={(e) =>
+                  onCheckedChange={(enabled) =>
                     void run(() =>
                       ensureNativeApi().scheduledTasks.setEnabled({
                         id: task.id,
                         expectedVersion: task.version,
-                        enabled: e.target.checked,
+                        enabled,
                       }),
                     )
                   }
                 />
-                Enabled
-              </label>
+              </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button

@@ -74,7 +74,7 @@ export function ScheduledTaskDialog(props: {
           if (!open) props.onClose();
         }}
       >
-        <DialogPopup>
+        <DialogPopup className="[-webkit-app-region:no-drag]">
           <DialogHeader>
             <DialogTitle>Scheduled task</DialogTitle>
           </DialogHeader>
@@ -299,7 +299,7 @@ function Editor(
         if (!open) props.onClose();
       }}
     >
-      <DialogPopup className="max-w-2xl">
+      <DialogPopup className="max-w-2xl [-webkit-app-region:no-drag]">
         <DialogHeader>
           <DialogTitle>{props.task ? "Edit scheduled task" : "New scheduled task"}</DialogTitle>
           <DialogDescription>
