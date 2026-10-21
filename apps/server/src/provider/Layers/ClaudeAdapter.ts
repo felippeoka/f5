@@ -511,6 +511,8 @@ interface ClaudeSessionContext {
   readonly processDiagnostics: { stderrTail: string };
   resumeInvalidatedTurnId: TurnId | undefined;
   modelContextWindowTokens: number;
+  /** Resolved by completeTurn while Stop waits for Claude to abort the turn. */
+  interruptedTurnSettled: Deferred.Deferred<void> | undefined;
   stopped: boolean;
   retiring: boolean;
   /** Agent browser/computer capabilities installed for this session generation. */
@@ -610,6 +612,11 @@ export interface ClaudeAdapterLiveOptions {
    * saved conversation. Zero skips the wait.
    */
   readonly resumeConfirmationTimeoutMs?: number;
+  /**
+   * How long Stop waits for Claude to abort a running turn before closing the
+   * query. Zero closes immediately.
+   */
+  readonly interruptGraceMs?: number;
   /**
    * Hosts F5's in-process preview tools in interactive desktop sessions and
    * supplies live agent browser policy. Absent outside desktop mode.
@@ -832,6 +839,7 @@ type ClaudeResumeSettlement =
 // Bounds how long the first turn after a resume waits for the CLI to confirm
 // the saved conversation. On timeout the send is reported as before.
 const DEFAULT_CLAUDE_RESUME_CONFIRMATION_TIMEOUT_MS = 20_000;
+const DEFAULT_CLAUDE_INTERRUPT_GRACE_MS = 3_000;
 /** One status read per second for up to 30 s after init. */
 const AGENT_BROWSER_STATUS_POLL_ATTEMPTS = 30;
 
@@ -2300,6 +2308,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     const resumeConfirmationTimeoutMs = Math.max(
       0,
       options?.resumeConfirmationTimeoutMs ?? DEFAULT_CLAUDE_RESUME_CONFIRMATION_TIMEOUT_MS,
+    );
+    const interruptGraceMs = Math.max(
+      0,
+      options?.interruptGraceMs ?? DEFAULT_CLAUDE_INTERRUPT_GRACE_MS,
     );
     const agentBrowserBroker =
       serverConfig.mode === "desktop" ? options?.previewAutomationBroker : undefined;
@@ -4096,6 +4108,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           },
           providerRefs: nativeProviderRefs(context),
         });
+        if (context.interruptedTurnSettled)
+          yield* Deferred.succeed(context.interruptedTurnSettled, undefined);
         yield* maybeRecommendCompaction(context, turnState.turnId);
         yield* refreshSupportedCommands(context);
       });
@@ -7925,6 +7939,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           modelContextWindowTokens:
             runtimeModelSelection.contextWindowTokens ??
             estimateModelContextWindowTokens(selectedModel, "claudeAgent"),
+          interruptedTurnSettled: undefined,
           stopped: false,
           retiring: false,
           agentBrowser: agentBrowserState,
@@ -8406,6 +8421,23 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }),
       );
 
+    // Lets Claude abort the running turn through its own path before Stop closes
+    // the query, so the prompt reaches the transcript. Closing a first turn
+    // before Claude writes it leaves a resume cursor for a session Claude never
+    // saved, and the next message fails with "No conversation found".
+    const settleInterruptedTurn = (context: ClaudeSessionContext): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (interruptGraceMs === 0 || context.stopped || !context.turnState) return;
+        const settled = yield* Deferred.make<void>();
+        context.interruptedTurnSettled = settled;
+        yield* Effect.tryPromise(() => context.query.interrupt()).pipe(
+          Effect.ignore,
+          Effect.andThen(Deferred.await(settled)),
+          Effect.timeoutOption(interruptGraceMs),
+        );
+        context.interruptedTurnSettled = undefined;
+      });
+
     const interruptTurn: ClaudeAdapterShape["interruptTurn"] = (threadId, turnId) =>
       withThreadLock(
         threadId,
@@ -8420,6 +8452,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             });
           if (context.turnState) context.turnState.interruptRequested = true;
           yield* settleResume(context, { outcome: "cancelled" });
+          yield* settleInterruptedTurn(context);
           // SDK interrupt only stops the foreground prompt. Closing the query also
           // stops resumed/background work; the durable resume cursor survives in
           // session.exited and the next send opens a fresh process for that session.

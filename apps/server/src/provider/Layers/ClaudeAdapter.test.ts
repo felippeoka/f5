@@ -181,8 +181,11 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     }
   }
 
+  /** Set by tests that exercise Claude's graceful interrupt. */
+  public onInterrupt: (() => Promise<void>) | undefined;
   readonly interrupt = async (): Promise<void> => {
     this.interruptCalls.push(undefined);
+    await this.onInterrupt?.();
   };
 
   public setModelWait: Promise<void> | undefined;
@@ -273,6 +276,7 @@ function makeHarness(config?: {
   readonly readResumeTranscript?: ClaudeAdapterLiveOptions["readResumeTranscript"];
   readonly probeResumableClaudeSession?: ClaudeAdapterLiveOptions["probeResumableClaudeSession"];
   readonly resumeConfirmationTimeoutMs?: number;
+  readonly interruptGraceMs?: number;
   /** Runs the adapter in desktop mode with F5's preview broker. */
   readonly previewAutomationBroker?: ClaudeAdapterLiveOptions["previewAutomationBroker"];
   readonly computerAutomationBroker?: ClaudeAdapterLiveOptions["computerAutomationBroker"];
@@ -323,6 +327,8 @@ function makeHarness(config?: {
     // The fake CLI only emits messages when a test pushes them, so most tests
     // cannot confirm a resume while sendTurn waits. Tests of that wait opt in.
     resumeConfirmationTimeoutMs: config?.resumeConfirmationTimeoutMs ?? 0,
+    // Likewise the fake never aborts a turn on interrupt() unless a test says so.
+    interruptGraceMs: config?.interruptGraceMs ?? 0,
     ...(config?.reportedModelCapabilities
       ? { reportedModelCapabilities: config.reportedModelCapabilities }
       : {}),
@@ -12616,6 +12622,75 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(harness.query.closeCalls, 1);
         const turnCompleted = runtimeEvents.filter((event) => event.type === "turn.completed");
         assert.equal(turnCompleted.length, 1);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    });
+
+    it.effect("lets Claude abort the turn before closing the session", () => {
+      const harness = makeHarness({ interruptGraceMs: 3_000 });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const turnCompleted = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+        yield* adapter.sendTurn({ threadId: session.threadId, input: "hello", attachments: [] });
+        let closeCallsAtInterrupt: number | undefined;
+        harness.query.onInterrupt = async () => {
+          closeCallsAtInterrupt = harness.query.closeCalls;
+          harness.query.emit({
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: false,
+            errors: ["Error: Request was aborted."],
+            session_id: "sdk-session-abort",
+            uuid: "result-abort",
+          } as unknown as SDKMessage);
+        };
+
+        yield* adapter.interruptTurn(session.threadId);
+
+        assert.equal(closeCallsAtInterrupt, 0);
+        assert.equal(harness.query.closeCalls, 1);
+        const [completed] = Array.from(yield* Fiber.join(turnCompleted));
+        assert.equal(
+          completed?.type === "turn.completed" && completed.payload.state,
+          "interrupted",
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    });
+
+    it.effect("closes the session when Claude never aborts the turn", () => {
+      const harness = makeHarness({ interruptGraceMs: 3_000 });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+        yield* adapter.sendTurn({ threadId: session.threadId, input: "hello", attachments: [] });
+        harness.query.onInterrupt = () => new Promise(() => {});
+
+        const interrupting = yield* adapter.interruptTurn(session.threadId).pipe(Effect.forkChild);
+        yield* TestClock.adjust("3 seconds");
+        yield* Fiber.join(interrupting);
+
+        assert.equal(harness.query.interruptCalls.length, 1);
+        assert.equal(harness.query.closeCalls, 1);
+        assert.equal(yield* adapter.hasSession(session.threadId), false);
       }).pipe(
         Effect.provideService(Random.Random, makeDeterministicRandomService()),
         Effect.provide(harness.layer),
