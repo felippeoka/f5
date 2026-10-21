@@ -46,6 +46,7 @@ import {
   RANGES,
   rangeLabel,
   recordCountDisplay,
+  resolveUsageTimeZone,
   tokenDelta,
   tokenFieldDisplay,
   usageMetricValue,
@@ -930,7 +931,7 @@ export function UsageDashboard(props: {
     ((patch: UsageSearchPatch) => setLocalSearch((current) => ({ ...current, ...patch })));
   const tab = search.tab ?? props.defaults?.tab ?? "activity";
   const range = search.range ?? props.defaults?.range ?? "7d";
-  const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
+  const timeZone = useMemo(resolveUsageTimeZone, []);
   const keybindings = useServerKeybindings();
   const handlersRef = useRef({ onSearchChange, onBack: props.onBack });
   handlersRef.current = { onSearchChange, onBack: props.onBack };

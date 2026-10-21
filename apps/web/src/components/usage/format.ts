@@ -7,6 +7,22 @@ import {
   type UsageSummary,
 } from "@t3tools/contracts";
 
+/**
+ * The browser's time zone for usage buckets, or UTC when the system reports a zone this
+ * runtime cannot format (a misconfigured or retired name). The server rejects such a zone,
+ * which failed the whole summary instead of bucketing it in UTC.
+ */
+export function resolveUsageTimeZone(): string {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!timeZone) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format(0);
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
 export const RANGES: ReadonlyArray<{ readonly value: UsageRange; readonly label: string }> = [
   { value: "24h", label: "24 hours" },
   { value: "7d", label: "7 days" },
