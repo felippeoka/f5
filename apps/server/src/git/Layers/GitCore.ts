@@ -11,7 +11,7 @@ import {
 } from "../../persistence/Services/WorktreePreparations.ts";
 import { lstat as inspectPath, readFile, writeFile, rm, stat, utimes } from "node:fs/promises";
 import { parseWorktreeListPorcelain, stripPathTerminator } from "../worktreeList.ts";
-import { networkFailureDetail } from "../networkFailureDetail.ts";
+import { isRefLockFailure, networkFailureDetail } from "../networkFailureDetail.ts";
 import {
   withWorktreeLifecycleLock,
   withRepositoryLifecycleLock,
@@ -2863,19 +2863,42 @@ const makeGitCore = Effect.gen(function* () {
       }
 
       const fullRefName = `refs/remotes/${remoteName}/${branch}`;
-      yield* executeGit(
-        "GitCore.fetchRemoteBranchCommit.fetch",
-        input.cwd,
-        ["fetch", "--quiet", "--no-tags", "--", remoteName, `+refs/heads/${branch}:${fullRefName}`],
-        {
-          timeoutMs: 30_000,
-          env: {
-            ...process.env,
-            ...BACKGROUND_GIT_FETCH_ENV,
-          },
-          fallbackErrorMessage: `Failed to fetch ${remoteName}/${branch}`,
+      const fetchArgs = [
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--",
+        remoteName,
+        `+refs/heads/${branch}:${fullRefName}`,
+      ];
+      const fetchOptions = {
+        timeoutMs: 30_000,
+        env: {
+          ...process.env,
+          ...BACKGROUND_GIT_FETCH_ENV,
         },
-      );
+        fallbackErrorMessage: `Failed to fetch ${remoteName}/${branch}`,
+      };
+      // Another fetch in this repository, such as the background status poll, can win
+      // the race for the remote-tracking ref. The ref is free again by the time a rerun
+      // needs it, so retry once before failing.
+      const fetchOnce = () =>
+        executeGit("GitCore.fetchRemoteBranchCommit.fetch", input.cwd, fetchArgs, {
+          ...fetchOptions,
+          allowNonZeroExit: true,
+        });
+      let fetched = yield* fetchOnce();
+      if (fetched.code !== 0 && isRefLockFailure(fetched.stderr)) fetched = yield* fetchOnce();
+      if (fetched.code !== 0) {
+        return yield* createGitCommandError(
+          "GitCore.fetchRemoteBranchCommit.fetch",
+          input.cwd,
+          fetchArgs.map((argument) =>
+            argument.includes("://") || argument.includes("@") ? "<remote>" : argument,
+          ),
+          `${fetchOptions.fallbackErrorMessage}: ${networkFailureDetail(fetched.stderr)} (exit ${fetched.code})`,
+        );
+      }
 
       const commit = yield* runGitStdout("GitCore.fetchRemoteBranchCommit.resolve", input.cwd, [
         "rev-parse",

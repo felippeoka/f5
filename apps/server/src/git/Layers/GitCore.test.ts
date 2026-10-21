@@ -190,6 +190,44 @@ describe("GitCore unit", () => {
     });
   });
 
+  it.each([
+    "error: cannot lock ref 'refs/remotes/origin/main': is at 1234 but expected 5678",
+    "error: fetching ref refs/remotes/origin/main failed: incorrect old value provided",
+  ])("retries a base fetch once when another fetch held the ref: %s", async (stderr) => {
+    const commit = "0123456789abcdef0123456789abcdef01234567";
+    let fetches = 0;
+    const scripted = makeScriptedGitService((input) => {
+      if (input.args[0] === "rev-parse") return { stdout: `${commit}\n` };
+      if (input.args[0] === "fetch" && ++fetches === 1) return { code: 1, stderr };
+      return {};
+    });
+    const core = await makeCore(scripted.service);
+
+    await expect(
+      Effect.runPromise(
+        core.fetchRemoteBranchCommit({ cwd: process.cwd(), remoteName: "origin", branch: "main" }),
+      ),
+    ).resolves.toMatchObject({ commit });
+    expect(fetches).toBe(2);
+  });
+
+  it("fails a base fetch without retrying when the remote is unreachable", async () => {
+    let fetches = 0;
+    const scripted = makeScriptedGitService((input) => {
+      if (input.args[0] !== "fetch") return {};
+      fetches += 1;
+      return { code: 128, stderr: "fatal: Could not resolve host: example.test" };
+    });
+    const core = await makeCore(scripted.service);
+
+    await expect(
+      Effect.runPromise(
+        core.fetchRemoteBranchCommit({ cwd: process.cwd(), remoteName: "origin", branch: "main" }),
+      ),
+    ).rejects.toThrow("Git could not reach the remote");
+    expect(fetches).toBe(1);
+  });
+
   it("rejects option-like remote names before invoking git fetch", async () => {
     const scripted = makeScriptedGitService();
     const core = await makeCore(scripted.service);
