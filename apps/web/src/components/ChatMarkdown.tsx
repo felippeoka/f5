@@ -547,7 +547,12 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
                 if (!href || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
                   return;
                 event.preventDefault();
-                void openLink(href).catch(() => undefined);
+                // Option/Alt-click leaves the app like the other modifiers. Chromium would
+                // otherwise turn it into a download, so open it here while the key is still
+                // down, which lets link routers such as Finicky read it.
+                void openLink(href, event.altKey ? { external: true } : undefined).catch(
+                  () => undefined,
+                );
               }}
             >
               {isGitHub ? (
