@@ -2924,6 +2924,9 @@ export default memo(function ChatView({
     }
     useRightPanelStore.getState().open(threadId, "agents");
   }, [readSurfaceHeaderState, threadId]);
+  const onViewAgents = useCallback(() => {
+    useRightPanelStore.getState().open(threadId, "agents");
+  }, [threadId]);
   const onTogglePreview = useCallback(() => {
     if (readSurfaceHeaderState("preview") === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "preview");
@@ -7899,6 +7902,7 @@ export default memo(function ChatView({
                         prompt={prompt}
                         latestMessageAt={activeThread.messages.at(-1)?.createdAt}
                         onSuggestion={setPrompt}
+                        onViewAgents={onViewAgents}
                       />
                     </ComposerTray>
                     <ChatComposer
