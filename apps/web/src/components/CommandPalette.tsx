@@ -29,6 +29,7 @@ import {
   MessageSquareIcon,
   PauseCircleIcon,
   RocketIcon,
+  RotateCcwIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -85,7 +86,7 @@ import { openFileRightPanelSurface, setSearchParamsForSurface } from "../rightPa
 import { buildGlobalSearchQueryInput, parseGlobalSearchQuery } from "../lib/globalSearchQuery";
 import { formatRelativeTimeLabel } from "../lib/relativeTime";
 import { useStore } from "../store";
-import { liveThreadActivityAt, useThreadSummaries } from "../threadSelectors";
+import { liveThreadActivityAt, selectThreadById, useThreadSummaries } from "../threadSelectors";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useWorkflowCreateDialogStore } from "../workflowCreateDialogStore";
 import {
@@ -286,6 +287,9 @@ function OpenCommandPaletteDialog(props: {
   const codeReviewWorkflows = useStore((store) => store.codeReviewWorkflows);
   const investigationWorkflows = useStore((store) => store.investigationWorkflows);
   const queueSummary = useNextTurnQueueStore((store) => store.summary);
+  const activeSession = useStore((store) =>
+    activeThread ? (selectThreadById(store, activeThread.id)?.session ?? null) : null,
+  );
   const activeQueueSnapshot = useNextTurnQueueStore((store) =>
     activeThread ? (store.byThreadId[activeThread.id]?.snapshot ?? null) : null,
   );
@@ -779,6 +783,32 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.find",
       run: async () => {
         window.dispatchEvent(new CustomEvent("f5:find-thread", { detail: activeThread.id }));
+      },
+    });
+  // Only an idle process: stopping keeps the conversation, and the next message
+  // resumes it in a fresh process that loads newly added skills, plugins and MCP servers.
+  const restartableSession = activeSession?.status === "ready" ? activeSession : null;
+  if (activeThread && restartableSession)
+    actionItems.push({
+      kind: "action",
+      value: "action:restart-agent-session",
+      searchTerms: ["restart", "agent", "session", "reload", "skills", "plugins", "mcp"],
+      title: "Restart agent session",
+      icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const api = ensureNativeApi();
+        await api.orchestration.dispatchCommand({
+          type: "thread.session.stop",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          createdAt: new Date().toISOString(),
+        });
+        // Rescan the provider so the composer's skill menus update right away.
+        await api.server.refreshProviders(
+          restartableSession.providerInstanceId
+            ? { instanceId: restartableSession.providerInstanceId }
+            : undefined,
+        );
       },
     });
 

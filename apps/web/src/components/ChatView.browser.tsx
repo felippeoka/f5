@@ -5800,6 +5800,43 @@ describe("ChatView timeline (full app)", () => {
     }
   });
 
+  it("restarts an idle agent session from the command palette and rescans providers", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-restart-session" as MessageId,
+        targetText: "restart session test",
+      }),
+    });
+    try {
+      useCommandPaletteStore.getState().setOpen(true);
+      const paletteInput = await waitForElement(
+        () => document.querySelector<HTMLInputElement>('[data-testid="command-palette"] input'),
+        "Command palette input should render.",
+      );
+      await page.elementLocator(paletteInput).fill("restart agent");
+      await vi.waitFor(() =>
+        expect(document.querySelector('[data-testid="command-palette"]')?.textContent).toContain(
+          "Restart agent session",
+        ),
+      );
+      await page.getByText("Restart agent session").click();
+      await vi.waitFor(() => {
+        expect(getDispatchCommandRequests("thread.session.stop")).toEqual([
+          expect.objectContaining({
+            command: expect.objectContaining({ type: "thread.session.stop", threadId: THREAD_ID }),
+          }),
+        ]);
+        expect(
+          wsRequests.some((request) => request._tag === WS_METHODS.serverRefreshProviders),
+        ).toBe(true);
+      });
+    } finally {
+      useCommandPaletteStore.getState().setOpen(false);
+      await mounted.cleanup();
+    }
+  });
+
   it("creates a new thread from the global chat.new shortcut", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
