@@ -191,6 +191,7 @@ describe("GitManager unit", () => {
             url: "https://github.com/t3tools/f5/pull/42",
             baseRefName: "main",
             headRefName: "feature/test",
+            headRefOid: "abc123",
             state: "open",
           },
         ],
@@ -205,6 +206,7 @@ describe("GitManager unit", () => {
       url: "https://github.com/t3tools/f5/pull/42",
       baseBranch: "main",
       headBranch: "feature/test",
+      headOid: "abc123",
       state: "open",
     });
     expect(status.changeRequest).toMatchObject({

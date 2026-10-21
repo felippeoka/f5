@@ -53,8 +53,23 @@ describe("worktree cleanup rules", () => {
     expect(matchWorktreeCleanupRule(base)).toBeNull();
     expect(matchWorktreeCleanupRule({ ...base, nowMs: 8 * DAY_MS })).toBe("idle for 8 days");
     expect(matchWorktreeCleanupRule({ ...base, deleted: true })).toBe("the thread was deleted");
-    // A merged PR whose head is not in the default branch is not eligible.
+    // A merged PR whose head is not in the default branch is not eligible...
     expect(matchWorktreeCleanupRule({ ...base, pullRequestMerged: true })).toBeNull();
+    // ...unless the PR names this exact HEAD, as a squash or rebase merge leaves it.
+    expect(
+      matchWorktreeCleanupRule({
+        ...base,
+        pullRequestMerged: true,
+        pullRequestHeadIsWorktreeHead: true,
+      }),
+    ).toBe("the pull request was merged");
+    expect(
+      matchWorktreeCleanupRule({
+        ...base,
+        pullRequestMerged: false,
+        pullRequestHeadIsWorktreeHead: true,
+      }),
+    ).toBeNull();
     expect(
       matchWorktreeCleanupRule({ ...base, pullRequestMerged: true, headInDefaultBranch: true }),
     ).toBe("the pull request was merged");

@@ -148,6 +148,8 @@ export function matchWorktreeCleanupRule(input: {
   readonly nowMs: number;
   readonly headInDefaultBranch: boolean | null;
   readonly pullRequestMerged: boolean | null;
+  /** The merged pull request names the worktree's exact HEAD as its head commit. */
+  readonly pullRequestHeadIsWorktreeHead?: boolean;
 }): string | null {
   if (input.deleted && input.rules.onDelete) return "the thread was deleted";
   if (input.deleted) return null;
@@ -161,7 +163,13 @@ export function matchWorktreeCleanupRule(input: {
   if (input.rules.unchanged && input.headInDefaultBranch === true) {
     return "no commits beyond the default branch";
   }
-  if (input.rules.onMerge && input.headInDefaultBranch === true && input.pullRequestMerged) {
+  // A squash or rebase merge leaves HEAD outside the default branch, so the
+  // merged pull request must then name this exact commit.
+  if (
+    input.rules.onMerge &&
+    input.pullRequestMerged &&
+    (input.headInDefaultBranch === true || input.pullRequestHeadIsWorktreeHead === true)
+  ) {
     return "the pull request was merged";
   }
   return null;
@@ -289,13 +297,18 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
         .pipe(Effect.orElseSucceed(() => null));
       let headInDefaultBranch: boolean | null = null;
       let pullRequestMerged: boolean | null = null;
+      let pullRequestHeadIsWorktreeHead = false;
       if ((rules.unchanged || rules.onMerge) && headSha !== null && thread.deletedAt === null) {
         headInDefaultBranch = (yield* resolveHeadInDefaultBranch(git, projectRoot, headSha)).merged;
-        if (rules.onMerge && headInDefaultBranch === true && Option.isSome(gitManager)) {
-          pullRequestMerged = yield* gitManager.value.status({ cwd: worktreePath }).pipe(
-            Effect.map((status) => status.pr?.state === "merged"),
-            Effect.orElseSucceed(() => null),
+        if (rules.onMerge && headInDefaultBranch !== null && Option.isSome(gitManager)) {
+          const pr = yield* gitManager.value.status({ cwd: worktreePath }).pipe(
+            Effect.map((status) => status.pr),
+            Effect.orElseSucceed(() => undefined),
           );
+          if (pr !== undefined) {
+            pullRequestMerged = pr?.state === "merged";
+            pullRequestHeadIsWorktreeHead = pr?.headOid?.toLowerCase() === headSha.toLowerCase();
+          }
         }
       }
       const matched = matchWorktreeCleanupRule({
@@ -306,6 +319,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
         nowMs: input.nowMs,
         headInDefaultBranch,
         pullRequestMerged,
+        pullRequestHeadIsWorktreeHead,
       });
       if (matched === null) return { kind: "ignore" } as const;
       const blocked = yield* safetyBlock(thread, worktreePath);

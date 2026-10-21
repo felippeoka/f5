@@ -229,14 +229,17 @@ function toStatusPr(pr: PullRequestInfo): {
   url: string;
   baseBranch: string;
   headBranch: string;
+  headOid?: string;
   state: "open" | "closed" | "merged";
 } {
+  const headOid = pr.headRefOid?.trim();
   return {
     number: pr.number,
     title: pr.title,
     url: pr.url,
     baseBranch: pr.baseRefName,
     headBranch: pr.headRefName,
+    ...(headOid ? { headOid } : {}),
     state: pr.state,
   };
 }
