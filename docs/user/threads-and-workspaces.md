@@ -35,6 +35,11 @@ The right side of a thread holds the **Agents**, **Diff**, **Plan**, **Files** a
 panels; open them from the panel picker or their shortcuts. The terminal (`mod+J`) opens below the
 thread in the workspace directory, and project scripts run from the thread header.
 
+In the terminal, Shift+PageUp and Shift+PageDown page through scrollback. `mod+Shift+Home` and
+`mod+Shift+End` jump to the start and the latest output; full-screen programs keep those keys.
+Cmd+A on macOS and Ctrl+Shift+A elsewhere select all retained output, while Ctrl+A still moves to
+the start of shell input.
+
 The Files panel can edit files. If a file changes on disk while you have unsaved edits, F5 marks a
 conflict and keeps your draft. **Open in editor** hands the file to your external editor.
 

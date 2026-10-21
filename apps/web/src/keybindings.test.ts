@@ -26,6 +26,7 @@ import {
   shortcutLabelForCommand,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
+  terminalScrollbackShortcut,
   type ShortcutEventLike,
 } from "./keybindings";
 
@@ -793,6 +794,48 @@ describe("terminalDeleteShortcutData", () => {
       terminalDeleteShortcutData(
         event({ type: "keyup", key: "Backspace", metaKey: true }),
         "MacIntel",
+      ),
+    );
+  });
+});
+
+describe("terminalScrollbackShortcut", () => {
+  it("selects all with Cmd+A on macOS and Ctrl+Shift+A elsewhere, leaving Ctrl+A to the shell", () => {
+    assert.strictEqual(
+      terminalScrollbackShortcut(event({ key: "a", metaKey: true }), "MacIntel"),
+      "select-all",
+    );
+    assert.strictEqual(
+      terminalScrollbackShortcut(event({ key: "A", ctrlKey: true, shiftKey: true }), "Linux"),
+      "select-all",
+    );
+    assert.isNull(terminalScrollbackShortcut(event({ key: "a", ctrlKey: true }), "Linux"));
+    assert.isNull(terminalScrollbackShortcut(event({ key: "a", ctrlKey: true }), "MacIntel"));
+    assert.isNull(
+      terminalScrollbackShortcut(event({ key: "a", metaKey: true, shiftKey: true }), "MacIntel"),
+    );
+  });
+
+  it("jumps to the start and latest output with the primary modifier and Shift", () => {
+    assert.strictEqual(
+      terminalScrollbackShortcut(event({ key: "Home", metaKey: true, shiftKey: true }), "MacIntel"),
+      "top",
+    );
+    assert.strictEqual(
+      terminalScrollbackShortcut(event({ key: "End", ctrlKey: true, shiftKey: true }), "Win32"),
+      "bottom",
+    );
+    assert.isNull(terminalScrollbackShortcut(event({ key: "End", ctrlKey: true }), "Win32"));
+    assert.isNull(
+      terminalScrollbackShortcut(
+        event({ key: "End", ctrlKey: true, shiftKey: true, altKey: true }),
+        "Win32",
+      ),
+    );
+    assert.isNull(
+      terminalScrollbackShortcut(
+        event({ type: "keyup", key: "End", ctrlKey: true, shiftKey: true }),
+        "Linux",
       ),
     );
   });

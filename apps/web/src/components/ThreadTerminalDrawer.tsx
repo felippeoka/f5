@@ -41,6 +41,7 @@ import {
   isTerminalClearShortcut,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
+  terminalScrollbackShortcut,
 } from "../keybindings";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -488,6 +489,19 @@ function TerminalViewport({
           copyToClipboard(terminal.getSelection(), undefined);
           terminal.clearSelection();
         } else void pasteClipboard();
+        return false;
+      }
+      const scrollback = terminalScrollbackShortcut(event);
+      // Full-screen programs keep Home/End; they have no scrollback to jump through.
+      if (
+        scrollback === "select-all" ||
+        (scrollback !== null && terminal.buffer.active.type === "normal")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (scrollback === "select-all") terminal.selectAll();
+        else if (scrollback === "top") terminal.scrollToTop();
+        else terminal.scrollToBottom();
         return false;
       }
       const navigationData = terminalNavigationShortcutData(event);
