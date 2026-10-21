@@ -98,6 +98,16 @@ export function parseGrokModelsCliOutput(output: string) {
   return { authenticated, models: [...models.values()] };
 }
 
+/**
+ * Grok checks for a newer CLI when it launches. Health and skill probes run in
+ * the background, so an update they start is invisible, and on Windows it
+ * opens a console window for npm. `GROK_DISABLE_AUTOUPDATER=1` suppresses it
+ * for one process. Sessions and text generation keep the caller's environment.
+ */
+export function grokProbeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...environment, GROK_DISABLE_AUTOUPDATER: "1" };
+}
+
 const runGrokCliCommand = (
   grokSettings: GrokSettings,
   args: ReadonlyArray<string>,
@@ -105,11 +115,12 @@ const runGrokCliCommand = (
 ) =>
   Effect.gen(function* () {
     const command = grokSettings.binaryPath || "grok";
-    const invocation = yield* resolveInvocationEffect(command, args, environment);
+    const probeEnvironment = grokProbeEnvironment(environment);
+    const invocation = yield* resolveInvocationEffect(command, args, probeEnvironment);
     return yield* spawnAndCollect(
       command,
       ChildProcess.make(invocation.file, [...invocation.args], {
-        env: environment,
+        env: probeEnvironment,
       }),
     );
   });

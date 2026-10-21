@@ -1,3 +1,7 @@
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { GrokSettings } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
@@ -28,6 +32,35 @@ describe("checkGrokProviderStatus", () => {
     expect(provider.enabled).toBe(false);
     expect(provider.status).toBe("disabled");
   });
+  it.skipIf(process.platform === "win32")(
+    "keeps Grok's updater off for its health probes",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "f5-grok-probe-"));
+      const log = join(dir, "env.log");
+      const binaryPath = join(dir, "grok");
+      writeFileSync(
+        binaryPath,
+        `#!/bin/sh\necho "$1=$GROK_DISABLE_AUTOUPDATER" >> "${log}"\n[ "$1" = "--version" ] && echo "grok 1.2.0"\nexit 0\n`,
+      );
+      chmodSync(binaryPath, 0o755);
+      try {
+        const settings = Schema.decodeSync(GrokSettings)({
+          enabled: true,
+          binaryPath,
+          customModels: [],
+        });
+        await Effect.runPromise(
+          checkGrokProviderStatus(settings, { PATH: process.env.PATH }).pipe(
+            Effect.provide(NodeServices.layer),
+          ),
+        );
+        expect(readFileSync(log, "utf8")).toContain("--version=1");
+        expect(readFileSync(log, "utf8")).not.toMatch(/=\n/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
   it("reports a missing binary as unavailable", async () => {
     const settings = Schema.decodeSync(GrokSettings)({
       enabled: true,
