@@ -7949,6 +7949,9 @@ export default memo(function ChatView({
                         multiModel={fanOutModels.length > 1}
                         onOpenTerminal={createNewTerminal}
                         onComposerFocusRequest={scheduleComposerFocus}
+                        preparingWorktree={
+                          worktreeSetup?.phase === "running" || worktreeSetup?.phase === "done"
+                        }
                         {...(canCheckoutPullRequestIntoThread
                           ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                           : {})}
