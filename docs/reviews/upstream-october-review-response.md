@@ -2932,3 +2932,59 @@ shows each account separately by design.
 Validation: the provider limits, usage format and desktop Info.plist unit tests
 pass, as do the 41 Usage dashboard browser tests and the server and web
 typechecks.
+
+## September sets 11c, 12b and 11 triage log: titles, forges and Grok
+
+The seven September members left in these sets are classified in the ledger
+and keep their `11c`, `12b` and `11` ids. The result is 4 ported, 1
+equivalent, 1 not applicable and 1 still deferred with part of it ported.
+
+New ports:
+
+- [t3code#8087](https://github.com/pingdotgg/t3code/pull/8087): automatic title
+  generation retries a failed request twice with exponential backoff before it
+  falls back to the truncated message. Each attempt calls the provider again,
+  and an unsupported Codex ChatGPT model goes straight to its fallback model.
+  The first backoff is a `ThreadTitleRetryDelay` reference, so tests run it in
+  a millisecond.
+- [t3code#5941](https://github.com/pingdotgg/t3code/pull/5941): a provider's
+  thread name replaces only the default title, never one the user or title
+  generation set.
+- [t3code#10526](https://github.com/pingdotgg/t3code/pull/10526), server half:
+  Claude metadata generation runs with `--permission-mode dontAsk`, so a
+  default permission mode in the user's Claude settings cannot change it. The
+  other half syncs the title model across connected environments, which F5
+  does not have.
+- [t3code#11593](https://github.com/pingdotgg/t3code/pull/11593), web parts:
+  dialogs and alert dialogs are no-drag, so one over the desktop titlebar keeps
+  its clicks, and the model picker tooltip names the model picker shortcut.
+  The Forgejo error-body change is declined because F5 keeps forge response
+  bodies out of its errors on purpose.
+- [t3code#8358](https://github.com/pingdotgg/t3code/pull/8358), approval
+  parts: choosing "Always allow this session" when Grok offers no
+  `allow_always` option used to send `cancelled` and end the turn. It now
+  approves once, and the adapter remembers that exact operation for the
+  session; a different command still asks, and computer-use requests are never
+  remembered. Supervised sessions start Grok with `--permission-mode default`,
+  so an always-approve in the user's Grok config cannot skip the prompts.
+
+Equivalent: large Azure DevOps pull request lists
+([t3code#8572](https://github.com/pingdotgg/t3code/pull/8572)) were an az CLI
+output cap; F5 calls Azure DevOps over REST and already reads up to 16 MiB per
+response. Not applicable: slow forge CLI discovery probes
+([t3code#6223](https://github.com/pingdotgg/t3code/pull/6223)), because F5
+detects forges from remote URLs and runs no CLI probes.
+
+Still deferred from t3code#8358: the Grok turn inactivity watchdog (about 300
+lines of race-sensitive liveness state that F5's shared Grok, ACP and
+Antigravity adapter would need adapted, not copied), capturing Grok's native
+plan mode as a proposed plan, reasoning effort through `session/set_model`
+metadata, and the ACP tool-content bounding and coalescing changes, which are
+not compared yet.
+
+Validation: the Grok adapter tests fail without the fix (both turns end
+`cancelled`), as does the dialog test without `no-drag`, the model picker
+tooltip test without the shortcut, and the Claude text generation suite
+without `dontAsk` (18 failures). The 11 suites that use the mock ACP agent
+(191 tests), the title and reactor suites, and the server and web typechecks
+pass.

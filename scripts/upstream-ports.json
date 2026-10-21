@@ -5107,16 +5107,17 @@
     {
       "upstreamSha": "24b711b7f9ccba03518551991e466e2e4f8ace5a",
       "subject": "fix: multiple UI and server bug fixes (#11593)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix: multiple UI and server bug fixes.",
+      "reason": "Ported (web): dialogs and alert dialogs declare themselves no-drag, so one that overlaps the desktop titlebar keeps its clicks, and the model picker tooltip shows the model picker shortcut. Declined: the Forgejo error text change, because F5 deliberately keeps forge response bodies out of its errors (apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:351). Not applicable: the provider icon z-index fix (F5's model picker sidebar draws plain icons with no indicator layer) and the iOS terminal view (no mobile app). Upstream change: fix: multiple UI and server bug fixes (#11593)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "12b",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
+      "f5Shas": [
+        "e073f2654001c9c72cb7a8f78cbec5dc6bf58c85",
+        "408f212d913d1ab8e130575133e7591b73c52ad9"
+      ],
       "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
+        "apps/web/src/components/ui/dialog.browser.tsx:12",
+        "apps/web/src/components/chat/ProviderModelPicker.browser.tsx:166"
       ]
     },
     {
@@ -22823,17 +22824,12 @@
     {
       "upstreamSha": "a56b0cd7178dfef299aa49b26773a80a34abe205",
       "subject": "fix(server): allow large Azure DevOps PR lists (#8572)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): allow large Azure DevOps PR lists.",
+      "reason": "Equivalent: upstream raises the az CLI output cap to 16 MiB so large Azure DevOps pull request lists parse. F5 talks to Azure DevOps over REST, not the az CLI, and already reads up to 16 MiB per response. Upstream change: fix(server): allow large Azure DevOps PR lists (#8572)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "equivalent",
       "plannedWorkstream": "12b",
-      "f5Shas": ["e073f2654001c9c72cb7a8f78cbec5dc6bf58c85"],
-      "evidence": [
-        "docs/user/pr-hub-forges.md:1",
-        "apps/server/src/prHub/Layers/PrHubFederation.ts:1",
-        "apps/server/src/sourceControl/ForgeSourceControlProvider.ts:1",
-        "apps/web/src/components/prHub/ForgeControls.tsx:1"
-      ]
+      "f5Shas": ["57c1f66f615d8b4e8150d592b46ca4001974d41a"],
+      "evidence": ["apps/server/src/sourceControl/ForgeSourceControlProvider.ts:301"]
     },
     {
       "upstreamSha": "a5ac766596bdf6c7d6852ecda453e2a85a7b08d4",
@@ -25714,16 +25710,18 @@
     {
       "upstreamSha": "bc4b00666272188027d086361fa5ae01cda53bd2",
       "subject": "fix: generate thread titles with the selected model across connections (#10526)",
-      "reason": "The linked commit implements the f5-native phase 11 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix: generate thread titles with the selected model across connections (#10526).",
+      "reason": "Ported (server half): Claude title and commit-message generation runs with --permission-mode dontAsk, so a default permission mode from the user's Claude settings cannot change how metadata is generated. Not applicable: the rest syncs the text-generation model across connected environments, which F5 does not have. Upstream change: fix: generate thread titles with the selected model across connections (#10526)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "11c",
       "evidence": [
-        "docs/user/usage-limits.md:1",
-        "apps/server/src/orchestration/decider.ts:1",
-        "apps/server/src/orchestration/decider.titleRegeneration.test.ts:1"
+        "apps/server/src/git/Layers/ClaudeTextGeneration.ts:208",
+        "apps/server/src/git/Layers/ClaudeTextGeneration.test.ts:31"
       ],
-      "f5Shas": ["d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22"]
+      "f5Shas": [
+        "d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22",
+        "5d8373f16d9d5b84ad0ab6478c1c4253ade17939"
+      ]
     },
     {
       "upstreamSha": "bc5f754baabf62b5488cfb4007d3ab33b6957c03",
@@ -29348,9 +29346,9 @@
     {
       "upstreamSha": "d715c2e56bb718d2225cc0f07cc65e6c637dc229",
       "subject": "fix(server): let slow provider CLIs raise their discovery probe budget (#6223)",
-      "reason": "The linked commit implements the f5-native Phase 12 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): let slow provider CLIs raise their discovery probe budget.",
+      "reason": "Not applicable: upstream lets slow forge CLIs (az, glab, fj) raise their discovery probe timeout. F5 detects a forge from the remote URL and configured hosts (apps/server/src/sourceControl/discovery.ts) and runs no CLI probes for it. Upstream change: fix(server): let slow provider CLIs raise their discovery probe budget (#6223)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "12b",
       "evidence": [
         "docs/user/pr-hub-forges.md:1",
@@ -30325,16 +30323,15 @@
     {
       "upstreamSha": "ddee418a8d6d3e242ca26a8053a886ecc3b56b53",
       "subject": "fix(server): stop the provider title mirror from overwriting real thread titles (#5941)",
-      "reason": "The linked commit implements the f5-native phase 11 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): stop the provider title mirror from overwriting real thread titles (#5941).",
+      "reason": "Ported: a provider's thread name updates the title only while the thread still has its default title, so it never overwrites a title the user or title generation set. Upstream change: fix(server): stop the provider title mirror from overwriting real thread titles (#5941)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "11c",
-      "evidence": [
-        "docs/user/usage-limits.md:1",
-        "apps/server/src/orchestration/decider.ts:1",
-        "apps/server/src/orchestration/decider.titleRegeneration.test.ts:1"
-      ],
-      "f5Shas": ["d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22"]
+      "evidence": ["apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:7133"],
+      "f5Shas": [
+        "d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22",
+        "f75b92546a4727021843ecabc1f14e18f91ec713"
+      ]
     },
     {
       "upstreamSha": "ddfe45c66eccd93c0adf61db92a16cbbbcde23e1",
@@ -32126,13 +32123,19 @@
     {
       "upstreamSha": "ead4ce52a1624d9c55461f61524580978fc8b719",
       "subject": "fix(grok): improve skills, plans, usage, and turn reliability (#8358)",
-      "reason": "The linked commit implements the f5-native phase 11 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(grok): improve skills, plans, usage, and turn reliability (#8358).",
+      "reason": "Partly ported (248320007c): choosing Always allow when Grok offers no allow_always approves once instead of cancelling the turn, the adapter remembers that operation for the session, and Supervised sessions start Grok with --permission-mode default. Still deferred: the Grok turn inactivity watchdog (10 minutes, 30 with an active tool), capturing Grok's native plan mode (enter_plan_mode, exit_plan_mode, plan.md) as a proposed plan, reasoning effort through session/set_model metadata, and the ACP tool-content bounding and coalescing changes in AcpRuntimeModel, which have not been compared yet. Equivalent: Grok skills (apps/server/src/provider/Drivers/GrokSkills.ts). Not applicable: transcript usage readers (F5 reads no provider history), the rate-limit fix to the xAI prompt_complete fallback (F5 never had that fallback), and the mobile usage list. Upstream change: fix(grok): improve skills, plans, usage, and turn reliability (#8358)",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "evidence": ["docs/user/usage-limits.md:1", "apps/server/src/usage/providerLimits.ts:1"],
+      "evidence": [
+        "docs/user/usage-limits.md:1",
+        "apps/server/src/usage/providerLimits.ts:1",
+        "apps/server/src/provider/Layers/GrokAdapter.test.ts:501",
+        "apps/server/src/provider/acp/GrokAcpSupport.test.ts:28"
+      ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
-        "d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22"
+        "d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22",
+        "248320007cdfebeec43a0c011acc13c04e8e5015"
       ],
       "plannedWorkstream": "11"
     },
@@ -34599,16 +34602,19 @@
     {
       "upstreamSha": "fc262f1a28d8305951c751f2486da6ca72e6c1d1",
       "subject": "fix(server): retry automatic thread title generation (#8087)",
-      "reason": "The linked commit implements the f5-native phase 11 plan. Full equivalence for this additional upstream-specific change has not been established; retain its deferred disposition pending a targeted comparison: fix(server): retry automatic thread title generation (#8087).",
+      "reason": "Ported: automatic title generation retries a failed request twice with exponential backoff (2 seconds first) before falling back to the truncated message. Each attempt calls the provider again. An unsupported Codex ChatGPT model is not retried, since it has its own fallback model. Upstream change: fix(server): retry automatic thread title generation (#8087)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "ported",
       "plannedWorkstream": "11c",
       "evidence": [
-        "docs/user/usage-limits.md:1",
-        "apps/server/src/orchestration/decider.ts:1",
-        "apps/server/src/orchestration/decider.titleRegeneration.test.ts:1"
+        "apps/server/src/threadTitle.test.ts:215",
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts:4164"
       ],
-      "f5Shas": ["d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22"]
+      "f5Shas": [
+        "d9b6640c9d6200dc5bbd9a9bc7f994d84c981e22",
+        "fbc544a6c1fc9c0885835b8f3ae21f94aaa8df8b",
+        "d3e940a9c654dccec30718914667acc87760bc26"
+      ]
     },
     {
       "upstreamSha": "fc28abf24b034502402cba1fedf5fa38658ee2e8",
