@@ -255,7 +255,10 @@ import { Button } from "./ui/button";
 import { randomUUID } from "~/lib/utils";
 
 import { toastManager } from "./ui/toast";
-import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
+import {
+  decodeProjectScriptKeybindingRule,
+  replaceProjectScriptKeybinding,
+} from "~/lib/projectScriptKeybindings";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
   commandForProjectScript,
@@ -3337,22 +3340,14 @@ export default memo(function ChatView({
         command: input.keybindingCommand,
       });
 
-      if (isElectron) {
-        const currentServerConfig = queryClient.getQueryData<ServerConfig>(
-          serverQueryKeys.config(),
-        );
-        const staleRules =
-          currentServerConfig?.customKeybindings.filter(
-            (rule) => rule.command === input.keybindingCommand,
-          ) ?? [];
-        for (const target of staleRules) {
-          await api.server.removeKeybinding({ target });
-        }
-        if (keybindingRule) {
-          await api.server.addKeybinding({ rule: keybindingRule });
-        }
-        await queryClient.invalidateQueries({ queryKey: serverQueryKeys.all });
-      }
+      await replaceProjectScriptKeybinding({
+        server: api.server,
+        customKeybindings:
+          queryClient.getQueryData<ServerConfig>(serverQueryKeys.config())?.customKeybindings ?? [],
+        command: input.keybindingCommand,
+        rule: keybindingRule,
+      });
+      await queryClient.invalidateQueries({ queryKey: serverQueryKeys.all });
     },
     [queryClient],
   );
