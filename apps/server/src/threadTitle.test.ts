@@ -211,6 +211,35 @@ describe("resolveBestEffortGeneratedTitle", () => {
     );
   });
 
+  it("retries a transient title failure before falling back", async () => {
+    const generateThreadTitle = vi
+      .fn()
+      .mockImplementationOnce(() => Effect.fail(new Error("Claude CLI request timed out.")))
+      .mockImplementationOnce(() => Effect.fail(new Error("Claude CLI request timed out.")))
+      .mockImplementationOnce(() => Effect.succeed({ title: "Generated after retry" }));
+
+    const title = await Effect.runPromise(
+      resolveBestEffortGeneratedTitle({
+        cwd: "/tmp/project",
+        titleSourceText: "Plan the workflow",
+        attachments: [],
+        defaultTitle: "New thread",
+        retryDelay: "1 millis",
+        textGeneration: {
+          generateCommitMessage: () => Effect.die("unsupported"),
+          generatePrContent: () => Effect.die("unsupported"),
+          generateBranchName: () => Effect.die("unsupported"),
+          generateThreadTitle,
+          generateStructuredJson: () => Effect.die("unsupported"),
+        },
+        logPrefix: "threadTitle test",
+      }),
+    );
+
+    expect(title).toBe("Generated after retry");
+    expect(generateThreadTitle).toHaveBeenCalledTimes(3);
+  });
+
   it.each(["gpt-5.3-codex", DEFAULT_THREAD_TITLE_MODEL_BY_PROVIDER.codex])(
     "retries unsupported ChatGPT Codex title model %s with the standard Codex model",
     async (model) => {
