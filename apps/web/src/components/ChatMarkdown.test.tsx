@@ -222,3 +222,18 @@ it("renders file URI links as chips but still empties unsafe schemes", async () 
   expect(html).toContain('href="file:///tmp/project/a.ts" class="chat-markdown-file-link"');
   expect(html).not.toContain("javascript:");
 });
+
+it("marks image-only links so they render without an underline", async () => {
+  const { default: ChatMarkdown } = await import("./ChatMarkdown");
+  const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+  const html = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <ChatMarkdown
+        text="[![build](https://example.com/badge.svg)](https://example.com/ci) and [docs](https://example.com/docs)"
+        cwd="/tmp/project"
+      />
+    </QueryClientProvider>,
+  );
+  expect(html.match(/data-markdown-image-link="true"/g)).toHaveLength(1);
+  expect(html).toMatch(/<a data-markdown-image-link="true" href="https:\/\/example\.com\/ci"/);
+});

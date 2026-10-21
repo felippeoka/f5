@@ -543,6 +543,8 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
           return (
             <a
               {...props}
+              // An image-only link (a badge, a screenshot) gets no underline.
+              data-markdown-image-link={nodeToPlainText(children).trim() === "" || undefined}
               href={href}
               target="_blank"
               rel="noreferrer"

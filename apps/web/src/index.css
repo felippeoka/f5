@@ -582,6 +582,10 @@ label:has(> select#reasoning-effort) select {
   opacity: 0.8;
 }
 
+.chat-markdown a[data-markdown-image-link] {
+  text-decoration: none;
+}
+
 .chat-markdown a.chat-markdown-file-link {
   display: inline-flex;
   align-items: center;
