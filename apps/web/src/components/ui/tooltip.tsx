@@ -1,6 +1,29 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 
-import { cn } from "~/lib/utils";
+import { isElectron } from "~/env";
+import { cn, isMacPlatform } from "~/lib/utils";
+
+// Base UI's default viewport margin.
+const COLLISION_PADDING = 5;
+// The desktop app centers the macOS traffic lights in the 52px app header
+// (--app-header-height). macOS has no overlay API to measure, so treat that
+// strip as off-screen and let a tooltip that would open under the lights flip.
+const MACOS_TITLEBAR_HEIGHT = 52;
+
+/** Top padding that keeps tooltips out of the native titlebar strip. */
+export function tooltipTopCollisionPadding(electron: boolean, platform: string): number {
+  return COLLISION_PADDING + (electron && isMacPlatform(platform) ? MACOS_TITLEBAR_HEIGHT : 0);
+}
+
+const TOOLTIP_COLLISION_PADDING = {
+  top: tooltipTopCollisionPadding(
+    isElectron,
+    typeof navigator === "undefined" ? "" : navigator.platform,
+  ),
+  right: COLLISION_PADDING,
+  bottom: COLLISION_PADDING,
+  left: COLLISION_PADDING,
+};
 
 const TooltipCreateHandle = TooltipPrimitive.createHandle;
 
@@ -32,6 +55,7 @@ function TooltipPopup({
         align={align}
         anchor={anchor}
         className="z-50 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
+        collisionPadding={TOOLTIP_COLLISION_PADDING}
         data-slot="tooltip-positioner"
         side={side}
         sideOffset={sideOffset}
