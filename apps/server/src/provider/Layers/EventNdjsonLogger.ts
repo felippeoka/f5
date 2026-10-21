@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { ThreadId } from "@t3tools/contracts";
-import { RotatingFileSink } from "@t3tools/shared/logging";
+import { AsyncRotatingFileSink } from "@t3tools/shared/logging";
 import { Effect, Exit, Logger, Scope } from "effect";
 
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
@@ -17,6 +17,7 @@ import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_FILES = 10;
 const DEFAULT_BATCH_WINDOW_MS = 200;
+const CLOSE_DRAIN_TIMEOUT = "2 seconds";
 const GLOBAL_THREAD_SEGMENT = "_global";
 const LOG_SCOPE = "provider-observability";
 
@@ -126,21 +127,16 @@ function makeThreadWriter(input: {
   readonly streamLabel: string;
 }): Effect.Effect<ThreadWriter | undefined> {
   return Effect.gen(function* () {
-    const sinkResult = yield* Effect.sync(() => {
-      try {
-        return {
-          ok: true as const,
-          sink: new RotatingFileSink({
-            filePath: input.filePath,
-            maxBytes: input.maxBytes,
-            maxFiles: input.maxFiles,
-            throwOnError: true,
-          }),
-        };
-      } catch (error) {
-        return { ok: false as const, error };
-      }
-    });
+    const sinkResult = yield* Effect.promise(() =>
+      AsyncRotatingFileSink.open({
+        filePath: input.filePath,
+        maxBytes: input.maxBytes,
+        maxFiles: input.maxFiles,
+      }).then(
+        (sink) => ({ ok: true as const, sink }),
+        (error: unknown) => ({ ok: false as const, error }),
+      ),
+    );
 
     if (!sinkResult.ok) {
       yield* logWarning("failed to initialize provider thread log file", {
@@ -150,29 +146,27 @@ function makeThreadWriter(input: {
       return undefined;
     }
 
+    // Writes run asynchronously, so a slow disk delays the log instead of the event loop.
     const sink = sinkResult.sink;
+    let reported = { droppedChunks: 0, failedWrites: 0 };
     const scope = yield* Scope.make();
     const lineLogger = makeLineLogger(input.streamLabel);
     const batchedLogger = yield* Logger.batched(lineLogger, {
       window: input.batchWindowMs,
       flush: (messages) =>
         Effect.gen(function* () {
-          const flushResult = yield* Effect.sync(() => {
-            try {
-              for (const message of messages) {
-                sink.write(message);
-              }
-              return { ok: true as const };
-            } catch (error) {
-              return { ok: false as const, error };
-            }
-          });
-
-          if (!flushResult.ok) {
+          for (const message of messages) sink.write(message);
+          const statistics = sink.statistics;
+          if (
+            statistics.droppedChunks > reported.droppedChunks ||
+            statistics.failedWrites > reported.failedWrites
+          ) {
             yield* logWarning("provider event log batch flush failed", {
               filePath: input.filePath,
-              error: flushResult.error,
+              droppedChunks: statistics.droppedChunks - reported.droppedChunks,
+              failedWrites: statistics.failedWrites - reported.failedWrites,
             });
+            reported = statistics;
           }
         }),
     }).pipe(Effect.provideService(Scope.Scope, scope));
@@ -184,7 +178,15 @@ function makeThreadWriter(input: {
         return Effect.log(message).pipe(Effect.provide(loggerLayer));
       },
       close() {
-        return Scope.close(scope, Exit.void);
+        // A stuck disk never holds shutdown: accepted chunks get a bounded drain.
+        return Scope.close(scope, Exit.void).pipe(
+          Effect.andThen(
+            Effect.promise(() => sink.flushed()).pipe(
+              Effect.timeoutOption(CLOSE_DRAIN_TIMEOUT),
+              Effect.asVoid,
+            ),
+          ),
+        );
       },
     } satisfies ThreadWriter;
   });
