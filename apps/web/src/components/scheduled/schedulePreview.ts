@@ -4,19 +4,13 @@ export type PreviewState =
   | { kind: "unpreviewed" }
   | { kind: "loading"; key: string }
   | { kind: "error"; key: string; message: string }
-  | { kind: "ready" | "confirmed" | "saving"; key: string; preview: SchedulePreview };
+  | { kind: "ready"; key: string; preview: SchedulePreview };
 export function confirmedSchedule(
   state: PreviewState,
   key: string,
-  naturalLanguage: boolean,
   now = Date.now(),
 ): SchedulePreview | null {
-  if (
-    (state.kind !== "ready" && state.kind !== "confirmed") ||
-    state.key !== key ||
-    (naturalLanguage && state.kind !== "confirmed")
-  )
-    return null;
+  if (state.kind !== "ready" || state.key !== key) return null;
   if (state.preview.oneShotAt && Date.parse(state.preview.oneShotAt) <= now) return null;
   return state.preview.nextFireTimes.length ? state.preview : null;
 }

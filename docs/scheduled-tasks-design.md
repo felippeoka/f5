@@ -62,10 +62,17 @@ Phase 3 verification: 234 focused scheduler/Bridge/queue/orchestration tests pas
 
 Phase 3 also fixes earlier-phase lifecycle cases: completed turns retain unresolved input attention; user answers are durably associated and preserve execution settings and budget; known not-sent delivery failures settle after fencing; archived-thread failures retain their reason; metadata-only edits remain possible for expired one-shots.
 
+## Schedule editor defaults
+
+New tasks default to the project root and the daily preset. The workspace menu lists the project root first; worktree isolation remains an explicit option. Existing tasks retain their saved workspace and cron.
+
+The dialog offers Preset and Cron. The cron editor uses the shared evaluator for live descriptions and field-specific validation, inside one compact expression box, with sections navigable by Tab and a copy action. Pasting a full expression into any field distributes it across the editor. Expressions are bounded to 512 characters in both the input and shared validation; lists, ranges, steps, named months/weekdays and nth weekdays remain supported. The dialog keeps a fixed viewport-bounded height, and the description below the cron retains its last result while the next calculation is pending. Saving remains fenced by the current inputs. Descriptions and the next fire update automatically after edits; the Next link expands the five upcoming fires. Field ranges are available on hover, with no visible tutorial or example buttons. There is no preview button. Saving requires a matching valid calculation of the normalized expression, timezone and next fires. The natural-language option is removed from the dialog; existing one-shot tasks remain editable.
+
 ## Manual acceptance checklist
 
-- [ ] Confirm NL schedules, including first Monday and one-shot examples.
-- [ ] Run in a fresh worktree and explicitly at the project root; test project/provider skills and missing-skill warnings.
+- [ ] Create a task from the daily preset; verify Project root is selected first and by default.
+- [ ] Try the compact Cron editor, Tab navigation, full-expression paste, invalid ranges and automatic next-fire updates; edit an existing one-shot.
+- [ ] Run at the project root and explicitly in a fresh worktree; test project/provider skills and missing-skill warnings.
 - [ ] Respond to approval/input attention and observe settlement.
 - [ ] Restart across multiple fires; verify one catch-up, overlap/pending coalescing and capacity recovery.
 - [ ] Disable queued work and verify no send; resolve ambiguous delivery without resending.

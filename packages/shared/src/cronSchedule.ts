@@ -3,12 +3,27 @@ import cronstrue from "cronstrue";
 
 export class ScheduleError extends Error {
   readonly code: "invalid_schedule" | "evaluation_limit";
-  constructor(message: string, code: ScheduleError["code"] = "invalid_schedule") {
+  readonly fieldIndex: number | undefined;
+  constructor(
+    message: string,
+    code: ScheduleError["code"] = "invalid_schedule",
+    fieldIndex?: number,
+  ) {
     super(message);
     this.name = "ScheduleError";
     this.code = code;
+    this.fieldIndex = fieldIndex;
   }
 }
+/** Allows full numeric lists in every field while bounding parsing and editor input. */
+export const CRON_EXPRESSION_MAX_LENGTH = 512;
+export const CRON_SCHEDULE_FIELDS = [
+  { label: "Minute", range: "0–59" },
+  { label: "Hour", range: "0–23" },
+  { label: "Day of month", range: "1–31" },
+  { label: "Month", range: "1–12 or JAN–DEC" },
+  { label: "Day of week", range: "0–7 or SUN–SAT (0 and 7 are Sunday)" },
+] as const;
 export const SCHEDULE_PRESETS = {
   hourly: "0 * * * *",
   daily: "0 9 * * *",
@@ -32,6 +47,10 @@ export function validateTimezone(timezone: string): string {
   }
 }
 export function normalizeCron(value: string): string {
+  if (value.length > CRON_EXPRESSION_MAX_LENGTH)
+    throw new ScheduleError(
+      `Cron expressions can have at most ${CRON_EXPRESSION_MAX_LENGTH} characters.`,
+    );
   const cron =
     aliases[value.trim().toLowerCase()] ?? value.trim().replace(/\s+/g, " ").toUpperCase();
   const fields = cron.split(" ");
@@ -39,17 +58,23 @@ export function normalizeCron(value: string): string {
     throw new ScheduleError(
       "Use five fields for recurring schedules or seven fields for a one-shot schedule.",
     );
-  if (!/^[0-9A-Z*,/# -]+$/.test(cron)) throw new ScheduleError("Unsupported cron syntax.");
+  const unsupported = fields.findIndex((field) => !/^[0-9A-Z*,/#-]+$/.test(field));
+  if (unsupported !== -1)
+    throw new ScheduleError(
+      "Unsupported cron character. Use numbers, month/day names, *, /, -, comma or #.",
+      "invalid_schedule",
+      unsupported,
+    );
   const recurring = fields.length === 5 ? fields : fields.slice(1, 6);
   const [minute, hour, day, month, weekday] = recurring;
   const numeric = /^(?:\*|\d+(?:-\d+)?)(?:\/\d+)?(?:,(?:\*|\d+(?:-\d+)?)(?:\/\d+)?)*$/;
   const named = (s: string, names: string[]) =>
     names.reduce((v, name, i) => v.replaceAll(name, String(i + (names[0] === "JAN" ? 1 : 0))), s);
-  if (
-    !numeric.test(minute!) ||
-    !numeric.test(hour!) ||
-    !numeric.test(day!) ||
-    !numeric.test(
+  const validFields = [
+    numeric.test(minute!),
+    numeric.test(hour!),
+    numeric.test(day!),
+    numeric.test(
       named(month!, [
         "JAN",
         "FEB",
@@ -64,14 +89,17 @@ export function normalizeCron(value: string): string {
         "NOV",
         "DEC",
       ]),
-    ) ||
-    !(
-      numeric.test(named(weekday!, ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"])) ||
-      /^(?:[0-7]|SUN|MON|TUE|WED|THU|FRI|SAT)#[1-5]$/.test(weekday!)
-    )
-  )
+    ),
+    numeric.test(named(weekday!, ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"])) ||
+      /^(?:[0-7]|SUN|MON|TUE|WED|THU|FRI|SAT)#[1-5]$/.test(weekday!),
+  ];
+  const invalidField = validFields.findIndex((valid) => !valid);
+  const offset = fields.length === 7 ? 1 : 0;
+  if (invalidField !== -1)
     throw new ScheduleError(
-      "Unsupported cron field. Use numbers, names, lists, ranges, steps, or a single nth weekday.",
+      `${CRON_SCHEDULE_FIELDS[invalidField]!.label}: use numbers, supported names, lists, ranges, steps${invalidField === 4 ? " or a single nth weekday (#1–#5)" : ""}.`,
+      "invalid_schedule",
+      invalidField + offset,
     );
   if (
     fields.length === 7 &&
@@ -86,6 +114,21 @@ export function normalizeCron(value: string): string {
   try {
     new Cron(cron, { paused: true, domAndDow: false, timezone: "UTC" });
   } catch {
+    // Only inspect individual fields on failure; valid scheduling keeps the
+    // existing single-parser path and uses the same range rules as Croner.
+    for (const [index, field] of recurring.entries()) {
+      const probe = ["0", "0", "*", "*", "*"];
+      probe[index] = field;
+      try {
+        new Cron(probe.join(" "), { paused: true, domAndDow: false, timezone: "UTC" });
+      } catch {
+        throw new ScheduleError(
+          `${CRON_SCHEDULE_FIELDS[index]!.label}: expected ${CRON_SCHEDULE_FIELDS[index]!.range}. Check ranges and use a positive step.`,
+          "invalid_schedule",
+          index + offset,
+        );
+      }
+    }
     throw new ScheduleError("Invalid cron expression.");
   }
   return cron;

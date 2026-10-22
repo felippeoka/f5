@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CRON_EXPRESSION_MAX_LENGTH,
+  ScheduleError,
   describeSchedule,
   nextScheduleFires,
   normalizeCron,
@@ -29,6 +31,37 @@ describe("cron schedule contract", () => {
     "0 0 * * MON#6",
     "0 0 * * MON#1,TUE#2",
   ])("rejects unsupported grammar %s", (cron) => expect(() => normalizeCron(cron)).toThrow());
+  it.each([
+    ["60 * * * *", 0],
+    ["0 24 * * *", 1],
+    ["0 0 0 * *", 2],
+    ["0 0 * 13 *", 3],
+    ["0 0 * * 8", 4],
+    ["*/0 * * * *", 0],
+    ["0 0 * * MON#6", 4],
+    ["0 0 ? * *", 2],
+    ["0 0 24 1 1 * 2027", 2],
+  ])("identifies the invalid field in %s", (cron, fieldIndex) => {
+    try {
+      normalizeCron(cron as string);
+      expect.fail("Expected invalid cron to be rejected");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ScheduleError);
+      expect((error as ScheduleError).fieldIndex).toBe(fieldIndex);
+    }
+  });
+  it("bounds input length without restricting valid lists, ranges or steps", () => {
+    const all = (count: number, start = 0) =>
+      Array.from({ length: count }, (_, i) => start + i).join(",");
+    const lists = `${all(60)} ${all(24)} ${all(31, 1)} ${all(12, 1)} ${all(7)}`;
+    expect(normalizeCron(lists)).toBe(lists);
+    expect(normalizeCron("*/15 9-17 * JAN-MAR MON-FRI")).toBe("*/15 9-17 * JAN-MAR MON-FRI");
+    expect(normalizeCron("0 0 * * 7")).toBe("0 0 * * 7");
+    expect(() => normalizeCron("*".repeat(CRON_EXPRESSION_MAX_LENGTH + 1))).toThrow(/at most 512/);
+    expect(() => normalizeCron(" ".repeat(CRON_EXPRESSION_MAX_LENGTH) + "@daily")).toThrow(
+      /at most 512/,
+    );
+  });
   it("rejects invalid timezones", () =>
     expect(() => next("* * * * *", "Mars/Olympus", "2026-01-01Z")).toThrow());
   it("handles first Monday", () =>

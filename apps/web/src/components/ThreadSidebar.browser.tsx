@@ -1104,12 +1104,7 @@ describe("Thread sidebar", () => {
       expect(querySidebarButtonByText("Archived")).toBeNull();
       expect(querySidebarButtonByText("Snoozed (1)")).toBeNull();
       toggle.click();
-      for (const title of [
-        "Scheduled working",
-        "Scheduled attention",
-        "Scheduled archived",
-        "Scheduled snoozed",
-      ]) {
+      for (const title of ["Scheduled working", "Scheduled attention", "Scheduled snoozed"]) {
         const row = await waitForElement(
           () =>
             [...folder.querySelectorAll<HTMLElement>('[data-slot="sidebar-menu-sub-button"]')].find(
@@ -1121,7 +1116,17 @@ describe("Thread sidebar", () => {
         if (title !== "Scheduled snoozed")
           expect(document.querySelectorAll(`[data-testid="thread-row-${title}"]`)).toHaveLength(1);
       }
+      expect(querySidebarThreadRowByTitle("Scheduled archived")).toBeNull();
+      const archivedToggle = [...folder.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent?.trim() === "Archived",
+      )!;
+      expect(archivedToggle.getAttribute("aria-expanded")).toBe("false");
+      archivedToggle.click();
+      await waitForSidebarThreadRow("Scheduled archived");
       expect(folder.querySelector('[aria-label="Unarchive Scheduled archived"]')).not.toBeNull();
+      archivedToggle.click();
+      await vi.waitFor(() => expect(querySidebarThreadRowByTitle("Scheduled archived")).toBeNull());
+      expect(querySidebarThreadRowByTitle("Scheduled working")).not.toBeNull();
       toggle.click();
       await vi.waitFor(() => expect(querySidebarThreadRowByTitle("Scheduled working")).toBeNull());
     } finally {
@@ -1176,6 +1181,86 @@ describe("Thread sidebar", () => {
       await mounted.cleanup();
     }
   });
+
+  it.each([false, true])(
+    "keeps Scheduled archive previews independent and reveals selected archives (%s)",
+    async (selectArchive) => {
+      seedAppSettings({ sidebarThreadPreviewCount: 5 });
+      const selectedId = "archived-scheduled-0" as ThreadId;
+      const scheduled = (archived: boolean, index: number) =>
+        createSnapshotThread({
+          id: `${archived ? "archived" : "active"}-scheduled-${index}` as ThreadId,
+          title: `${archived ? "Archived" : "Active"} scheduled ${index}`,
+          lastInteractionAt: `2026-03-11T11:${String(index).padStart(2, "0")}:00.000Z`,
+          archivedAt: archived ? NOW_ISO : null,
+          scheduledOrigin: {
+            taskId: ScheduledTaskId.makeUnsafe("task"),
+            runId: ScheduledTaskRunId.makeUnsafe(`${archived}-${index}`),
+          },
+        });
+      const mounted = await mountApp({
+        width: 1_400,
+        initialEntries: [`/${selectArchive ? selectedId : THREAD_ID}`],
+        configureFixture: (nextFixture) => {
+          nextFixture.snapshot = createSnapshot([
+            createSnapshotThread({ id: THREAD_ID, title: "Normal conversation" }),
+            createSnapshotThread({
+              id: "normal-archive" as ThreadId,
+              title: "Normal archive",
+              archivedAt: NOW_ISO,
+            }),
+            ...Array.from({ length: 8 }, (_, index) => scheduled(false, index)),
+            ...Array.from({ length: 8 }, (_, index) => scheduled(true, index)),
+          ]);
+        },
+      });
+      try {
+        await waitForSidebarThreadRow(
+          selectArchive ? "Archived scheduled 0" : "Normal conversation",
+        );
+        const folder = document.querySelector<HTMLElement>(
+          '[data-testid="scheduled-thread-folder"]',
+        )!;
+        const toggle = folder.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+        if (!selectArchive) toggle.click();
+        const currentRows = () =>
+          folder.querySelectorAll('[data-testid^="thread-row-active-scheduled-"]');
+        const archivedRows = () =>
+          folder.querySelectorAll('[data-testid^="thread-row-archived-scheduled-"]');
+        await vi.waitFor(() => expect(currentRows()).toHaveLength(5));
+        const archivedToggle = [...folder.querySelectorAll<HTMLButtonElement>("button")].find(
+          (button) => button.textContent?.trim() === "Archived",
+        )!;
+        expect(archivedToggle.getAttribute("aria-expanded")).toBe(String(selectArchive));
+        expect(archivedRows()).toHaveLength(selectArchive ? 6 : 0);
+        if (!selectArchive) archivedToggle.click();
+        await vi.waitFor(() => expect(archivedRows()).toHaveLength(selectArchive ? 6 : 5));
+        const moreButtons = () =>
+          [...folder.querySelectorAll<HTMLButtonElement>("button")].filter(
+            (button) => button.textContent?.trim() === "Show more",
+          );
+        expect(moreButtons()).toHaveLength(2);
+        moreButtons()[0]!.click();
+        await vi.waitFor(() => expect(currentRows()).toHaveLength(8));
+        expect(archivedRows()).toHaveLength(selectArchive ? 6 : 5);
+        moreButtons()[0]!.click();
+        await vi.waitFor(() => expect(archivedRows()).toHaveLength(8));
+        archivedToggle.click();
+        await vi.waitFor(() => expect(archivedRows()).toHaveLength(0));
+        expect(currentRows()).toHaveLength(8);
+        expect(querySidebarThreadRowByTitle("Normal archive")).toBeNull();
+        const otherArchiveToggle = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+          (button) => button.textContent?.trim() === "Archived" && !folder.contains(button),
+        )!;
+        expect(otherArchiveToggle.getAttribute("aria-expanded")).toBe("false");
+        otherArchiveToggle.click();
+        await waitForSidebarThreadRow("Normal archive");
+        expect(archivedRows()).toHaveLength(0);
+      } finally {
+        await mounted.cleanup();
+      }
+    },
+  );
 
   it.each(["sidebar", "header"] as const)(
     "opens the source scheduler editor from the %s thread menu",
@@ -1236,17 +1321,9 @@ describe("Thread sidebar", () => {
         },
       });
       try {
-        const row = await waitForSidebarThreadRow("Renamed execution");
+        await waitForSidebarThreadRow("Renamed execution");
         if (surface === "sidebar") {
-          row.dispatchEvent(
-            new MouseEvent("contextmenu", {
-              bubbles: true,
-              cancelable: true,
-              button: 2,
-              clientX: 100,
-              clientY: 200,
-            }),
-          );
+          await page.getByTestId(`thread-row-${THREAD_ID}`).click({ button: "right" });
           await vi.waitFor(() => expect(nativeMenu).toHaveBeenCalled());
           expect(nativeMenu.mock.calls[0]![0]).toEqual(
             expect.arrayContaining([

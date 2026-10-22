@@ -20,29 +20,24 @@ describe("schedule confirmation", () => {
       { kind: "loading", key: "a" },
       { kind: "error", key: "a", message: "failed" },
     ];
-    for (const state of states) expect(confirmedSchedule(state, "a", true)).toBeNull();
+    for (const state of states) expect(confirmedSchedule(state, "a")).toBeNull();
   });
-  it("requires explicit NL confirmation but accepts a shown cron/preset", () => {
-    const state = { kind: "ready", key: "a", preview } as const;
-    expect(confirmedSchedule(state, "a", true)).toBeNull();
-    expect(confirmedSchedule(state, "a", false)).toBe(preview);
-    expect(confirmedSchedule({ ...state, kind: "confirmed" }, "a", true)).toBe(preview);
+  it("accepts a shown cron or preset preview", () => {
+    expect(confirmedSchedule({ kind: "ready", key: "a", preview }, "a")).toBe(preview);
   });
   it("invalidates changed inputs and stale responses", () => {
     expect(
       confirmedSchedule(
-        { kind: "confirmed", key: "old-project-zone-input", preview },
+        { kind: "ready", key: "old-project-zone-input", preview },
         "new-project-zone-input",
-        true,
       ),
     ).toBeNull();
   });
   it("requires a new preview after a one-shot expires", () => {
     expect(
       confirmedSchedule(
-        { kind: "confirmed", key: "a", preview: { ...preview, oneShotAt: "2026-01-01T00:00:00Z" } },
+        { kind: "ready", key: "a", preview: { ...preview, oneShotAt: "2026-01-01T00:00:00Z" } },
         "a",
-        true,
         Date.parse("2026-01-02"),
       ),
     ).toBeNull();

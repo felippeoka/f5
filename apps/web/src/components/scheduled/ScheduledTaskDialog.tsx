@@ -1,5 +1,7 @@
+import { normalizeCron, previewCronSchedule, SCHEDULE_PRESETS } from "@t3tools/shared/cronSchedule";
+import { CronScheduleEditor, inspectCronInput } from "./CronScheduleEditor";
 import { projectSettingsQueryOptions } from "../../lib/projectSettingsQuery";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   type ModelSlug,
@@ -44,6 +46,7 @@ import {
 } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { NativeSelect } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import {
   isMetadataOnlyScheduleEdit,
@@ -153,14 +156,8 @@ function Editor(
           }).modelOptionsForDispatch,
         ),
         runtimeMode: props.settings.defaultRuntimeMode,
-        workspace: {
-          kind: "worktree",
-          baseBranch:
-            props.branches?.branches.find((b) => b.current)?.name ??
-            props.branches?.branches.find((b) => b.isDefault)?.name ??
-            "",
-        },
-        cron: "0 9 * * 1-5",
+        workspace: { kind: "projectRoot" },
+        cron: SCHEDULE_PRESETS.daily,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         scheduleSource: "",
         maxRuns: null,
@@ -169,10 +166,11 @@ function Editor(
         enabled: true,
       },
   );
-  const [mode, setMode] = useState<"natural_language" | "preset" | "cron">(
-    props.task ? "cron" : "natural_language",
+  const [mode, setMode] = useState<"preset" | "cron">(props.task ? "cron" : "preset");
+  const [schedule, setSchedule] = useState(() =>
+    props.task ? normalizeCron(props.task.cron) : "daily",
   );
-  const [schedule, setSchedule] = useState(props.task?.cron ?? "every weekday at 9am");
+  const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "unpreviewed" });
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState(value.prompt.length);
@@ -181,9 +179,6 @@ function Editor(
   const taskId = useRef(props.task?.id ?? ScheduledTaskId.makeUnsafe(crypto.randomUUID()));
   const requestedAt = useRef(new Date().toISOString());
   const key = JSON.stringify([props.projectId, value.timezone, mode, schedule]);
-  const currentKey = useRef(key);
-  currentKey.current = key;
-  useEffect(() => setPreview({ kind: "unpreviewed" }), [key]);
   const provider = props.providers.find((p) => p.instanceId === value.modelSelection.instanceId);
   const driver = provider?.driver ?? ProviderDriverKind.make("codex");
   const options = getCustomModelOptionsByInstance(props.settings, props.providers);
@@ -209,48 +204,46 @@ function Editor(
     update({ prompt: next });
     setCursor(item.name.length + 2);
   };
-  const previewSchedule = async () => {
-    setPreview({ kind: "loading", key });
-    setError(null);
-    try {
-      const candidate = await ensureNativeApi().scheduledTasks.previewSchedule({
-        projectId: props.projectId,
-        timezone: value.timezone,
-        schedule:
-          mode === "natural_language"
-            ? { kind: mode, text: schedule }
-            : mode === "cron"
-              ? { kind: mode, cron: schedule }
-              : { kind: mode, preset: schedule as "hourly" | "daily" | "weekdays" | "weekly" },
-      });
-      if (currentKey.current === key) setPreview({ kind: "ready", key, preview: candidate });
-    } catch (e) {
-      if (currentKey.current === key)
+  const cron =
+    mode === "preset" ? SCHEDULE_PRESETS[schedule as keyof typeof SCHEDULE_PRESETS] : schedule;
+  const cronValidation = useMemo(() => inspectCronInput(cron), [cron]);
+  const invalidCron = !!cronValidation.error;
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        const candidate = previewCronSchedule(cron, value.timezone);
+        setPreview({ kind: "ready", key, preview: candidate });
+        const first = candidate.nextFireTimes[0];
+        if (first)
+          timer = setTimeout(
+            refresh,
+            Math.min(2_147_483_647, Math.max(1, Date.parse(first) - Date.now() + 1)),
+          );
+      } catch (error) {
         setPreview({
           kind: "error",
           key,
-          message: e instanceof Error ? e.message : "Preview failed. Use a preset or cron.",
+          message: error instanceof Error ? error.message : "Invalid schedule.",
         });
-    }
-  };
+      }
+    };
+    // Avoid evaluating future dates for every keystroke. Cleanup fences changed inputs.
+    let timer = setTimeout(refresh, 180);
+    return () => clearTimeout(timer);
+  }, [key, cron, value.timezone]);
   const metadataOnly =
     isMetadataOnlyScheduleEdit(props.task, value) &&
     mode === "cron" &&
     schedule === props.task?.cron;
   const metadataPreview =
-    metadataOnly &&
-    (preview.kind === "ready" || preview.kind === "confirmed") &&
-    preview.key === key
-      ? preview.preview
-      : null;
-  const candidate = confirmedSchedule(preview, key, mode === "natural_language") ?? metadataPreview;
+    metadataOnly && preview.kind === "ready" && preview.key === key ? preview.preview : null;
+  const candidate = confirmedSchedule(preview, key) ?? metadataPreview;
   const save = async () => {
-    if (!confirmedSchedule(preview, key, mode === "natural_language") && !metadataPreview) {
-      setError("This preview expired or changed. Preview the schedule again.");
-      setPreview({ kind: "unpreviewed" });
+    if (!confirmedSchedule(preview, key) && !metadataPreview) {
+      setError("The schedule is updating or has expired. Check its next run times.");
       return;
     }
-    if (!candidate) return;
+    if (!candidate || invalidCron) return;
     const configuration = {
       ...value,
       cron: candidate.cron,
@@ -264,7 +257,8 @@ function Editor(
       setError(problem);
       return;
     }
-    setPreview({ kind: "saving", key, preview: candidate });
+    setError(null);
+    setSaving(true);
     try {
       const api = ensureNativeApi().scheduledTasks;
       const result = props.task
@@ -284,14 +278,10 @@ function Editor(
       props.onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed.");
-      setPreview({
-        kind: mode === "natural_language" ? "confirmed" : "ready",
-        key,
-        preview: candidate,
-      });
+    } finally {
+      setSaving(false);
     }
   };
-  const fieldClass = "w-full rounded-md border bg-background px-3 py-2 text-sm";
   return (
     <Dialog
       open
@@ -299,19 +289,19 @@ function Editor(
         if (!open) props.onClose();
       }}
     >
-      <DialogPopup className="max-w-2xl [-webkit-app-region:no-drag]">
-        <DialogHeader>
+      <DialogPopup className="h-[min(48rem,calc(100dvh-4rem))] max-w-2xl [-webkit-app-region:no-drag]">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{props.task ? "Edit scheduled task" : "New scheduled task"}</DialogTitle>
           <DialogDescription>
             Runs on this F5 server while it is running. Project: {props.project.name}.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
-          <fieldset disabled={preview.kind === "saving"} className="space-y-4">
+          <fieldset disabled={saving} className="space-y-4">
             {props.onProjectChange && (
               <label>
                 Project
-                <select
+                <NativeSelect
                   value={props.projectId}
                   onChange={(e) => props.onProjectChange?.(e.target.value as ProjectId)}
                 >
@@ -320,7 +310,7 @@ function Editor(
                       {p.name}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
             )}
             <label className="block">
@@ -337,7 +327,7 @@ function Editor(
                 value={value.prompt}
                 cursor={cursor}
                 terminalContexts={[]}
-                disabled={preview.kind === "saving"}
+                disabled={saving}
                 placeholder="Describe the work, or /skill-name args"
                 className="min-h-24 rounded-md border p-3"
                 onRemoveTerminalContext={() => {}}
@@ -423,22 +413,27 @@ function Editor(
             </div>
             <label className="block">
               Workspace
-              <select
+              <NativeSelect
                 aria-label="Workspace"
-                className={fieldClass}
                 value={value.workspace.kind}
                 onChange={(e) =>
                   update({
                     workspace:
                       e.target.value === "worktree"
-                        ? { kind: "worktree", baseBranch: "" }
+                        ? {
+                            kind: "worktree",
+                            baseBranch:
+                              props.branches?.branches.find((b) => b.current)?.name ??
+                              props.branches?.branches.find((b) => b.isDefault)?.name ??
+                              "",
+                          }
                         : { kind: "projectRoot" },
                   })
                 }
               >
-                <option value="worktree">New worktree for every run</option>
                 <option value="projectRoot">Project root (shared filesystem)</option>
-              </select>
+                <option value="worktree">New worktree for every run</option>
+              </NativeSelect>
             </label>
             {value.workspace.kind === "worktree" && (
               <label className="block">
@@ -471,103 +466,110 @@ function Editor(
               />
             </label>
             <label className="block">
-              Schedule format
-              <select
-                className={fieldClass}
-                value={mode}
-                onChange={(e) => {
-                  const mode = e.target.value as "natural_language" | "preset" | "cron";
-                  setMode(mode);
-                  setSchedule(
-                    mode === "preset"
-                      ? "daily"
-                      : mode === "cron"
-                        ? value.cron
-                        : "every weekday at 9am",
-                  );
-                }}
-              >
-                <option value="natural_language">Natural language</option>
-                <option value="preset">Preset</option>
-                <option value="cron">Cron (advanced)</option>
-              </select>
-            </label>
-            {mode === "preset" ? (
-              <select
-                aria-label="Preset"
-                className={fieldClass}
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value)}
-              >
-                {["hourly", "daily", "weekdays", "weekly"].map((p) => (
-                  <option key={p}>{p}</option>
-                ))}
-              </select>
-            ) : (
-              <Input
-                aria-label="Schedule"
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value)}
-              />
-            )}
-            <Button
-              variant="outline"
-              onClick={() => void previewSchedule()}
-              disabled={preview.kind === "loading" || preview.kind === "saving"}
-            >
-              {preview.kind === "loading" ? "Converting…" : "Preview schedule"}
-            </Button>
-            {preview.kind === "error" && preview.key === key && (
-              <p role="alert">{preview.message} Presets and raw cron remain available.</p>
-            )}
-            {(preview.kind === "ready" ||
-              preview.kind === "confirmed" ||
-              preview.kind === "saving") &&
-              preview.key === key && (
-                <div className="rounded-md border p-3" aria-live="polite">
-                  <p>{preview.preview.summary}</p>
-                  <code>{preview.preview.cron}</code>
-                  <p>{preview.preview.timezone}</p>
-                  <ol>
-                    {preview.preview.nextFireTimes.map((time) => (
-                      <li key={time}>
-                        {new Date(time).toLocaleString(undefined, {
-                          timeZone: preview.preview.timezone,
-                          timeZoneName: "short",
-                        })}
-                      </li>
-                    ))}
-                  </ol>
-                  {mode === "natural_language" && preview.kind === "ready" && (
-                    <Button onClick={() => setPreview({ ...preview, kind: "confirmed" })}>
-                      Use this schedule
-                    </Button>
-                  )}
-                  {preview.preview.oneShotAt && <p>Runs once, then disables itself.</p>}
-                </div>
-              )}
-            <label className="block">
               Notify
-              <select
+              <NativeSelect
                 aria-label="Notification policy"
-                className={fieldClass}
                 value={value.notify}
                 onChange={(e) => update({ notify: e.target.value as typeof value.notify })}
               >
                 <option value="all">Every outcome</option>
                 <option value="failures_and_attention">Failures and attention</option>
                 <option value="none">None</option>
-              </select>
+              </NativeSelect>
             </label>
+            <label className="block">
+              Schedule format
+              <NativeSelect
+                value={mode}
+                onChange={(e) => {
+                  const nextMode = e.target.value as "preset" | "cron";
+                  setMode(nextMode);
+                  setSchedule(
+                    nextMode === "preset"
+                      ? "daily"
+                      : (SCHEDULE_PRESETS[schedule as keyof typeof SCHEDULE_PRESETS] ?? value.cron),
+                  );
+                }}
+              >
+                <option value="preset">Preset</option>
+                <option value="cron">Cron</option>
+              </NativeSelect>
+            </label>
+            {mode === "preset" ? (
+              <NativeSelect
+                aria-label="Preset"
+                value={schedule}
+                onChange={(e) => setSchedule(e.target.value)}
+              >
+                {["hourly", "daily", "weekdays", "weekly"].map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </NativeSelect>
+            ) : (
+              <CronScheduleEditor
+                value={schedule}
+                onChange={setSchedule}
+                validation={cronValidation}
+              />
+            )}
+            <div
+              data-testid="schedule-summary"
+              className="min-h-28 space-y-2 text-center"
+              aria-live="polite"
+              aria-busy={
+                preview.kind !== "error" && (preview.kind !== "ready" || preview.key !== key)
+              }
+            >
+              {preview.kind === "error" && preview.key === key && !invalidCron && (
+                <p role="alert">{preview.message}</p>
+              )}
+              {preview.kind === "ready" && (
+                <>
+                  <p className="text-lg font-medium">{preview.preview.summary}</p>
+                  {preview.preview.nextFireTimes[0] ? (
+                    <details className="text-xs text-muted-foreground">
+                      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                        <span className="underline underline-offset-4">Next</span>{" "}
+                        <time dateTime={preview.preview.nextFireTimes[0]}>
+                          {new Date(preview.preview.nextFireTimes[0]).toLocaleString(undefined, {
+                            timeZone: preview.preview.timezone,
+                            timeZoneName: "short",
+                          })}
+                        </time>
+                      </summary>
+                      <ol aria-label="Next runs" className="mt-2 space-y-1">
+                        {preview.preview.nextFireTimes.map((time) => (
+                          <li key={time}>
+                            {new Date(time).toLocaleString(undefined, {
+                              timeZone: preview.preview.timezone,
+                              timeZoneName: "short",
+                            })}
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No future runs for this schedule.
+                    </p>
+                  )}
+                  {preview.preview.oneShotAt && (
+                    <p className="text-xs text-muted-foreground">
+                      Runs once, then disables itself.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
             {error && <p role="alert">{error}</p>}
           </fieldset>
         </DialogPanel>
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="ghost" onClick={props.onClose}>
             Cancel
           </Button>
-          <Button disabled={!candidate || preview.kind === "saving"} onClick={() => void save()}>
-            {preview.kind === "saving" ? "Saving…" : "Save task"}
+          <Button disabled={!candidate || invalidCron || saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save task"}
           </Button>
         </DialogFooter>
       </DialogPopup>

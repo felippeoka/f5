@@ -11,10 +11,18 @@ import { SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "../ui/
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import type { SidebarThreadRowIndicators } from "./SidebarWorkflowItem";
 import type { SidebarThreadActions } from "./useSidebarThreadActions";
+import { ListToggleRow, SectionToggleRow } from "./SidebarSectionRows";
 
 export function SidebarScheduledFolder(props: {
   threads: readonly ThreadListItem[];
   visibleThreads: readonly ThreadListItem[];
+  currentThreadCount: number;
+  archivedThreads: readonly ThreadListItem[];
+  visibleArchivedThreads: readonly ThreadListItem[];
+  archivedExpanded: boolean;
+  archivedShowingAll: boolean;
+  onToggleArchived: () => void;
+  onToggleArchivedShowAll: () => void;
   expanded: boolean;
   showingAll: boolean;
   previewLimit: number;
@@ -53,6 +61,30 @@ export function SidebarScheduledFolder(props: {
     if (["Pending Approval", "Awaiting Input", "Plan Ready"].includes(status.label)) attention++;
     else if (status.pulse) running++;
   }
+
+  const renderThread = (thread: ThreadListItem) => {
+    const section =
+      thread.archivedAt !== null ? "archived" : isSnoozedThread(thread) ? "snoozed" : "active";
+    const indicators = props.indicatorsForThread(thread);
+    return (
+      <SidebarThreadRow
+        key={thread.id}
+        thread={thread}
+        section={section}
+        isActive={props.routeThreadId === thread.id}
+        orderedIds={props.orderedIds}
+        isRenaming={props.actions.renamingThreadId === thread.id}
+        trailingMeta={
+          section === "snoozed" ? (
+            <span className="text-2xs text-muted-foreground">Snoozed</span>
+          ) : undefined
+        }
+        actions={props.actions}
+        {...indicators}
+        threadStatus={section === "snoozed" ? null : indicators.threadStatus}
+      />
+    );
+  };
 
   return (
     <SidebarMenuSubItem className="w-full" data-testid="scheduled-thread-folder">
@@ -111,46 +143,26 @@ export function SidebarScheduledFolder(props: {
       </SidebarMenuSubButton>
       {props.expanded && (
         <SidebarMenuSub className={SIDEBAR_TREE_LEVEL_CLASS_NAME}>
-          {props.visibleThreads.map((thread) => {
-            const section =
-              thread.archivedAt !== null
-                ? "archived"
-                : isSnoozedThread(thread)
-                  ? "snoozed"
-                  : "active";
-            const indicators = props.indicatorsForThread(thread);
-            return (
-              <SidebarThreadRow
-                key={thread.id}
-                thread={thread}
-                section={section}
-                isActive={props.routeThreadId === thread.id}
-                orderedIds={props.orderedIds}
-                isRenaming={props.actions.renamingThreadId === thread.id}
-                trailingMeta={
-                  section !== "active" ? (
-                    <span className="text-2xs text-muted-foreground">
-                      {section === "archived" ? "Archived" : "Snoozed"}
-                    </span>
-                  ) : undefined
-                }
-                actions={props.actions}
-                {...indicators}
-                threadStatus={section === "snoozed" ? null : indicators.threadStatus}
-              />
-            );
-          })}
-          {props.threads.length > props.previewLimit && (
-            <SidebarMenuSubItem>
-              <SidebarMenuSubButton
-                render={<button type="button" />}
-                size="sm"
-                data-thread-selection-safe
-                onClick={props.onToggleShowAll}
-              >
-                {props.showingAll ? "Show less" : "Show more"}
-              </SidebarMenuSubButton>
-            </SidebarMenuSubItem>
+          {props.visibleThreads.map(renderThread)}
+          {props.currentThreadCount > props.previewLimit && (
+            <ListToggleRow
+              label={props.showingAll ? "Show less" : "Show more"}
+              onSelect={props.onToggleShowAll}
+            />
+          )}
+          {props.archivedThreads.length > 0 && (
+            <SectionToggleRow
+              label="Archived"
+              expanded={props.archivedExpanded}
+              onToggle={props.onToggleArchived}
+            />
+          )}
+          {props.archivedExpanded && props.visibleArchivedThreads.map(renderThread)}
+          {props.archivedExpanded && props.archivedThreads.length > props.previewLimit && (
+            <ListToggleRow
+              label={props.archivedShowingAll ? "Show less" : "Show more"}
+              onSelect={props.onToggleArchivedShowAll}
+            />
           )}
         </SidebarMenuSub>
       )}
