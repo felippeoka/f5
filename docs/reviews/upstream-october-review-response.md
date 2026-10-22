@@ -3197,6 +3197,10 @@ Validation:
   FileViewPanel, Settings, Home and new-project dialog browser suites.
 - The workspace guard and the shared resolver tests pass.
 - The slug test failed on accented names until combining marks were stripped.
+- The final full run found that a project written without a `kind` could not
+  be stored, which broke the Codex control client and MCP runtime suites. The
+  repository now stores it as a standard project, and a repository test covers
+  the case.
 
 ## 15n triage log: prompt links
 
