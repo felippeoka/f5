@@ -632,7 +632,7 @@ describe("GitManager unit", () => {
             ...(runSetupScript === undefined ? {} : { runSetupScript }),
           }),
         );
-        return (git.calls.createWorktree[0]?.[0] as { preparation?: unknown }).preparation;
+        return (git.calls.createWorktree[0]![0] as { preparation?: unknown }).preparation;
       });
 
     expect(await prepare()).toMatchObject({ runSetupScript: true, setupIdentity: "bun install" });
