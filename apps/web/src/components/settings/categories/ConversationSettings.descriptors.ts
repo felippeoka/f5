@@ -34,9 +34,9 @@ const CONVERSATION_CONTROL_DESCRIPTORS = (
     [
       "remote-images",
       "Load remote images in chat",
-      "Allow HTTPS images from external websites.",
+      "Allow HTTPS images from external websites, and HTTPS images and scripts in HTML pages agents show.",
       "Load remote images in chat",
-      ["images", "privacy", "markdown"],
+      ["images", "privacy", "markdown", "html", "scripts"],
     ],
     [
       "word-wrap",

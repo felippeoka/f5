@@ -1,4 +1,5 @@
 import { useServerKeybindings, resolveShortcutCommand } from "../../keybindings";
+import { useAppSettingsSelector } from "../../appSettings";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { HTML_RENDER_MAX_PAGE_BYTES, type HtmlRenderReference } from "@t3tools/contracts";
 import { htmlRenderDocument } from "@t3tools/shared/htmlRender";
@@ -209,9 +210,14 @@ export function HtmlRenderFrame({
       port.current = null;
     };
   }, [bridgeId]);
+  // Follows the chat's remote-image setting, so a page cannot reach the network on its own.
+  const allowRemoteContent = useAppSettingsSelector((settings) => settings.loadRemoteImagesInChat);
   const document = useMemo(
-    () => (html === null ? undefined : htmlRenderDocument(html, initialTheme.current, bridgeId)),
-    [html, bridgeId],
+    () =>
+      html === null
+        ? undefined
+        : htmlRenderDocument(html, initialTheme.current, bridgeId, { allowRemoteContent }),
+    [html, bridgeId, allowRemoteContent],
   );
   const iframe = document ? (
     <iframe

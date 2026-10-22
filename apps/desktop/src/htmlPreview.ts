@@ -53,6 +53,7 @@ export function createHtmlPreviewRenderer() {
         if (consoleMessages.length < 100) consoleMessages.push(details.message.slice(0, 1000));
       });
       const render = async (): Promise<HtmlPreviewResult> => {
+        // Agent-requested and unattended, so remote content never loads here.
         const html = htmlRenderDocument(input.html, {
           appearance: input.appearance,
           variables: {

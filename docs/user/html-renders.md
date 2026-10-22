@@ -9,7 +9,9 @@ your browser, and the app's configured keyboard shortcuts continue to work insid
 `html_render` accepts up to 512 KiB of HTML, a title up to 80 characters and a height from
 120 to 2,000 pixels. Absolute local image paths are inlined only from the thread's project,
 worktree or attachment folders. Images must be at most 10 MiB each, and the prepared page
-must fit within 25 MiB. Remote HTTPS images load directly.
+must fit within 25 MiB. Remote HTTPS images and scripts load only when **Load remote images
+in chat** is on in Conversation settings; it is off by default because any remote request a
+page makes can carry data out. `html_preview` screenshots never load remote content.
 
 Each page runs in a sandbox with an opaque origin. It cannot read the parent application,
 its cookies or Node.js. Pages share the generated attachment budget with tool screenshots:

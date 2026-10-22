@@ -1,12 +1,23 @@
-export const HTML_RENDER_CSP =
-  "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline' https:; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'";
+/**
+ * Remote HTTPS images and scripts load only when allowed: either one is an
+ * outbound request an agent-written page makes as soon as it renders.
+ */
+export const htmlRenderCsp = (allowRemoteContent = false) => {
+  const remote = allowRemoteContent ? " https:" : "";
+  return `default-src 'none'; img-src data:${remote}; style-src 'unsafe-inline'; script-src 'unsafe-inline'${remote}; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'`;
+};
 export interface HtmlRenderTheme {
   readonly appearance: "light" | "dark";
   readonly variables: Readonly<Record<string, string>>;
 }
 
 /** First-policy CSP and an opaque-origin iframe are both required by callers. */
-export function htmlRenderDocument(html: string, theme: HtmlRenderTheme, bridgeId = ""): string {
+export function htmlRenderDocument(
+  html: string,
+  theme: HtmlRenderTheme,
+  bridgeId = "",
+  options: { readonly allowRemoteContent?: boolean } = {},
+): string {
   const variables = Object.entries(theme.variables)
     .filter(([key]) => /^--[a-z0-9-]+$/.test(key))
     .map(([key, value]) => `${key}:${value.replace(/[;{}<>]/g, "")}`)
@@ -27,5 +38,5 @@ export function htmlRenderDocument(html: string, theme: HtmlRenderTheme, bridgeI
     addEventListener('keydown',e=>{if(!e.isTrusted||read.isComposing(e))return;const key=read.key(e);if(key==='Escape'){prevent(e);emit('escape',null);return}const value={key,code:read.code(e),metaKey:read.metaKey(e),ctrlKey:read.ctrlKey(e),shiftKey:read.shiftKey(e),altKey:read.altKey(e),repeat:read.repeat(e)};if(shortcuts.some(s=>s.key===key.toLowerCase()&&s.metaKey===value.metaKey&&s.ctrlKey===value.ctrlKey&&s.shiftKey===value.shiftKey&&s.altKey===value.altKey)){prevent(e);emit('keydown',value)}},true);
     addEventListener('wheel',e=>{if(!e.isTrusted||e.ctrlKey)return;prevent(e);emit('wheel',{x:e.deltaX,y:e.deltaY})},{passive:false});
   })();`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${HTML_RENDER_CSP}"><meta name="referrer" content="no-referrer"><style id="f5-html-theme">:root{color-scheme:${theme.appearance};${variables}}</style><style>html{overflow:hidden}body{margin:0;color:var(--foreground);background:var(--background);font-family:system-ui,sans-serif}img,svg,video{max-width:100%}</style><script>${script}</script></head><body>${html}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${htmlRenderCsp(options.allowRemoteContent)}"><meta name="referrer" content="no-referrer"><style id="f5-html-theme">:root{color-scheme:${theme.appearance};${variables}}</style><style>html{overflow:hidden}body{margin:0;color:var(--foreground);background:var(--background);font-family:system-ui,sans-serif}img,svg,video{max-width:100%}</style><script>${script}</script></head><body>${html}</body></html>`;
 }
