@@ -16,7 +16,7 @@ Scheduled execution uses main's command admission, commit side effects, filtered
 
 The final delivery handoff rechecks scheduled authority, cancellation and capacity after asynchronous preparation, alongside the shutdown fence. Capacity wakeups query only pending deliveries in the affected thread. Scheduler subscriptions and timers stop during shutdown admission; already-admitted submission workers have a separate drain barrier. Durable reserved identities and the existing delivery recovery path remain authoritative after restart.
 
-Main's migrations 124–126 are unchanged; Scheduled Tasks is migration 127. Profiles from unreleased builds whose ledger identifies 124 specifically as `ScheduledTasks` receive main's missing 124 changes transactionally before 125–127 run. Existing scheduled rows, origin and projection cursors are retained, and interrupted upgrades remain retryable.
+Main's migrations 124–127 are unchanged; Scheduled Tasks is migration 128. Profiles from unreleased builds whose ledger identifies 124 or 127 specifically as `ScheduledTasks` receive the corresponding missing main migration transactionally with the ledger identity repair. The idempotent scheduled migration then runs at 128. Existing task definitions, runs, ownership, notifications, origin and projection cursors are retained, and interrupted upgrades remain retryable. Main's planning-workflow lane cleanup and missing-worktree branch-drift protections are preserved.
 
 Main's selective renderer persistence remains in place. Explicit read/unread actions separately persist their receipts, including bulk acknowledgement, without writing renderer state for every streamed event. Local acknowledgements also survive backend-incarnation rehydration.
 

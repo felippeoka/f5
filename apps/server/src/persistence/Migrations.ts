@@ -1,7 +1,8 @@
+import Migration0127 from "./Migrations/127_ClearPlanningWorkflowLaneBranches.ts";
 import Migration0126 from "./Migrations/126_ProviderTerminalRecoveryIndexes.ts";
 import Migration0124 from "./Migrations/124_ProviderTerminalRetry.ts";
 import Migration0125 from "./Migrations/125_ProviderTerminalRetryIndexes.ts";
-import Migration0127 from "./Migrations/127_ScheduledTasks.ts";
+import Migration0128 from "./Migrations/128_ScheduledTasks.ts";
 import Migration0123 from "./Migrations/123_WorkspaceMoveRecoveryIndex.ts";
 import Migration0122 from "./Migrations/122_StorageActivity.ts";
 import Migration0121 from "./Migrations/121_AttachmentDeletionGuards.ts";
@@ -164,7 +165,8 @@ export const MIGRATIONS = {
   "124_ProviderTerminalRetry": Migration0124,
   "125_ProviderTerminalRetryIndexes": Migration0125,
   "126_ProviderTerminalRecoveryIndexes": Migration0126,
-  "127_ScheduledTasks": Migration0127,
+  "127_ClearPlanningWorkflowLaneBranches": Migration0127,
+  "128_ScheduledTasks": Migration0128,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,
@@ -333,14 +335,23 @@ export const runMigrations = Effect.gen(function* () {
   if (tracking.length)
     yield* sql.withTransaction(
       Effect.gen(function* () {
-        // Unreleased #193 builds used 124 for schedules. Repair that exact ledger
-        // identity before 125 builds indexes on the stability columns from main's 124.
+        // Released main owns 124 and 127. Only repair the exact identities used
+        // by unreleased #193 builds, atomically with the missing main migration.
         const previous = yield* sql<{
+          migration_id: number;
           name: string;
-        }>`SELECT name FROM effect_sql_migrations WHERE migration_id=124`;
-        if (previous[0]?.name !== "ScheduledTasks") return;
-        yield* Migration0124;
-        yield* sql`UPDATE effect_sql_migrations SET name='ProviderTerminalRetry' WHERE migration_id=124 AND name='ScheduledTasks'`;
+        }>`SELECT migration_id, name FROM effect_sql_migrations
+           WHERE migration_id IN (124, 127) AND name='ScheduledTasks'
+           ORDER BY migration_id`;
+        for (const migration of previous) {
+          if (migration.migration_id === 124) {
+            yield* Migration0124;
+            yield* sql`UPDATE effect_sql_migrations SET name='ProviderTerminalRetry' WHERE migration_id=124 AND name='ScheduledTasks'`;
+          } else {
+            yield* Migration0127;
+            yield* sql`UPDATE effect_sql_migrations SET name='ClearPlanningWorkflowLaneBranches' WHERE migration_id=127 AND name='ScheduledTasks'`;
+          }
+        }
       }),
     );
   yield* run({ loader });
