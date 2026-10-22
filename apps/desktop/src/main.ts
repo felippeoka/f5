@@ -61,6 +61,7 @@ import {
   PromptLinkInbox,
   promptLinkInArgv,
   promptLinkSchemeFor,
+  entryScriptInArgv,
   protocolClientRegistration,
 } from "./promptLinkInbox";
 import {
@@ -3188,10 +3189,11 @@ const PROMPT_LINKS_AVAILABLE_CHANNEL = "desktop:prompt-links-available";
 const promptLinks = new PromptLinkInbox(PROMPT_LINK_SCHEME_FOR_BUILD);
 
 function registerPromptLinkProtocol(): void {
+  const entryScript = entryScriptInArgv(process.argv);
   const registration = protocolClientRegistration({
     defaultApp: Boolean(process.defaultApp),
     execPath: process.execPath,
-    entryScript: process.argv[1] ? Path.resolve(process.argv[1]) : undefined,
+    entryScript: entryScript ? Path.resolve(entryScript) : undefined,
   });
   const registered = registration
     ? app.setAsDefaultProtocolClient(PROMPT_LINK_SCHEME_FOR_BUILD, registration.path, [

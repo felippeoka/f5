@@ -22,6 +22,14 @@ export function protocolClientRegistration(input: {
   return input.entryScript ? { path: input.execPath, args: [input.entryScript] } : null;
 }
 
+/**
+ * The entry script an unpackaged Electron was started with: its first argument that is not a
+ * switch. The dev launcher puts `--t3code-dev-root=…` ahead of it.
+ */
+export function entryScriptInArgv(argv: readonly string[]): string | undefined {
+  return argv.slice(1).find((arg) => !arg.startsWith("-"));
+}
+
 /** A prompt link Windows and Linux pass on the command line of a second launch. */
 export function promptLinkInArgv(argv: readonly string[], scheme: string): string | null {
   return argv.find((arg) => arg.toLowerCase().startsWith(`${scheme}:`)) ?? null;

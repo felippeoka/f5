@@ -4,6 +4,7 @@ import {
   PromptLinkInbox,
   promptLinkInArgv,
   promptLinkSchemeFor,
+  entryScriptInArgv,
   protocolClientRegistration,
 } from "./promptLinkInbox";
 
@@ -64,6 +65,18 @@ describe("protocol registration", () => {
     expect(
       protocolClientRegistration({ defaultApp: false, execPath: "/F5", entryScript: undefined }),
     ).toBeNull();
+  });
+
+  it("finds the entry script past the dev launcher's switches", () => {
+    expect(
+      entryScriptInArgv([
+        "/dev/electron",
+        "--t3code-dev-root=/repo/apps/desktop",
+        "dist-electron/main.js",
+      ]),
+    ).toBe("dist-electron/main.js");
+    expect(entryScriptInArgv(["/dev/electron", "/repo/main.js"])).toBe("/repo/main.js");
+    expect(entryScriptInArgv(["/dev/electron", "--inspect"])).toBeUndefined();
   });
 
   it("finds a link among a second launch's arguments", () => {
