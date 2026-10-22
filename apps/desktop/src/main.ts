@@ -938,7 +938,15 @@ function registerPreviewWebContents(tabId: string, webContentsId: number): boole
   entry.ownerWebContentsId = guest.hostWebContents?.id ?? null;
   entry.webContentsId = webContentsId;
   installAgentDownloadHandler(guest.session, {
-    directory: Path.join(STATE_DIR, "preview-downloads"),
+    // Each profile keeps its own downloads; sessions can outlive the guest that installed this.
+    directoryFor: (sourceId) => {
+      const hostId = electronWebContents.fromId(sourceId)?.hostWebContents?.id;
+      const profileId = hostId === undefined ? undefined : profileByWebContentsId.get(hostId);
+      const runtime = profileId ? backends.get(profileId) : undefined;
+      return runtime
+        ? Path.join(profileStateDir(STATE_DIR, runtime.profile), "preview-downloads")
+        : undefined;
+    },
     isAgentDriven: (sourceId) =>
       [...previewTabs.entries()].some(
         ([candidateTabId, candidate]) =>

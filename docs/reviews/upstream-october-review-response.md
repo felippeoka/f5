@@ -3005,7 +3005,7 @@ New ports:
 
 - [t3code#14573](https://github.com/pingdotgg/t3code/pull/14573): a download
   from a preview tab the agent is driving saves to `preview-downloads` in the
-  state directory instead of opening a native Save dialog over the whole app.
+  owning profile's state directory instead of opening a native Save dialog over the whole app.
   A download the user starts keeps the dialog.
 - [t3code#16961](https://github.com/pingdotgg/t3code/pull/16961), in part:
   preview sessions had no permission handler, and Electron approves every

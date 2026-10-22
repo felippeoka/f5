@@ -22,12 +22,15 @@ describe("installAgentDownloadHandler", () => {
     const session = new EventEmitter();
     const directory = path.join("/state", "preview-downloads");
     installAgentDownloadHandler(session, {
-      directory,
+      directoryFor: () => directory,
       isAgentDriven: (id) => id === 7,
       ensureDirectory: () => undefined,
     });
     // A second install on the same session must not add a second listener.
-    installAgentDownloadHandler(session, { directory, isAgentDriven: () => true });
+    installAgentDownloadHandler(session, {
+      directoryFor: () => directory,
+      isAgentDriven: () => true,
+    });
     expect(session.listenerCount("will-download")).toBe(1);
 
     const agentExport = download("../report.csv");
@@ -42,5 +45,28 @@ describe("installAgentDownloadHandler", () => {
     const userDownload = download("photo.png");
     session.emit("will-download", {}, userDownload, { id: 8 });
     expect(userDownload.savePath).toBeNull();
+  });
+
+  it("saves each profile's downloads in that profile's folder", () => {
+    const session = new EventEmitter();
+    const folders: Record<number, string> = {
+      1: path.join("/state", "preview-downloads"),
+      2: path.join("/state", "profiles", "work", "preview-downloads"),
+    };
+    installAgentDownloadHandler(session, {
+      directoryFor: (id) => folders[id],
+      isAgentDriven: () => true,
+      ensureDirectory: () => undefined,
+    });
+    const personal = download("a.csv");
+    const work = download("b.csv");
+    const orphan = download("c.csv");
+    session.emit("will-download", {}, personal, { id: 1 });
+    session.emit("will-download", {}, work, { id: 2 });
+    session.emit("will-download", {}, orphan, { id: 3 });
+    expect(path.dirname(personal.savePath!)).toBe(folders[1]);
+    expect(path.dirname(work.savePath!)).toBe(folders[2]);
+    // An unknown owner keeps the Save dialog instead of borrowing another profile's folder.
+    expect(orphan.savePath).toBeNull();
   });
 });
