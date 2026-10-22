@@ -157,3 +157,22 @@ export function persistedStartConfigToRecord(
         : {}),
   };
 }
+
+export interface IncompleteHistoryMarker {
+  readonly eventId: string;
+  readonly turnId: string | null;
+  readonly historyIdentity: string | null;
+}
+export function readIncompleteHistory(
+  runtimePayload: unknown,
+): IncompleteHistoryMarker | undefined {
+  if (!isRecord(runtimePayload) || !isRecord(runtimePayload.historyReconciliationRequired))
+    return undefined;
+  const marker = runtimePayload.historyReconciliationRequired;
+  if (typeof marker.eventId !== "string") return undefined;
+  return {
+    eventId: marker.eventId,
+    turnId: typeof marker.turnId === "string" ? marker.turnId : null,
+    historyIdentity: typeof marker.historyIdentity === "string" ? marker.historyIdentity : null,
+  };
+}

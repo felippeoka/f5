@@ -2,6 +2,12 @@ import { stringifyWithinBytes } from "@t3tools/shared/boundedJson";
 import { readMcpAppToolResult } from "@t3tools/shared/mcpApp";
 import { snapshotMcpApp } from "../../mcpApps/McpAppSnapshot.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import {
+  registerNotificationQueueResources,
+  providerNotificationOverflows,
+} from "../../observability/Metrics.ts";
+import { NotificationAdmission } from "../notificationAdmission.ts";
+import { ServerShutdown } from "../../shutdown.ts";
 import { observeCodexMcpServers } from "../codexMcpObservation.ts";
 import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
 import {
@@ -86,14 +92,13 @@ import {
 import {
   Cause,
   Effect,
-  Fiber,
   FileSystem,
   Layer,
+  Metric,
   Option,
   Path,
   Queue,
   Schema,
-  Scope,
   Semaphore,
   ServiceMap,
   Stream,
@@ -122,7 +127,11 @@ import type {
   PreviewMcpHttpServerShape,
   PreviewMcpSessionConfig,
 } from "../../mcp/PreviewMcpHttpServer.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  writeProviderEventLog,
+  type EventNdjsonLogger,
+  makeEventNdjsonLogger,
+} from "./EventNdjsonLogger.ts";
 import { appendProviderAttachmentRuntimeContext } from "../attachmentRuntimeContext.ts";
 
 const PROVIDER = "codex" as const;
@@ -165,6 +174,7 @@ export function resolveCodexSelectionOptions(input: {
 export interface CodexAdapterLiveOptions {
   readonly getEffectiveModelCapabilities?: () => ReadonlyMap<string, ModelCapabilities>;
   readonly manager?: CodexAppServerManager;
+  readonly notificationLimits?: { entries: number; bytes: number; controls: number };
   readonly makeManager?: (services?: ServiceMap.ServiceMap<never>) => CodexAppServerManager;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
@@ -243,6 +253,13 @@ function toRequestError(threadId: ThreadId, method: string, cause: unknown): Pro
     provider: PROVIDER,
     method,
     detail: toMessage(cause, `${method} failed`),
+    ...(asObject(cause)?.deliveryCertainty === "not_sent" ||
+    asObject(cause)?.deliveryCertainty === "unknown"
+      ? {
+          deliveryCertainty: asObject(cause)!.deliveryCertainty as "not_sent" | "unknown",
+          deliveryRetryable: asObject(cause)?.deliveryRetryable === true,
+        }
+      : {}),
     ...(method === "turn/start"
       ? (() => {
           const usageLimit = detectCodexUsageLimit({
@@ -2458,7 +2475,7 @@ function mapToRuntimeEvents(
 export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* Effect.service(ServerConfig);
-    const adapterScope = yield* Scope.Scope;
+    const shutdown = yield* Effect.serviceOption(ServerShutdown);
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const nativeEventLogger =
       options?.nativeEventLogger ??
@@ -2502,6 +2519,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
     const computerMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
     const previewMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
     const threadMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
+    const automationGenerations = new Map<ThreadId, number | undefined>();
     // Sessions pin F5's MCP servers with `-c mcp_servers=...` at launch, so a
     // reload cannot change that set; a different desired set needs a restart.
     const launchedMcpConfigKeys = new Map<ThreadId, string>();
@@ -2741,7 +2759,10 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         };
 
         return yield* Effect.tryPromise({
-          try: () => manager.startSession(managerInput),
+          try: (signal) => {
+            automationGenerations.set(input.threadId, input.mcpEventIdentity?.sessionGeneration);
+            return manager.startSession(managerInput, signal);
+          },
           catch: (cause) =>
             new ProviderAdapterProcessError({
               provider: PROVIDER,
@@ -2765,6 +2786,14 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
 
     const sendTurn: CodexAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
+        if (incompleteThreads.has(input.threadId))
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "turn/start",
+            detail: "Provider output is incomplete. Reconcile native history before continuing.",
+            deliveryCertainty: "not_sent",
+            deliveryRetryable: false,
+          });
         const codexAttachments = yield* Effect.forEach(
           (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
           (attachment) =>
@@ -3084,7 +3113,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       });
 
     const stopAll: CodexAdapterShape["stopAll"] = () =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
         for (const session of previewMcpSessions.values()) {
           session.dispose();
         }
@@ -3095,21 +3124,93 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         computerMcpSessions.clear();
         computerDecisions.clear();
         launchedMcpConfigKeys.clear();
-        manager.stopAll();
+        const deadline = Option.getOrUndefined(shutdown)?.deadline ?? Date.now() + 1_800;
+        if (typeof manager.shutdown === "function") await manager.shutdown(deadline);
+        else manager.stopAll();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            Promise.all([...eventPreparation.values()]),
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, Math.max(0, deadline - Date.now()));
+            }),
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+        if (preparationControllers.size) {
+          const pending = preparationControllers.size;
+          for (const controller of preparationControllers) controller.abort();
+          throw new Error(
+            `Codex shutdown left ${pending} admitted event preparation(s) incomplete.`,
+          );
+        }
       });
 
     const appSql = yield* Effect.serviceOption(SqlClient.SqlClient);
     const appFs = yield* Effect.serviceOption(FileSystem.FileSystem);
     const appPath = yield* Effect.serviceOption(Path.Path);
-    const appCaptures = new Map<ThreadId, Set<Promise<void>>>();
+    const appCaptures = new Map<ThreadId, number>();
     const capturePermit = yield* Semaphore.make(2);
     let captureCount = 0;
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEventQueue = yield* Queue.bounded<{
+      event: ProviderRuntimeEvent;
+      units: number;
+      lease: symbol;
+      bytes: number;
+    }>(1024);
+    const runtimeEventBudget = yield* Semaphore.make(512);
+    const canonicalQueueResources = new Map<symbol, { bytes: number; admittedAt: number }>();
+    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
+      Effect.gen(function* () {
+        const bytes = Buffer.byteLength(JSON.stringify(event));
+        const units = Math.min(512, Math.max(1, Math.ceil(bytes / (64 * 1024))));
+        const lease = Symbol();
+        let transferred = false;
+        yield* Effect.acquireUseRelease(
+          runtimeEventBudget.take(units),
+          () =>
+            Effect.sync(() =>
+              canonicalQueueResources.set(lease, { bytes, admittedAt: Date.now() }),
+            ).pipe(
+              Effect.andThen(Queue.offer(runtimeEventQueue, { event, units, lease, bytes })),
+              Effect.tap((accepted) =>
+                Effect.sync(() => {
+                  transferred = accepted;
+                }),
+              ),
+            ),
+          () =>
+            transferred
+              ? Effect.void
+              : Effect.sync(() => canonicalQueueResources.delete(lease)).pipe(
+                  Effect.andThen(runtimeEventBudget.release(units)),
+                ),
+        );
+      });
+    const notificationAdmission = new NotificationAdmission(options?.notificationLimits);
+    const incompleteThreads = new Map<ThreadId, { eventId: string; contextKey: string }>();
+    const incompleteContexts = new Set<string>();
+    const unregisterQueueResources = registerNotificationQueueResources(() => {
+      const native = notificationAdmission.snapshot();
+      const canonical = [...canonicalQueueResources.values()];
+      return {
+        entries: native.entries + native.controls + canonical.length,
+        bytes: native.bytes + canonical.reduce((sum, entry) => sum + entry.bytes, 0),
+        oldestAgeMs: Math.max(
+          native.oldestAgeMs,
+          ...canonical.map((entry) => Date.now() - entry.admittedAt),
+        ),
+      };
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unregisterQueueResources));
     const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
 
-    const turnStartedAtByThread = new Map<ThreadId, string>();
+    const eventPreparation = new Map<string, Promise<void>>();
+    const preparationControllers = new Set<AbortController>();
+    const turnStartedAtByThread = new Map<string, string>();
     const limitsByThread = new Map<
-      ThreadId,
+      string,
       Map<string, { snapshot: CodexLimitSnapshot; observedAt: string }>
     >();
 
@@ -3120,14 +3221,88 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             if (!nativeEventLogger) {
               return;
             }
-            yield* nativeEventLogger.write(
+            yield* writeProviderEventLog(
+              nativeEventLogger,
               automationEventSanitizer.sanitize(event.threadId, event),
               event.threadId,
             );
           });
 
         const services = yield* Effect.services<never>();
+        const markIncomplete = (event: ProviderEvent) => {
+          const key = `${event.threadId}:${event.providerInstanceId ?? "legacy"}:${event.sessionGeneration ?? 0}`;
+          if (incompleteContexts.has(key)) return;
+          incompleteContexts.add(key);
+          Effect.runSync(Metric.update(providerNotificationOverflows, 1));
+          const eventId = `incomplete:${event.id}`;
+          const liveGeneration = automationGenerations.get(event.threadId);
+          const ownsCurrent =
+            liveGeneration === undefined ||
+            event.sessionGeneration === undefined ||
+            liveGeneration === event.sessionGeneration;
+          if (ownsCurrent) {
+            incompleteThreads.set(event.threadId, { eventId, contextKey: key });
+            // A retired context must never interrupt its replacement.
+            void manager
+              .interruptTurn(
+                event.threadId,
+                event.turnId ? TurnId.makeUnsafe(String(event.turnId)) : undefined,
+              )
+              .catch(() => {});
+          }
+          const previous = eventPreparation.get(key) ?? Promise.resolve();
+          const reportController = new AbortController();
+          preparationControllers.add(reportController);
+          const report = () =>
+            Effect.runPromiseWith(services)(
+              offerRuntimeEvent({
+                type: "runtime.error",
+                eventId: EventId.makeUnsafe(eventId),
+                provider: PROVIDER,
+                threadId: event.threadId,
+                createdAt: event.createdAt,
+                ...(event.turnId ? { turnId: TurnId.makeUnsafe(String(event.turnId)) } : {}),
+                ...(event.providerInstanceId !== undefined
+                  ? { providerInstanceId: event.providerInstanceId }
+                  : {}),
+                ...(event.sessionGeneration !== undefined
+                  ? { sessionGeneration: event.sessionGeneration }
+                  : {}),
+                payload: {
+                  class: "transport_error",
+                  historyReconciliationRequired: true,
+                  message:
+                    "Provider output is incomplete because notification admission was exhausted. Native history must be reconciled before continuing.",
+                },
+              }),
+              { signal: reportController.signal },
+            );
+          const next = previous.then(report, report);
+          eventPreparation.set(key, next);
+          void next
+            .finally(() => {
+              preparationControllers.delete(reportController);
+              if (eventPreparation.get(key) === next) eventPreparation.delete(key);
+            })
+            .catch(() => {});
+        };
         const listener = (event: ProviderEvent) => {
+          const control =
+            event.kind === "session" ||
+            event.kind === "error" ||
+            /(?:completed|closed|exited|started|requestApproval|requestUserInput)$/.test(
+              event.method,
+            );
+          const contextKey = `${event.threadId}:${event.providerInstanceId ?? "legacy"}:${event.sessionGeneration ?? 0}`;
+          if (incompleteContexts.has(contextKey) && !control) return;
+          const releaseAdmission = notificationAdmission.reserve(
+            Buffer.byteLength(JSON.stringify(event)),
+            control,
+          );
+          if (!releaseAdmission) {
+            markIncomplete(event);
+            return;
+          }
           // Retain synchronously at admission: asynchronous logging/image storage
           // can still be running when a replacement retires this provider process.
           const nativeItem =
@@ -3140,7 +3315,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             nativeItem.status === "completed" &&
             nativeItem.error == null &&
             captureCount < 8 &&
-            (appCaptures.get(event.threadId)?.size ?? 0) < 4;
+            (appCaptures.get(event.threadId) ?? 0) < 4;
           const initialResult =
             eligibleApp && appUri?.startsWith("ui://") && appUri.length <= 4096
               ? readMcpAppToolResult(nativeItem?.result)
@@ -3164,164 +3339,208 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               /* Ordinary tool fallback. */
             }
           }
-          const predecessors = [
-            "turn/completed",
-            "turn/aborted",
-            "session/exited",
-            "session/closed",
-          ].includes(event.method)
-            ? [...(appCaptures.get(event.threadId) ?? [])]
-            : [];
           let releaseAppCapture: (() => void) | undefined;
-          let barrier: Promise<void> | undefined;
           if (appCapture) {
+            // Captures run inside this session's ordered preparation, so later
+            // output waits behind them; the caps bound how long that can be.
             captureCount++;
-            barrier = new Promise<void>((resolve) => {
-              releaseAppCapture = resolve;
-            });
-            const pending = appCaptures.get(event.threadId) ?? new Set<Promise<void>>();
-            pending.add(barrier);
-            appCaptures.set(event.threadId, pending);
+            appCaptures.set(event.threadId, (appCaptures.get(event.threadId) ?? 0) + 1);
+            releaseAppCapture = () => {
+              captureCount--;
+              const pending = (appCaptures.get(event.threadId) ?? 1) - 1;
+              if (pending > 0) appCaptures.set(event.threadId, pending);
+              else appCaptures.delete(event.threadId);
+            };
           }
           const releaseProvenance = automationEventSanitizer.retain(event.threadId);
-          return Effect.gen(function* () {
-            if (isSyntheticOneOffThreadId(event.threadId)) {
-              return;
-            }
-            if (predecessors.length) yield* Effect.promise(() => Promise.all(predecessors));
-            yield* writeNativeEvent(event);
-            if (event.method === "turn/started")
-              turnStartedAtByThread.set(event.threadId, event.createdAt);
-            if (event.method === "account/rateLimits/updated") {
-              const snapshot = asObject(asObject(event.payload)?.rateLimits);
-              if (snapshot) {
-                const buckets = limitsByThread.get(event.threadId) ?? new Map();
-                const key = typeof snapshot.limitId === "string" ? snapshot.limitId : "codex";
-                const merged = mergeCodexLimitSnapshot(
-                  buckets.get(key)?.snapshot,
-                  snapshot as CodexLimitSnapshot,
-                );
-                if (merged) buckets.set(key, { snapshot: merged, observedAt: event.createdAt });
-                limitsByThread.set(event.threadId, buckets);
+          const controller = new AbortController();
+          preparationControllers.add(controller);
+          const key = `${event.threadId}:${event.providerInstanceId ?? "legacy"}:${event.sessionGeneration ?? 0}`;
+          const previous = eventPreparation.get(key) ?? Promise.resolve();
+          const prepare = () =>
+            Effect.gen(function* () {
+              if (isSyntheticOneOffThreadId(event.threadId)) {
+                return;
               }
-            }
-            const previewServerName = previewMcpSessions.get(event.threadId)?.serverName;
-            if (event.method === "turn/completed" && event.turnId)
-              computerMcpSessions.get(event.threadId)?.endTurn?.(event.turnId);
-            let runtimeEvents = withAgentBrowserPreview(
-              mapToRuntimeEvents(
-                event,
-                event.threadId,
-                limitsByThread.get(event.threadId)?.get("codex")?.snapshot,
-                [...(limitsByThread.get(event.threadId)?.values() ?? [])],
-                turnStartedAtByThread.get(event.threadId),
-              ),
-              previewServerName,
-              computerMcpSessions.get(event.threadId)?.serverName,
-              computerDecisions.get(event.threadId),
-            );
-            if (
-              appCapture &&
-              nativeItem &&
-              appUri &&
-              appIdentity &&
-              Option.isSome(appSql) &&
-              Option.isSome(appFs) &&
-              Option.isSome(appPath)
-            ) {
-              const server = asString(nativeItem.server),
-                tool = asString(nativeItem.tool);
-              if (server && tool) {
-                const reference = yield* capturePermit
-                  .withPermits(1)(
-                    Effect.tryPromise({
-                      try: () =>
-                        manager.readMcpAppResource(event.threadId, server, appUri, appIdentity),
-                      catch: (cause) =>
-                        toRequestError(event.threadId, "mcpServer/resource/read", cause),
-                    }).pipe(
-                      Effect.flatMap((response) =>
-                        snapshotMcpApp({
-                          attachmentsDir: serverConfig.attachmentsDir,
-                          threadId: event.threadId,
-                          activityId: `${event.id}:mcp-app`,
-                          itemKey: `mcp-app:${String(nativeItem.id)}`,
-                          server,
-                          tool,
-                          resourceUri: appUri,
-                          response,
-                        }),
-                      ),
-                      Effect.provideService(SqlClient.SqlClient, appSql.value),
-                      Effect.provideService(FileSystem.FileSystem, appFs.value),
-                      Effect.provideService(Path.Path, appPath.value),
-                    ),
-                  )
-                  .pipe(
-                    Effect.timeout("10 seconds"),
-                    Effect.catchCause((cause) =>
-                      Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(undefined),
-                    ),
+              yield* writeNativeEvent(event);
+              if (event.method === "turn/started") turnStartedAtByThread.set(key, event.createdAt);
+              if (event.method === "account/rateLimits/updated") {
+                const snapshot = asObject(asObject(event.payload)?.rateLimits);
+                if (snapshot) {
+                  const buckets = limitsByThread.get(key) ?? new Map();
+                  const limitKey =
+                    typeof snapshot.limitId === "string" ? snapshot.limitId : "codex";
+                  const merged = mergeCodexLimitSnapshot(
+                    buckets.get(limitKey)?.snapshot,
+                    snapshot as CodexLimitSnapshot,
                   );
-                if (reference)
-                  runtimeEvents = runtimeEvents.map((item) =>
-                    item.type === "item.completed"
-                      ? {
-                          ...item,
-                          payload: {
-                            ...item.payload,
-                            data: {
-                              ...asObject(item.payload.data),
-                              mcpApp: reference,
-                              mcpAppBootstrap: appBootstrap,
-                            },
-                          },
-                        }
-                      : item,
-                  );
-              }
-            }
-            // Redact at admission, before lifecycle cleanup removes provenance.
-            const safeRuntimeEvents = yield* Effect.forEach(runtimeEvents, prepareRuntimeEvent);
-            if (event.method === "session/exited" || event.method === "session/closed") {
-              computerMcpSessions.get(event.threadId)?.dispose();
-              computerMcpSessions.delete(event.threadId);
-              computerDecisions.delete(event.threadId);
-              limitsByThread.delete(event.threadId);
-              turnStartedAtByThread.delete(event.threadId);
-            }
-            if (runtimeEvents.length === 0) {
-              yield* Effect.logDebug("ignoring unhandled Codex provider event", {
-                method: event.method,
-                threadId: event.threadId,
-                turnId: event.turnId,
-                itemId: event.itemId,
-              });
-              return;
-            }
-            yield* Queue.offerAll(runtimeEventQueue, safeRuntimeEvents);
-          }).pipe(
-            Effect.forkIn(adapterScope),
-            Effect.flatMap(Fiber.join),
-            Effect.ensuring(
-              Effect.sync(() => {
-                releaseProvenance();
-                releaseAppCapture?.();
-                if (barrier) {
-                  captureCount--;
-                  const pending = appCaptures.get(event.threadId);
-                  pending?.delete(barrier);
-                  if (!pending?.size) appCaptures.delete(event.threadId);
+                  if (merged)
+                    buckets.set(limitKey, { snapshot: merged, observedAt: event.createdAt });
+                  limitsByThread.set(key, buckets);
                 }
-              }),
-            ),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.void
-                : Effect.logWarning("Codex event processing failed."),
-            ),
-            Effect.runPromiseWith(services),
-          );
+              }
+              const ownsAutomation =
+                automationGenerations.get(event.threadId) === event.sessionGeneration;
+              const previewServerName = ownsAutomation
+                ? previewMcpSessions.get(event.threadId)?.serverName
+                : undefined;
+              if (ownsAutomation && event.method === "turn/completed" && event.turnId)
+                computerMcpSessions.get(event.threadId)?.endTurn?.(event.turnId);
+              let runtimeEvents = withAgentBrowserPreview(
+                mapToRuntimeEvents(
+                  event,
+                  event.threadId,
+                  limitsByThread.get(key)?.get("codex")?.snapshot,
+                  [...(limitsByThread.get(key)?.values() ?? [])],
+                  turnStartedAtByThread.get(key),
+                ),
+                previewServerName,
+                ownsAutomation ? computerMcpSessions.get(event.threadId)?.serverName : undefined,
+                ownsAutomation ? computerDecisions.get(event.threadId) : undefined,
+              );
+              if (
+                appCapture &&
+                nativeItem &&
+                appUri &&
+                appIdentity &&
+                Option.isSome(appSql) &&
+                Option.isSome(appFs) &&
+                Option.isSome(appPath)
+              ) {
+                const server = asString(nativeItem.server),
+                  tool = asString(nativeItem.tool);
+                if (server && tool) {
+                  const reference = yield* capturePermit
+                    .withPermits(1)(
+                      Effect.tryPromise({
+                        try: () =>
+                          manager.readMcpAppResource(event.threadId, server, appUri, appIdentity),
+                        catch: (cause) =>
+                          toRequestError(event.threadId, "mcpServer/resource/read", cause),
+                      }).pipe(
+                        Effect.flatMap((response) =>
+                          snapshotMcpApp({
+                            attachmentsDir: serverConfig.attachmentsDir,
+                            threadId: event.threadId,
+                            activityId: `${event.id}:mcp-app`,
+                            itemKey: `mcp-app:${String(nativeItem.id)}`,
+                            server,
+                            tool,
+                            resourceUri: appUri,
+                            response,
+                          }),
+                        ),
+                        Effect.provideService(SqlClient.SqlClient, appSql.value),
+                        Effect.provideService(FileSystem.FileSystem, appFs.value),
+                        Effect.provideService(Path.Path, appPath.value),
+                      ),
+                    )
+                    .pipe(
+                      Effect.timeout("10 seconds"),
+                      Effect.catchCause((cause) =>
+                        Cause.hasInterruptsOnly(cause)
+                          ? Effect.interrupt
+                          : Effect.succeed(undefined),
+                      ),
+                    );
+                  if (reference)
+                    runtimeEvents = runtimeEvents.map((item) =>
+                      item.type === "item.completed"
+                        ? {
+                            ...item,
+                            payload: {
+                              ...item.payload,
+                              data: {
+                                ...asObject(item.payload.data),
+                                mcpApp: reference,
+                                mcpAppBootstrap: appBootstrap,
+                              },
+                            },
+                          }
+                        : item,
+                    );
+                }
+              }
+              // Redact at admission, before lifecycle cleanup removes provenance.
+              const safeRuntimeEvents = yield* Effect.forEach(runtimeEvents, (runtimeEvent) =>
+                prepareRuntimeEvent({
+                  ...runtimeEvent,
+                  ...(event.providerInstanceId !== undefined
+                    ? { providerInstanceId: event.providerInstanceId }
+                    : {}),
+                  ...(event.sessionGeneration !== undefined
+                    ? { sessionGeneration: event.sessionGeneration }
+                    : {}),
+                }),
+              );
+              if (event.method === "session/exited" || event.method === "session/closed") {
+                if (ownsAutomation) {
+                  computerMcpSessions.get(event.threadId)?.dispose();
+                  computerMcpSessions.delete(event.threadId);
+                  computerDecisions.delete(event.threadId);
+                  automationGenerations.delete(event.threadId);
+                }
+                incompleteContexts.delete(key);
+                limitsByThread.delete(key);
+                turnStartedAtByThread.delete(key);
+              }
+              if (runtimeEvents.length === 0) {
+                yield* Effect.logDebug("ignoring unhandled Codex provider event", {
+                  method: event.method,
+                  threadId: event.threadId,
+                  turnId: event.turnId,
+                  itemId: event.itemId,
+                });
+                return;
+              }
+              yield* Effect.forEach(safeRuntimeEvents, offerRuntimeEvent, {
+                concurrency: 1,
+                discard: true,
+              });
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.gen(function* () {
+                      yield* Effect.logError(
+                        "Codex event preparation failed; history reconciliation required",
+                        { threadId: event.threadId, eventId: event.id, cause },
+                      );
+                      markIncomplete(event);
+                      yield* offerRuntimeEvent({
+                        type: "runtime.error",
+                        eventId: EventId.makeUnsafe(`prepare:${event.id}`),
+                        provider: PROVIDER,
+                        threadId: event.threadId,
+                        createdAt: event.createdAt,
+                        ...(event.providerInstanceId !== undefined
+                          ? { providerInstanceId: event.providerInstanceId }
+                          : {}),
+                        ...(event.sessionGeneration !== undefined
+                          ? { sessionGeneration: event.sessionGeneration }
+                          : {}),
+                        payload: {
+                          class: "transport_error",
+                          message:
+                            "Provider output could not be prepared. Reconcile history before continuing.",
+                        },
+                      });
+                    }),
+              ),
+              (effect) => Effect.runPromiseWith(services)(effect, { signal: controller.signal }),
+            );
+          const next = previous.then(prepare, prepare);
+          eventPreparation.set(key, next);
+          void next
+            .finally(() => {
+              releaseAdmission();
+              releaseProvenance();
+              releaseAppCapture?.();
+              preparationControllers.delete(controller);
+              if (eventPreparation.get(key) === next) eventPreparation.delete(key);
+            })
+            .catch(() => {});
+          return next;
         };
         manager.on("event", listener);
         return listener;
@@ -3331,6 +3550,21 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           yield* Effect.sync(() => {
             manager.off("event", listener);
           });
+          yield* Effect.promise(() => Promise.allSettled([...eventPreparation.values()])).pipe(
+            Effect.timeoutOption(
+              Math.max(
+                0,
+                (Option.getOrUndefined(shutdown)?.deadline ?? Date.now() + 1_800) - Date.now(),
+              ),
+            ),
+          );
+          if (preparationControllers.size > 0) {
+            yield* Effect.logWarning("Codex event preparation did not drain before shutdown", {
+              pending: preparationControllers.size,
+            });
+            for (const controller of preparationControllers) controller.abort();
+            yield* Effect.promise(() => Promise.allSettled([...eventPreparation.values()]));
+          }
           yield* Queue.shutdown(runtimeEventQueue);
         }),
     );
@@ -3427,7 +3661,22 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           Object.keys(JSON.parse(launchedMcpConfigKeys.get(threadId) ?? "{}") as object),
         ),
       stopAll,
-      streamEvents: Stream.fromQueue(runtimeEventQueue),
+      acknowledgeHistoryReconciliation: (threadId, markerId) =>
+        Effect.sync(() => {
+          const marker = incompleteThreads.get(threadId);
+          if (marker?.eventId === markerId) {
+            incompleteContexts.delete(marker.contextKey);
+            incompleteThreads.delete(threadId);
+          }
+        }),
+      streamEvents: Stream.fromQueue(runtimeEventQueue).pipe(
+        Stream.mapEffect(({ event, units, lease }) =>
+          Effect.sync(() => canonicalQueueResources.delete(lease)).pipe(
+            Effect.andThen(runtimeEventBudget.release(units)),
+            Effect.as(event),
+          ),
+        ),
+      ),
     } satisfies CodexAdapterShape;
   });
 

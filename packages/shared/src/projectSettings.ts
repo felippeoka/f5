@@ -120,6 +120,7 @@ export interface AgentBrowserPolicy {
    * capability at invocation.
    */
   readonly computerUseExecutionMode?: "foreground" | "background";
+  readonly computerUsePasswordMasking?: "fast" | "conservative";
 }
 
 export const DISABLED_AGENT_BROWSER_POLICY: AgentBrowserPolicy = {
@@ -128,6 +129,7 @@ export const DISABLED_AGENT_BROWSER_POLICY: AgentBrowserPolicy = {
   claudeInChrome: false,
   computerUse: false,
   computerUseExecutionMode: "foreground",
+  computerUsePasswordMasking: "fast",
 };
 
 /** User overrides for the project win over global settings; checked-in files never apply. */
@@ -150,6 +152,7 @@ export function agentBrowserPolicyFromSettings(
     computerUse: overrides?.enableAgentComputerUse ?? settings.enableAgentComputerUse,
     // No project override: the execution mode is a machine-wide choice.
     computerUseExecutionMode: settings.computerUseExecutionMode ?? "foreground",
+    computerUsePasswordMasking: settings.computerUsePasswordMasking ?? "fast",
   };
 }
 

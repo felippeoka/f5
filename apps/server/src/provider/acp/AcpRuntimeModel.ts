@@ -43,6 +43,7 @@ export interface AcpPermissionRequest {
 }
 
 export type AcpParsedSessionEvent =
+  | { readonly _tag: "TransportTerminated"; readonly message: string }
   | {
       readonly _tag: "SlashCommandsUpdated";
       readonly commands: ReadonlyArray<{

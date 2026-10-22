@@ -1,4 +1,4 @@
-import Migration0129 from "../../persistence/Migrations/129_BackgroundWorkEffort.ts";
+import Migration0129 from "../../persistence/Migrations/132_BackgroundWorkEffort.ts";
 import {
   EventId,
   ProviderInstanceId,
@@ -41,6 +41,8 @@ const directory: ProviderSessionDirectoryShape = {
   listThreadIds: () => Effect.succeed([threadId]),
   listBindings: () => Effect.succeed([]),
   updateMcpStateIfCurrent: () => Effect.succeed(true),
+  updateHistoryReconciliationIfCurrent: () => Effect.succeed(true),
+  updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
   listBindingsByProject: () => Effect.succeed([]),
 };
 

@@ -25,7 +25,11 @@ import type { Connection } from "effect/unstable/sql/SqlConnection";
 import { SqlError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
 
-import { sqlConnectionWaitDuration, sqlExecutionDuration } from "../observability/Metrics.ts";
+import {
+  PerformanceStageProbe,
+  sqlConnectionWaitDuration,
+  sqlExecutionDuration,
+} from "../observability/Metrics.ts";
 
 import { startCheckpointWorker } from "./sqliteCheckpointWorker.ts";
 
@@ -36,8 +40,26 @@ const recordDuration = (
   startedAt: number,
 ): Effect.Effect<void> => Metric.update(metric, Duration.millis(performance.now() - startedAt));
 
-const recordExecution = (startedAt: number, outcome: "success" | "failure") =>
-  recordDuration(Metric.withAttributes(sqlExecutionDuration, { outcome }), startedAt);
+const recordExecution = (
+  startedAt: number,
+  outcome: "success" | "failure",
+  sourceSQL: string,
+  probe?: ((stage: string, durationMs: number) => void) | null,
+) => {
+  const durationMs = performance.now() - startedAt;
+  probe?.("sqlite.execution", durationMs);
+  const metric = Metric.update(
+    Metric.withAttributes(sqlExecutionDuration, { outcome }),
+    Duration.millis(durationMs),
+  );
+  // SQL shape only: expandedSQL and bound parameters can contain private content.
+  return durationMs > 100
+    ? Effect.andThen(
+        metric,
+        Effect.logWarning("slow sql statement", { durationMs, sql: sourceSQL.slice(0, 160) }),
+      )
+    : metric;
+};
 
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
@@ -135,6 +157,7 @@ const makeWithDatabase = (
 ): Effect.Effect<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> =>
   Effect.gen(function* () {
     yield* checkNodeSqliteCompat();
+    const probe = yield* PerformanceStageProbe;
 
     const compiler = Statement.makeCompilerSqlite(options.transformQueryNames);
     const transformRows = options.transformResultNames
@@ -204,7 +227,7 @@ const makeWithDatabase = (
           statement.setReadBigInts(Boolean(ServiceMap.get(fiber.services, Client.SafeIntegers)));
           const startedAt = performance.now();
           const executed = (result: ReadonlyArray<any>) =>
-            Effect.as(recordExecution(startedAt, "success"), result);
+            Effect.as(recordExecution(startedAt, "success", statement.sourceSQL, probe), result);
           try {
             if (hasRows(statement)) {
               return executed(statement.all(...(params as any)));
@@ -221,7 +244,7 @@ const makeWithDatabase = (
           } catch (cause) {
             // Failures are timed too: a busy-timeout stall ends in SQLITE_BUSY.
             return Effect.andThen(
-              recordExecution(startedAt, "failure"),
+              recordExecution(startedAt, "failure", statement.sourceSQL, probe),
               Effect.fail(sqlError(cause, "Failed to execute statement")),
             );
           }
@@ -257,7 +280,12 @@ const makeWithDatabase = (
                 catch: (cause) => sqlError(cause, "Failed to execute statement"),
               }).pipe(
                 Effect.onExit((exit) =>
-                  recordExecution(startedAt, Exit.isSuccess(exit) ? "success" : "failure"),
+                  recordExecution(
+                    startedAt,
+                    Exit.isSuccess(exit) ? "success" : "failure",
+                    sql,
+                    probe,
+                  ),
                 ),
               );
             }),
@@ -306,6 +334,7 @@ const makeWithDatabase = (
             Effect.andThen(
               Effect.suspend(() => {
                 const elapsed = performance.now() - startedAt;
+                probe?.("sqlite.admission", elapsed);
                 return Metric.update(sqlConnectionWaitDuration, Duration.millis(elapsed)).pipe(
                   Effect.andThen(Effect.annotateCurrentSpan("db.connection.wait_ms", elapsed)),
                 );

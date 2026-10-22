@@ -27,9 +27,46 @@ pub fn zoom_bounds(
         (((y + height) as f64 * capture.1 as f64 / model.1 as f64).ceil() as u32).min(capture.1);
     Some((left, top, right - left, bottom - top))
 }
+/// Select an action display from its explicit target or focused window, never the cursor.
+pub fn action_display_index(
+    requested: &str,
+    window: Option<(i32, i32, i32, i32)>,
+    displays: &[(&str, (i32, i32, i32, i32))],
+) -> Option<usize> {
+    if !requested.is_empty() {
+        return displays.iter().position(|(id, _)| *id == requested);
+    }
+    let (left, top, right, bottom) = window?;
+    if right <= left || bottom <= top {
+        return None;
+    }
+    let x = (left as i64 + right as i64) / 2;
+    let y = (top as i64 + bottom as i64) / 2;
+    displays.iter().position(|(_, (l, t, r, b))| {
+        x >= *l as i64 && x < *r as i64 && y >= *t as i64 && y < *b as i64
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn action_display_follows_request_or_window_and_never_defaults_arbitrarily() {
+        let displays = [("left", (0, 0, 1000, 800)), ("right", (1000, 0, 2000, 800))];
+        let window = Some((1200, 50, 1800, 550));
+        assert_eq!(action_display_index("", window, &displays), Some(1));
+        assert_eq!(action_display_index("left", window, &displays), Some(0));
+        assert_eq!(action_display_index("unknown", window, &displays), None);
+        assert_eq!(action_display_index("", None, &displays), None);
+        assert_eq!(
+            action_display_index("", Some((0, 0, 0, 0)), &displays),
+            None
+        );
+        assert_eq!(
+            action_display_index("", Some((2200, 0, 2300, 100)), &displays),
+            None
+        );
+    }
     #[test]
     fn maps_model_rect_into_sharp_capture_pixels() {
         assert_eq!(

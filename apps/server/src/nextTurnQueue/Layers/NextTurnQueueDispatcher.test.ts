@@ -777,6 +777,82 @@ for (const scenario of [
   });
 }
 
+for (const steering of [true, false]) {
+  it.effect(`lets only steers into the live turn through branch drift: ${steering}`, () => {
+    const target = path.join(os.tmpdir(), `f5-drift-${crypto.randomUUID()}`);
+    const threadId = ThreadId.makeUnsafe(`queue-drift-${steering}`);
+    const liveTurn = TurnId.makeUnsafe("live-turn");
+    const thread = {
+      id: threadId,
+      projectId: ProjectId.makeUnsafe("queue-dispatcher-project"),
+      deletedAt: null,
+      archivedAt: null,
+      pendingUserInputs: [],
+      session: {
+        threadId,
+        providerInstanceId: "codex",
+        status: steering ? "running" : "ready",
+        activeTurnId: steering ? liveTurn : null,
+        lastError: null,
+        updatedAt: new Date().toISOString(),
+      },
+    } as unknown as OrchestrationThread;
+    // The agent switched the recorded `feature` worktree to another branch.
+    const git = makeFakeGitCore({
+      listWorktrees: () =>
+        Effect.promise(async () => [
+          {
+            path: target,
+            canonicalPath: await canonicalWorktreePath(target),
+            branch: "agent-branch",
+            headSha: "abc123",
+            bare: false,
+            detached: false,
+            locked: null,
+            prunable: null,
+            isMain: false,
+          },
+        ]),
+      inspectCheckout: () =>
+        Effect.promise(async () => ({
+          canonicalRoot: await canonicalWorktreePath(target),
+          commonDir: await canonicalWorktreePath(`${process.cwd()}/.git`),
+          branch: "agent-branch",
+        })) as never,
+    });
+    return Effect.gen(function* () {
+      dispatched.length = 0;
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }));
+      const dispatcher = yield* NextTurnQueueDispatcher;
+      const store = yield* NextTurnQueueStore;
+      yield* seedThread(threadId);
+      yield* insert(70, threadId);
+      if (steering) {
+        const sql = yield* SqlClient.SqlClient;
+        const item = (yield* store.listByThread(threadId)).items[0]!;
+        yield* sql`UPDATE next_turn_queue SET command_json = ${JSON.stringify({
+          ...item.command,
+          expectedTurnId: liveTurn,
+        })} WHERE item_id = ${item.itemId}`;
+      }
+      yield* dispatcher.notify(threadId);
+      yield* dispatcher.drain;
+      const queue = yield* store.listByThread(threadId);
+      if (steering) {
+        assert.equal(dispatched.length, 1);
+        assert.equal(queue.state.paused, false);
+      } else {
+        assert.equal(dispatched.length, 0);
+        assert.equal(queue.state.paused, true);
+        assert.equal(queue.state.pauseReasonCode, "worktree_missing");
+      }
+    }).pipe(
+      Effect.provide(makeTestLayer(git.service, target, thread)),
+      Effect.ensuring(Effect.promise(() => fs.rm(target, { recursive: true, force: true }))),
+    );
+  });
+}
+
 for (const automatic of [false, true]) {
   it.effect(`schedules reset recovery at startup only when opted in: ${automatic}`, () => {
     const threadId = ThreadId.makeUnsafe(`recovery-startup-${automatic}`);
@@ -1060,3 +1136,53 @@ it.layer(
     }),
   );
 });
+
+it.effect("starts every actionable page before the first safety-sweep interval", () =>
+  Effect.gen(function* () {
+    const dispatcher = yield* NextTurnQueueDispatcher;
+    const store = yield* NextTurnQueueStore;
+    const expected = new Set<CommandId>();
+    for (let index = 0; index < 130; index++) {
+      const threadId = ThreadId.makeUnsafe(`startup-page-${String(index).padStart(3, "0")}`);
+      yield* seedThread(threadId);
+      yield* insert(20_000 + index, threadId);
+      expected.add(CommandId.makeUnsafe(`dispatcher-command-${20_000 + index}`));
+    }
+    const periodic = yield* store.listActionableThreadIds;
+    assert.equal(periodic.length, 64);
+    yield* dispatcher.start;
+    yield* dispatcher.drain;
+    assert.equal(dispatched.filter((id) => expected.has(id)).length, 130);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.live(
+  "notification before notBefore reinstates the precise wakeup without waiting for a sweep",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const dispatcher = yield* NextTurnQueueDispatcher;
+        const store = yield* NextTurnQueueStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.makeUnsafe("not-before-notified");
+        yield* seedThread(threadId);
+        yield* insert(9998, threadId);
+        const item = (yield* store.listByThread(threadId)).items[0]!;
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        const at = Date.now();
+        yield* sql`UPDATE next_turn_queue SET not_before = ${new Date(at + 200).toISOString()} WHERE item_id = ${item.itemId}`;
+        const before = dispatched.length;
+        // Do not start the sweep: progress must come from the scheduled retry alone.
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, before);
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(40));
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, before);
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(160));
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, before + 1);
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.useRealTimers())), Effect.provide(makeTestLayer())),
+);

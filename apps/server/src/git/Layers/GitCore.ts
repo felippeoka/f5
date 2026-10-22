@@ -2,7 +2,7 @@ import { gitConfigArgs, literalGitPathspec } from "@t3tools/shared/git";
 import { makeMoveSnapshotOperations } from "../moveSnapshot.ts";
 import { checkoutFingerprint } from "../checkoutFingerprint.ts";
 import { blockingIgnoredEntries } from "../worktreeIgnoredFiles.ts";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { parseCleanupSafetyStatus } from "../cleanupSafety.ts";
 import { basename, dirname } from "node:path";
 import {
@@ -14,6 +14,7 @@ import { parseWorktreeListPorcelain, stripPathTerminator } from "../worktreeList
 import { isRefLockFailure, networkFailureDetail } from "../networkFailureDetail.ts";
 import {
   withWorktreeLifecycleLock,
+  withoutLifecycleLocks,
   withRepositoryLifecycleLock,
   repositoryIdentityHash,
   pathContains,
@@ -32,6 +33,8 @@ import {
 import {
   Cache,
   Data,
+  Deferred,
+  Fiber,
   Duration,
   Effect,
   Exit,
@@ -277,6 +280,33 @@ function missingCwdErrorDetail(cwd: string): string {
 }
 
 const makeGitCore = Effect.gen(function* () {
+  const serviceScope = yield* Effect.scope;
+  const upstreamRefreshJobs = new Map<string, Set<Fiber.Fiber<void>>>();
+  const launchUpstreamRefresh = (cwd: string, work: Effect.Effect<void, GitCommandError>) =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      let job: Fiber.Fiber<void>;
+      job = yield* Deferred.await(ready).pipe(
+        Effect.andThen(work),
+        Effect.ignoreCause({ log: true }),
+        withoutLifecycleLocks,
+        Effect.ensuring(
+          Effect.sync(() => {
+            const jobs = upstreamRefreshJobs.get(cwd);
+            jobs?.delete(job);
+            if (jobs?.size === 0) upstreamRefreshJobs.delete(cwd);
+          }),
+        ),
+        Effect.forkIn(serviceScope),
+      );
+      const jobs = upstreamRefreshJobs.get(cwd) ?? new Set<Fiber.Fiber<void>>();
+      jobs.add(job);
+      upstreamRefreshJobs.set(cwd, jobs);
+      yield* Deferred.succeed(ready, undefined);
+    });
+
+  const statusRefreshListeners = new Set<(cwd: string) => void>();
+  yield* Effect.addFinalizer(() => Effect.sync(() => statusRefreshListeners.clear()));
   const git = yield* GitService;
   const preparations = yield* WorktreePreparations;
   const { worktreesDir, baseDir } = yield* ServerConfig;
@@ -581,36 +611,134 @@ const makeGitCore = Effect.gen(function* () {
       };
     });
 
-  const fetchUpstreamRef = (
-    cwd: string,
-    upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
-  ): Effect.Effect<void, GitCommandError> => {
-    const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
-    return runGit(
-      "GitCore.fetchUpstreamRef",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", "--no-auto-gc", "--", upstream.remoteName, refspec],
-      true,
-    );
-  };
+  const sweptStatusRepositories = new Set<string>();
+  let legacyStatusFetch = false;
+  const sweepStatusRefs = (cwd: string) =>
+    Effect.gen(function* () {
+      const commonDir = yield* canonicalPath(yield* resolveCommonDir(cwd));
+      if (sweptStatusRepositories.has(commonDir)) return;
+      sweptStatusRepositories.add(commonDir);
+      if (sweptStatusRepositories.size > 256)
+        sweptStatusRepositories.delete(sweptStatusRepositories.values().next().value!);
+      const refs = yield* runGitStdout("GitCore.sweepStatusRefs", cwd, [
+        "for-each-ref",
+        "--count=256",
+        "--format=%(refname)%09%(objectname)",
+        "refs/f5/status/",
+      ]);
+      const cutoff = Date.now() - 30 * 60_000;
+      for (const line of refs.trim().split("\n")) {
+        const [ref, oid] = line.split("\t");
+        if (!ref || !oid || !/^refs\/f5\/status\/(?:\d{13,}-)?[a-f0-9-]+$/.test(ref)) continue;
+        const timestamp = /^refs\/f5\/status\/(\d{13,})-/.exec(ref)?.[1];
+        // Earlier builds used bare UUIDs. Only filesystem age establishes their
+        // age; a commit's timestamp says nothing about when its ref was created.
+        const created = timestamp
+          ? Number(timestamp)
+          : yield* Effect.promise(async () => {
+              try {
+                return (await inspectPath(joinPath(commonDir, ref))).mtimeMs;
+              } catch {
+                try {
+                  return (await inspectPath(joinPath(commonDir, "packed-refs"))).mtimeMs;
+                } catch {
+                  return Infinity;
+                }
+              }
+            });
+        if (created >= cutoff) continue;
+        yield* withRepositoryLock(
+          "GitCore.sweepStatusRefs",
+          cwd,
+          executeGit("GitCore.sweepStatusRefs", cwd, ["update-ref", "-d", ref, oid], {
+            allowNonZeroExit: true,
+          }),
+          "background",
+        );
+      }
+    });
 
-  const fetchUpstreamRefForStatus = (
+  const fetchUpstreamRefInBackground = (
     cwd: string,
     upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
     env: NodeJS.ProcessEnv,
-  ): Effect.Effect<void, GitCommandError> => {
-    const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
-    return executeGit(
-      "GitCore.fetchUpstreamRefForStatus",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", "--no-auto-gc", "--", upstream.remoteName, refspec],
-      {
+  ): Effect.Effect<boolean, GitCommandError> =>
+    Effect.gen(function* () {
+      const operation = "GitCore.fetchUpstreamRefInBackground";
+      yield* sweepStatusRefs(cwd).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("status refresh ref sweep failed", { cause: String(cause) }),
+        ),
+      );
+      const destination = `refs/remotes/${upstream.upstreamRef}`;
+      const before = yield* executeGit(operation, cwd, ["rev-parse", "--verify", destination], {
         allowNonZeroExit: true,
-        timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
-        env,
-      },
-    ).pipe(Effect.asVoid);
-  };
+      });
+      const previous = before.code === 0 ? before.stdout.trim() : "";
+      const temporary = `refs/f5/status/${Date.now()}-${randomUUID()}`;
+      // Download under an isolated ref: concurrent user pulls must own FETCH_HEAD
+      // and their tracking refs. Only the short compare-and-set takes the shared lock.
+      return yield* Effect.acquireUseRelease(
+        Effect.succeed(temporary),
+        (ref) =>
+          Effect.gen(function* () {
+            const fetch = (legacy: boolean) =>
+              executeGit(
+                operation,
+                cwd,
+                [
+                  "fetch",
+                  "--quiet",
+                  "--no-tags",
+                  ...(legacy ? [] : ["--no-write-fetch-head", "--no-auto-maintenance"]),
+                  "--refmap=",
+                  "--",
+                  upstream.remoteName,
+                  `+refs/heads/${upstream.upstreamBranch}:${ref}`,
+                ],
+                {
+                  timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
+                  env,
+                  allowNonZeroExit: true,
+                },
+              );
+            // Older Git cannot isolate FETCH_HEAD. Serialize its compatibility
+            // path with user fetch/pull operations, retaining the temporary ref/CAS.
+            const compatibleFetch = () =>
+              withRepositoryLock(operation, cwd, fetch(true), "background");
+            let fetched = yield* legacyStatusFetch ? compatibleFetch() : fetch(false);
+            if (
+              fetched.code !== 0 &&
+              /(?:unknown|unrecognized) option/i.test(fetched.stderr) &&
+              !legacyStatusFetch
+            ) {
+              legacyStatusFetch = true;
+              yield* Effect.logWarning(
+                "Background Git refresh is using compatibility mode; fetch is serialized with repository writes.",
+              );
+              fetched = yield* compatibleFetch();
+            }
+            if (fetched.code !== 0) return false;
+            const head = yield* runGitStdout(operation, cwd, ["rev-parse", "--verify", ref]);
+            if (head.trim() === previous) return true;
+            return yield* withRepositoryLock(
+              operation,
+              cwd,
+              executeGit(operation, cwd, ["update-ref", destination, head.trim(), previous], {
+                allowNonZeroExit: true,
+              }),
+              "background",
+            ).pipe(Effect.map((result) => result.code === 0));
+          }),
+        (ref) =>
+          executeGit(operation, cwd, ["update-ref", "-d", ref], { allowNonZeroExit: true }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to clean up status refresh ref", { cause: String(cause) }),
+            ),
+            Effect.asVoid,
+          ),
+      );
+    });
 
   const statusUpstreamRefreshGenerationRef = yield* Ref.make(new Map<string, number>());
   const statusUpstreamRefreshGenerationKey = (key: StatusUpstreamRefreshCacheKey) =>
@@ -642,7 +770,7 @@ const makeGitCore = Effect.gen(function* () {
     lookup: (cacheKey: StatusUpstreamRefreshCacheKey) =>
       Effect.gen(function* () {
         const generation = yield* startStatusRefreshGeneration(cacheKey);
-        yield* fetchUpstreamRefForStatus(
+        const fetched = yield* fetchUpstreamRefInBackground(
           cacheKey.cwd,
           {
             upstreamRef: cacheKey.upstreamRef,
@@ -654,7 +782,12 @@ const makeGitCore = Effect.gen(function* () {
             ...BACKGROUND_GIT_FETCH_ENV,
           },
         );
-        return yield* isLatestStatusRefreshGeneration(cacheKey, generation);
+        const latest = yield* isLatestStatusRefreshGeneration(cacheKey, generation);
+        if (latest && fetched)
+          yield* Effect.sync(() => {
+            for (const listener of statusRefreshListeners) listener(cacheKey.cwd);
+          });
+        return latest && fetched;
       }),
     // Keep successful refreshes warm and briefly cool down refresh failures so repeated
     // status checks in the same action do not pay the full upstream timeout each time.
@@ -685,7 +818,10 @@ const makeGitCore = Effect.gen(function* () {
     Effect.gen(function* () {
       const upstream = yield* resolveCurrentUpstream(cwd);
       if (!upstream) return;
-      yield* fetchUpstreamRef(cwd, upstream);
+      yield* fetchUpstreamRefInBackground(cwd, upstream, {
+        ...process.env,
+        ...BACKGROUND_GIT_FETCH_ENV,
+      });
     });
 
   const resolveDefaultBranchName = (
@@ -966,7 +1102,7 @@ const makeGitCore = Effect.gen(function* () {
       }
 
       if (options?.refreshUpstream !== false)
-        yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true }));
+        yield* launchUpstreamRefresh(cwd, refreshStatusUpstreamIfStale(cwd));
 
       // Porcelain diff can refresh the real index even with optional locks
       // disabled. Plumbing preserves status totals without that side effect.
@@ -2140,9 +2276,12 @@ const makeGitCore = Effect.gen(function* () {
     operation: string,
     cwd: string,
     effect: Effect.Effect<A, GitCommandError>,
+    mode: "user" | "background" = "user",
   ): Effect.Effect<A, GitCommandError> =>
     resolveCommonDir(cwd).pipe(
-      Effect.flatMap((commonDir) => withRepositoryLifecycleLock(baseDir, commonDir, effect)),
+      Effect.flatMap((commonDir) =>
+        withRepositoryLifecycleLock(baseDir, commonDir, effect, { mode }),
+      ),
       Effect.mapError((error) =>
         Schema.is(GitCommandError)(error)
           ? error
@@ -3327,9 +3466,7 @@ const makeGitCore = Effect.gen(function* () {
 
       // Refresh upstream refs in the background so checkout remains responsive.
       if (options?.refreshUpstream !== false)
-        yield* Effect.forkScoped(
-          refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
-        );
+        yield* launchUpstreamRefresh(input.cwd, refreshCheckedOutBranchUpstream(input.cwd));
     });
 
   const initRepo: GitCoreShape["initRepo"] = (input) =>
@@ -3432,6 +3569,20 @@ const makeGitCore = Effect.gen(function* () {
     initRepo,
     listLocalBranchNames,
     readDefaultBranch: (cwd) => resolveDefaultBranchName(cwd, "origin"),
+    drainUpstreamRefreshes: (cwd) =>
+      Effect.suspend(() =>
+        Effect.forEach([...(upstreamRefreshJobs.get(cwd) ?? [])], Fiber.await, {
+          concurrency: "unbounded",
+          discard: true,
+        }),
+      ),
+    subscribeStatusRefresh: (listener) =>
+      Effect.sync(() => {
+        statusRefreshListeners.add(listener);
+        return () => {
+          statusRefreshListeners.delete(listener);
+        };
+      }),
   } satisfies GitCoreShape;
 });
 

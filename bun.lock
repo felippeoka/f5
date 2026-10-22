@@ -163,6 +163,7 @@
     "packages/effect-acp": {
       "name": "effect-acp",
       "dependencies": {
+        "@t3tools/shared": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   CODE_HIGHLIGHT_WORKER_MAX_LANGUAGES,
+  CODE_HIGHLIGHT_MAX_JOBS,
+  CODE_HIGHLIGHT_MAX_BYTES,
+  codeHighlightResourceInventory,
   type CodeHighlightWorkerRequest,
   highlightCodeInWorker,
   setCodeHighlightWorkerFactoryForTests,
@@ -72,6 +75,77 @@ afterEach(() => {
 });
 
 describe("highlightCodeInWorker", () => {
+  it("bounds jobs and physical bytes through cancellation and worker failure", async () => {
+    setCodeHighlightWorkerFactoryForTests(() => {
+      const worker = new FakeWorker();
+      worker.autoRespond = false;
+      return worker as unknown as Worker;
+    });
+    const controllers = Array.from(
+      { length: CODE_HIGHLIGHT_MAX_JOBS },
+      () => new AbortController(),
+    );
+    const pending = controllers.map((controller) =>
+      highlightCodeInWorker({
+        code: "bytes",
+        language: "ts",
+        theme: "pierre-dark",
+        signal: controller.signal,
+      }),
+    );
+    const settled = Promise.allSettled(pending);
+    await vi.waitFor(() =>
+      expect(FakeWorker.instances[0]?.highlightRequests()).toHaveLength(CODE_HIGHLIGHT_MAX_JOBS),
+    );
+    controllers.forEach((controller) => controller.abort());
+    await settled;
+    expect(codeHighlightResourceInventory()).toEqual({
+      jobs: CODE_HIGHLIGHT_MAX_JOBS,
+      bytes: CODE_HIGHLIGHT_MAX_JOBS * 5,
+    });
+    await expect(
+      highlightCodeInWorker({ code: "next", language: "ts", theme: "pierre-dark" }),
+    ).rejects.toThrow("capacity");
+    FakeWorker.instances[0]!.crash();
+    expect(codeHighlightResourceInventory()).toEqual({ jobs: 0, bytes: 0 });
+    await expect(
+      highlightCodeInWorker({
+        code: "x".repeat(CODE_HIGHLIGHT_MAX_BYTES + 1),
+        language: "ts",
+        theme: "pierre-dark",
+      }),
+    ).rejects.toThrow("capacity");
+    expect(codeHighlightResourceInventory()).toEqual({ jobs: 0, bytes: 0 });
+  });
+
+  it("retires cancelled jobs whose worker never acknowledges them", async () => {
+    vi.useFakeTimers();
+    try {
+      setCodeHighlightWorkerFactoryForTests(() => {
+        const worker = new FakeWorker();
+        worker.autoRespond = false;
+        return worker as unknown as Worker;
+      });
+      const controller = new AbortController();
+      const work = highlightCodeInWorker({
+        code: "x",
+        language: "ts",
+        theme: "pierre-dark",
+        signal: controller.signal,
+      });
+      const settled = Promise.allSettled([work]);
+      await vi.advanceTimersByTimeAsync(1);
+      controller.abort();
+      await settled;
+      expect(codeHighlightResourceInventory().jobs).toBe(1);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(codeHighlightResourceInventory()).toEqual({ jobs: 0, bytes: 0 });
+      expect(FakeWorker.instances[0]!.terminated).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sends each grammar and theme to a worker once", async () => {
     const first = await highlightCodeInWorker({ code: "a", language: "ts", theme: "pierre-dark" });
     const second = await highlightCodeInWorker({ code: "b", language: "ts", theme: "pierre-dark" });

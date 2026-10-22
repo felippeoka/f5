@@ -1,3 +1,5 @@
+import { ServerShutdown } from "../../shutdown.ts";
+import type { ProviderAdapterSessionStartInput } from "../Services/ProviderAdapter.ts";
 import {
   AGENT_AUTOMATION_SUPPORT,
   OPENCODE_EXTERNAL_AUTOMATION_REASON,
@@ -28,6 +30,7 @@ import {
   Queue,
   Random,
   Ref,
+  Option,
   Scope,
   Stream,
   Schedule,
@@ -37,7 +40,11 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  writeProviderEventLog,
+  type EventNdjsonLogger,
+  makeEventNdjsonLogger,
+} from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -79,6 +86,7 @@ type OpenCodeSubscribedEvent =
     : never;
 
 interface OpenCodeSessionContext {
+  readonly eventIdentity: ProviderAdapterSessionStartInput["mcpEventIdentity"];
   session: ProviderSession;
   readonly client: OpencodeClient;
   readonly nativeCommands: Set<string>;
@@ -160,6 +168,8 @@ const toProcessError = (threadId: ThreadId, cause: unknown): ProviderAdapterProc
   });
 
 const buildEventBase = (input: {
+  readonly providerInstanceId?: import("@t3tools/contracts").ProviderInstanceId;
+  readonly sessionGeneration?: number;
   readonly threadId: ThreadId;
   readonly turnId?: TurnId | undefined;
   readonly itemId?: string | undefined;
@@ -169,13 +179,28 @@ const buildEventBase = (input: {
 }): Effect.Effect<
   Pick<
     ProviderRuntimeEvent,
-    "eventId" | "provider" | "threadId" | "createdAt" | "turnId" | "itemId" | "requestId" | "raw"
+    | "eventId"
+    | "provider"
+    | "threadId"
+    | "createdAt"
+    | "turnId"
+    | "itemId"
+    | "requestId"
+    | "raw"
+    | "providerInstanceId"
+    | "sessionGeneration"
   >
 > =>
   Random.nextUUIDv4.pipe(
     Effect.map((uuid) => ({
       eventId: EventId.make(uuid),
       provider: PROVIDER,
+      ...(input.providerInstanceId !== undefined
+        ? { providerInstanceId: input.providerInstanceId }
+        : {}),
+      ...(input.sessionGeneration !== undefined
+        ? { sessionGeneration: input.sessionGeneration }
+        : {}),
       threadId: input.threadId,
       createdAt: input.createdAt ?? nowIso(),
       ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -461,86 +486,92 @@ function updateProviderSession(
 const abortOpenCodeTree = Effect.fn("abortOpenCodeTree")(function* (
   context: OpenCodeSessionContext,
 ) {
-  const ids = new Set([context.openCodeSessionId, ...context.relatedSessionIds]);
-  let failure: OpenCodeRuntimeError | undefined;
-  let parentFailure: OpenCodeRuntimeError | undefined;
-  const abort = (sessionID: string) =>
-    runOpenCodeSdk("session.abort", (signal) =>
-      context.client.session.abort({ sessionID }, { signal }),
-    ).pipe(
-      Effect.timeout("5 seconds"),
-      Effect.catch((cause) =>
-        Effect.sync(() => {
-          failure ??= new OpenCodeRuntimeError({
-            operation: "session.abort",
-            detail: openCodeRuntimeErrorDetail(cause),
-            cause,
-          });
-        }),
-      ),
-    );
-  // Stop the parent before enumerating children so it cannot keep spawning work.
-  // A discovery failure must not prevent aborting sessions we already know about.
-  yield* abort(context.openCodeSessionId);
-  parentFailure = failure;
-  failure = undefined;
-  yield* Effect.gen(function* () {
-    for (const sessionID of ids) {
-      const children = yield* runOpenCodeSdk("session.children", (signal) =>
-        context.client.session.children({ sessionID }, { signal }),
+  const shutdown = Option.getOrUndefined(yield* Effect.serviceOption(ServerShutdown));
+  const work = Effect.gen(function* () {
+    const ids = new Set([context.openCodeSessionId, ...context.relatedSessionIds]);
+    let failure: OpenCodeRuntimeError | undefined;
+    let parentFailure: OpenCodeRuntimeError | undefined;
+    const abort = (sessionID: string) =>
+      runOpenCodeSdk("session.abort", (signal) =>
+        context.client.session.abort({ sessionID }, { signal }),
       ).pipe(
         Effect.timeout("5 seconds"),
         Effect.catch((cause) =>
           Effect.sync(() => {
             failure ??= new OpenCodeRuntimeError({
-              operation: "session.children",
+              operation: "session.abort",
               detail: openCodeRuntimeErrorDetail(cause),
               cause,
             });
-            return { data: [] };
           }),
         ),
       );
-      for (const child of children.data ?? []) {
-        if (
-          context.currentTurnStartedAt &&
-          child.time?.updated < context.currentTurnStartedAt &&
-          !ids.has(child.id)
-        )
-          continue;
-        if (ids.size >= 128 && !ids.has(child.id)) {
+    // Stop the parent before enumerating children so it cannot keep spawning work.
+    // A discovery failure must not prevent aborting sessions we already know about.
+    yield* abort(context.openCodeSessionId);
+    parentFailure = failure;
+    failure = undefined;
+    yield* Effect.gen(function* () {
+      for (const sessionID of ids) {
+        const children = yield* runOpenCodeSdk("session.children", (signal) =>
+          context.client.session.children({ sessionID }, { signal }),
+        ).pipe(
+          Effect.timeout("5 seconds"),
+          Effect.catch((cause) =>
+            Effect.sync(() => {
+              failure ??= new OpenCodeRuntimeError({
+                operation: "session.children",
+                detail: openCodeRuntimeErrorDetail(cause),
+                cause,
+              });
+              return { data: [] };
+            }),
+          ),
+        );
+        for (const child of children.data ?? []) {
+          if (
+            context.currentTurnStartedAt &&
+            child.time?.updated < context.currentTurnStartedAt &&
+            !ids.has(child.id)
+          )
+            continue;
+          if (ids.size >= 128 && !ids.has(child.id)) {
+            failure ??= new OpenCodeRuntimeError({
+              operation: "session.children",
+              detail: "Too many OpenCode child sessions to stop safely.",
+            });
+            break;
+          }
+          ids.add(child.id);
+        }
+      }
+    }).pipe(
+      Effect.timeout("10 seconds"),
+      Effect.catch((cause) =>
+        Effect.sync(() => {
           failure ??= new OpenCodeRuntimeError({
             operation: "session.children",
-            detail: "Too many OpenCode child sessions to stop safely.",
+            detail: "Timed out discovering OpenCode child sessions.",
+            cause,
           });
-          break;
-        }
-        ids.add(child.id);
-      }
-    }
-  }).pipe(
-    Effect.timeout("10 seconds"),
-    Effect.catch((cause) =>
-      Effect.sync(() => {
-        failure ??= new OpenCodeRuntimeError({
-          operation: "session.children",
-          detail: "Timed out discovering OpenCode child sessions.",
-          cause,
-        });
-      }),
-    ),
-  );
-  yield* Effect.forEach(
-    [...ids].filter((id) => id !== context.openCodeSessionId),
-    abort,
-    { concurrency: 4, discard: true },
-  );
-  const cleanupFailure = yield* Effect.sync(() => failure);
-  if (cleanupFailure)
-    yield* Effect.logWarning("OpenCode child cleanup incomplete", {
-      detail: cleanupFailure.detail,
-    });
-  if (parentFailure) return yield* parentFailure;
+        }),
+      ),
+    );
+    yield* Effect.forEach(
+      [...ids].filter((id) => id !== context.openCodeSessionId),
+      abort,
+      { concurrency: 4, discard: true },
+    );
+    const cleanupFailure = yield* Effect.sync(() => failure);
+    if (cleanupFailure)
+      yield* Effect.logWarning("OpenCode child cleanup incomplete", {
+        detail: cleanupFailure.detail,
+      });
+    if (parentFailure) return yield* parentFailure;
+  });
+  return yield* shutdown?.deadline === undefined
+    ? work
+    : work.pipe(Effect.timeout(Math.max(1, shutdown.deadline - Date.now() - 50)));
 });
 
 const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
@@ -569,6 +600,7 @@ export function makeOpenCodeAdapter(
   options?: OpenCodeAdapterLiveOptions,
 ) {
   return Effect.gen(function* () {
+    const adapterScope = yield* Scope.Scope;
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("opencode");
     const serverConfig = yield* ServerConfig;
     const openCodeRuntime = yield* OpenCodeRuntime;
@@ -622,7 +654,8 @@ export function makeOpenCodeAdapter(
         readonly observedAt: string;
         readonly event: Record<string, unknown>;
       },
-    ) => (nativeEventLogger ? nativeEventLogger.write(event, threadId) : Effect.void);
+    ) =>
+      nativeEventLogger ? writeProviderEventLog(nativeEventLogger, event, threadId) : Effect.void;
     const writeNativeEventBestEffort = (
       threadId: ThreadId,
       event: {
@@ -651,6 +684,7 @@ export function makeOpenCodeAdapter(
       // subsequent yield point would unwind and silently drop these emits.
       yield* emit({
         ...(yield* buildEventBase({
+          ...context.eventIdentity,
           threadId: context.session.threadId,
           turnId,
         })),
@@ -662,6 +696,7 @@ export function makeOpenCodeAdapter(
       }).pipe(Effect.ignore);
       yield* emit({
         ...(yield* buildEventBase({
+          ...context.eventIdentity,
           threadId: context.session.threadId,
           turnId,
         })),
@@ -677,7 +712,10 @@ export function makeOpenCodeAdapter(
       // one-shot guard, so the call would no-op.
       yield* abortOpenCodeTree(context).pipe(Effect.ignore({ log: true }));
       context.eventsAbortController.abort();
-      yield* Scope.close(context.sessionScope, Exit.void);
+      // This handler runs inside sessionScope. Closing that scope in this
+      // fiber would wait for the same fiber to exit. Let the adapter own the
+      // close, then return so every session finalizer can finish.
+      yield* Scope.close(context.sessionScope, Exit.void).pipe(Effect.forkIn(adapterScope));
     });
 
     /** Emit content.delta and item.completed events for an assistant text part. */
@@ -705,6 +743,7 @@ export function makeOpenCodeAdapter(
       if (deltaToEmit.length > 0) {
         yield* emit({
           ...(yield* buildEventBase({
+            ...context.eventIdentity,
             threadId: context.session.threadId,
             turnId,
             itemId: part.id,
@@ -730,6 +769,7 @@ export function makeOpenCodeAdapter(
         context.completedAssistantPartIds.add(part.id);
         yield* emit({
           ...(yield* buildEventBase({
+            ...context.eventIdentity,
             threadId: context.session.threadId,
             turnId,
             itemId: part.id,
@@ -779,6 +819,7 @@ export function makeOpenCodeAdapter(
       if (context.autoRepliedRequestIds.delete(requestID)) return;
       yield* emit({
         ...(yield* buildEventBase({
+          ...context.eventIdentity,
           threadId: context.session.threadId,
           turnId: context.activeTurnId,
           requestId: requestID,
@@ -797,6 +838,7 @@ export function makeOpenCodeAdapter(
       context.pendingQuestions.delete(requestID);
       yield* emit({
         ...(yield* buildEventBase({
+          ...context.eventIdentity,
           threadId: context.session.threadId,
           turnId: context.activeTurnId,
           requestId: requestID,
@@ -811,6 +853,7 @@ export function makeOpenCodeAdapter(
       raw: unknown,
     ) {
       const base = yield* buildEventBase({
+        ...context.eventIdentity,
         threadId: context.session.threadId,
         turnId: context.activeTurnId,
         requestId: request.id,
@@ -934,6 +977,7 @@ export function makeOpenCodeAdapter(
           }
           yield* emit({
             ...(yield* buildEventBase({
+              ...context.eventIdentity,
               threadId: context.session.threadId,
               turnId,
               itemId: event.properties.partID,
@@ -978,6 +1022,7 @@ export function makeOpenCodeAdapter(
             };
             const runtimeEvent: ProviderRuntimeEvent = {
               ...(yield* buildEventBase({
+                ...context.eventIdentity,
                 threadId: context.session.threadId,
                 turnId,
                 itemId: part.callID,
@@ -1051,6 +1096,7 @@ export function makeOpenCodeAdapter(
 
         case "question.asked": {
           const base = yield* buildEventBase({
+            ...context.eventIdentity,
             threadId: context.session.threadId,
             turnId,
             requestId: event.properties.id,
@@ -1102,6 +1148,7 @@ export function makeOpenCodeAdapter(
           if (event.properties.status.type === "retry") {
             yield* emit({
               ...(yield* buildEventBase({
+                ...context.eventIdentity,
                 threadId: context.session.threadId,
                 turnId,
                 raw: event,
@@ -1121,6 +1168,7 @@ export function makeOpenCodeAdapter(
             updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
             yield* emit({
               ...(yield* buildEventBase({
+                ...context.eventIdentity,
                 threadId: context.session.threadId,
                 turnId,
                 raw: event,
@@ -1148,6 +1196,7 @@ export function makeOpenCodeAdapter(
           if (activeTurnId) {
             yield* emit({
               ...(yield* buildEventBase({
+                ...context.eventIdentity,
                 threadId: context.session.threadId,
                 turnId: activeTurnId,
                 raw: event,
@@ -1162,7 +1211,11 @@ export function makeOpenCodeAdapter(
           }
           if (context.interruptingTurnId === activeTurnId && activeTurnId) break;
           yield* emit({
-            ...(yield* buildEventBase({ threadId: context.session.threadId, raw: event })),
+            ...(yield* buildEventBase({
+              ...context.eventIdentity,
+              threadId: context.session.threadId,
+              raw: event,
+            })),
             type: "runtime.error",
             payload: {
               message,
@@ -1299,19 +1352,39 @@ export function makeOpenCodeAdapter(
                 serverUrl,
                 ...(options?.environment ? { environment: options.environment } : {}),
               });
+              const requests = new AbortController();
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => requests.abort(new Error("OpenCode session closed"))),
+              );
+              if (!server.external && server.exitCode !== null) {
+                // Install before session.create: startup requests need the same
+                // prompt rejection guarantee as requests from established sessions.
+                yield* server.exitCode.pipe(
+                  Effect.tap((code) =>
+                    Effect.sync(() =>
+                      requests.abort(new Error(`OpenCode server exited (${code})`)),
+                    ),
+                  ),
+                  Effect.forkScoped({ startImmediately: true }),
+                );
+              }
               const client = openCodeRuntime.createOpenCodeSdkClient({
+                signal: requests.signal,
                 baseUrl: server.url,
                 directory,
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               });
-              const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
+              const openCodeSession = yield* runOpenCodeSdk("session.create", (signal) =>
                 // No title: OpenCode only generates one from the first prompt
                 // when session.create leaves it unset.
-                client.session.create({
-                  permission: input.workflowExecutionProfile
-                    ? buildOpenCodeWorkflowPermissionRules(input.workflowExecutionProfile)
-                    : buildOpenCodePermissionRules(input.runtimeMode),
-                }),
+                client.session.create(
+                  {
+                    permission: input.workflowExecutionProfile
+                      ? buildOpenCodeWorkflowPermissionRules(input.workflowExecutionProfile)
+                      : buildOpenCodePermissionRules(input.runtimeMode),
+                  },
+                  { signal },
+                ),
               );
               if (!openCodeSession.data) {
                 return yield* new OpenCodeRuntimeError({
@@ -1367,6 +1440,7 @@ export function makeOpenCodeAdapter(
         };
 
         const context: OpenCodeSessionContext = {
+          eventIdentity: input.mcpEventIdentity,
           session,
           client: started.client,
           nativeCommands: new Set(),
@@ -1396,14 +1470,14 @@ export function makeOpenCodeAdapter(
         yield* startEventPump(context);
 
         yield* emit({
-          ...(yield* buildEventBase({ threadId: input.threadId })),
+          ...(yield* buildEventBase({ ...context.eventIdentity, threadId: input.threadId })),
           type: "session.started",
           payload: {
             message: "OpenCode session started",
           },
         });
         yield* emit({
-          ...(yield* buildEventBase({ threadId: input.threadId })),
+          ...(yield* buildEventBase({ ...context.eventIdentity, threadId: input.threadId })),
           type: "thread.started",
           payload: {
             providerThreadId: started.openCodeSession.id,
@@ -1425,7 +1499,7 @@ export function makeOpenCodeAdapter(
           });
         }
         yield* emit({
-          ...(yield* buildEventBase({ threadId: input.threadId })),
+          ...(yield* buildEventBase({ ...context.eventIdentity, threadId: input.threadId })),
           type: "session.configured",
           payload: {
             config: {
@@ -1521,7 +1595,7 @@ export function makeOpenCodeAdapter(
       );
 
       yield* emit({
-        ...(yield* buildEventBase({ threadId: input.threadId, turnId })),
+        ...(yield* buildEventBase({ ...context.eventIdentity, threadId: input.threadId, turnId })),
         type: "turn.started",
         payload: {
           model: modelSelection?.model ?? context.session.model,
@@ -1594,6 +1668,7 @@ export function makeOpenCodeAdapter(
             );
             yield* emit({
               ...(yield* buildEventBase({
+                ...context.eventIdentity,
                 threadId: input.threadId,
                 turnId,
               })),
@@ -1647,6 +1722,7 @@ export function makeOpenCodeAdapter(
         if (interruptedTurnId) {
           yield* emit({
             ...(yield* buildEventBase({
+              ...context.eventIdentity,
               threadId,
               turnId: interruptedTurnId,
             })),
@@ -1727,7 +1803,7 @@ export function makeOpenCodeAdapter(
           return;
         }
         yield* emit({
-          ...(yield* buildEventBase({ threadId })),
+          ...(yield* buildEventBase({ ...context.eventIdentity, threadId })),
           type: "session.exited",
           payload: {
             reason: "Session stopped.",

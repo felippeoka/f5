@@ -131,6 +131,7 @@ export function resolveNextTurnQueueGate(input: {
   ) {
     return {
       kind: "wait",
+      retryAfterMs: Math.max(0, Date.parse(input.item.notBefore) - (input.nowMs ?? Date.now())),
       reasonCode:
         input.item.scheduleReason === "usage_limit_reset" && input.item.attemptCount === 0
           ? "usage_limit_reset"

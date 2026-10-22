@@ -102,6 +102,8 @@ export const WsPushSequence = NonNegativeInt;
 export type WsPushSequence = typeof WsPushSequence.Type;
 
 export const WsWelcomePayload = Schema.Struct({
+  // Legacy welcomes remain decodable so the protocol check can request an upgrade.
+  backendIncarnation: Schema.optional(TrimmedNonEmptyString),
   // Optional only to decode legacy welcomes and explicitly close them as upgrade-required.
   bootstrap: Schema.optional(ServerBootstrap),
   profile: Schema.optional(ProfileSummary),

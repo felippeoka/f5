@@ -9,7 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as SqliteClient from "../../persistence/NodeSqliteClient.ts";
 import Migration102 from "../../persistence/Migrations/102_ForgeAccounts.ts";
-import Migration124 from "../../persistence/Migrations/124_PrHubReviewGuides.ts";
+import Migration124 from "../../persistence/Migrations/127_PrHubReviewGuides.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerConfig } from "../../config.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";

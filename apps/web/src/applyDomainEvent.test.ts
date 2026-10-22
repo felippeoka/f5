@@ -1,3 +1,6 @@
+import { messageAttachmentSources } from "./lib/streamingTextRevision";
+import { createTimelineEntryCache, deriveTimelineEntries } from "./session-logic";
+import { createTimelineRowCache, buildTimelineRows } from "./components/chat/MessagesTimeline";
 import { summarizeInvestigationWorkflow } from "@t3tools/shared/workflowSummary";
 import {
   ApprovalRequestId,
@@ -14,7 +17,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 
-import { applyDomainEvent } from "./applyDomainEvent";
+import { applyDomainEvent, createDomainEventBatch } from "./applyDomainEvent";
 import type { AppState } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Project, type Thread } from "./types";
 
@@ -291,7 +294,7 @@ describe("applyDomainEvent", () => {
     expect(next.threads[0]?.messages).toEqual([]);
   });
 
-  it("merges assistant message deltas into the target thread", () => {
+  it("merges assistant deltas without settling an active turn when its item completes", () => {
     const threadId = ThreadId.makeUnsafe("thread-1");
     const turnId = TurnId.makeUnsafe("turn-1");
     const messageId = MessageId.makeUnsafe("assistant-1");
@@ -362,13 +365,30 @@ describe("applyDomainEvent", () => {
     ]);
     expect(afterComplete.threads[0]?.latestTurn).toEqual({
       turnId,
-      state: "completed",
+      state: "running",
       requestedAt: "2026-04-01T09:04:01.000Z",
       startedAt: "2026-04-01T09:04:01.000Z",
-      completedAt: "2026-04-01T09:04:02.000Z",
+      completedAt: null,
       assistantMessageId: messageId,
     });
     expect(afterComplete.threads[0]?.lastInteractionAt).toBe("2026-04-01T09:05:02.000Z");
+    const failed = applyDomainEvent(
+      afterComplete,
+      makeEvent("thread.session-set", {
+        threadId,
+        settledTurnId: turnId,
+        session: {
+          threadId,
+          providerName: "codex",
+          status: "error",
+          activeTurnId: null,
+          lastError: "Host exited",
+          runtimeMode: "full-access",
+          updatedAt: "2026-04-01T09:06:00.000Z",
+        },
+      }),
+    );
+    expect(failed.threads[0]?.latestTurn?.state).toBe("error");
   });
 
   it("estimates thread token usage from message traffic when the provider does not report it", () => {
@@ -579,6 +599,54 @@ describe("applyDomainEvent", () => {
     expect(next.threads[0]?.modelContextWindowTokens).toBe(258_400);
     expect(next.threads[0]?.session?.tokenUsageSource).toBe("provider");
   });
+
+  it.each(["ready", "error", "stopped"] as const)(
+    "settles the live turn when a session becomes %s",
+    (status) => {
+      const threadId = ThreadId.makeUnsafe("thread-1"),
+        turnId = TurnId.makeUnsafe("turn-1");
+      const state = makeState({
+        threads: [
+          makeThread({
+            latestTurn: {
+              turnId,
+              state: "running",
+              requestedAt: "2026-04-01T09:00:00.000Z",
+              startedAt: null,
+              completedAt: null,
+              assistantMessageId: null,
+            },
+          }),
+        ],
+      });
+      const payload = {
+        threadId,
+        settledTurnId: turnId,
+        session: {
+          threadId,
+          status,
+          providerName: "muse",
+          runtimeMode: "auto-accept-edits",
+          activeTurnId: null,
+          lastError: status === "error" ? "Host exited" : null,
+          updatedAt: "2026-04-01T09:06:00.000Z",
+        },
+      } as const;
+      const next = applyDomainEvent(state, makeEvent("thread.session-set", payload));
+      expect(next.threads[0]?.latestTurn).toMatchObject({
+        state: status === "ready" ? "completed" : status === "error" ? "error" : "interrupted",
+        completedAt: payload.session.updatedAt,
+      });
+      const unrelated = applyDomainEvent(
+        state,
+        makeEvent("thread.session-set", {
+          ...payload,
+          settledTurnId: TurnId.makeUnsafe("old-turn"),
+        }),
+      );
+      expect(unrelated.threads[0]?.latestTurn).toBe(state.threads[0]?.latestTurn);
+    },
+  );
 
   it("updates the mapped session state and thread error", () => {
     const turnId = TurnId.makeUnsafe("turn-2");
@@ -1559,4 +1627,87 @@ it("removes only identified native rewind turns while preserving the active turn
   expect(applyDomainEvent(makeState({ threads: [next] }), event).threads[0]?.messages).toEqual(
     next.messages,
   );
+});
+
+describe("streaming batch and timeline work", () => {
+  it("copies the thread collection once and reuses timeline structure for text-only updates", () => {
+    const fixed = {
+      id: MessageId.makeUnsafe("fixed"),
+      role: "user" as const,
+      text: "Earlier question",
+      streaming: false,
+      createdAt: "2026-04-01T09:00:00.000Z",
+    };
+    const original = makeState({ threads: [makeThread({ messages: [fixed] })] });
+    const attachments = messageAttachmentSources(original.threads[0]!.messages);
+    const id = MessageId.makeUnsafe("streaming");
+    const event = (text: string, sequence: number) =>
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId: original.threads[0]!.id,
+          messageId: id,
+          role: "assistant",
+          text,
+          turnId: null,
+          streaming: true,
+          createdAt: "2026-04-01T09:04:00.000Z",
+          updatedAt: "2026-04-01T09:04:00.000Z",
+        },
+        { sequence },
+      );
+    const batch = createDomainEventBatch();
+    let state = applyDomainEvent(original, event("A", 1), batch);
+    const owned = state.threads;
+    expect(owned).not.toBe(original.threads);
+    const plans: [] = [],
+      work: [] = [],
+      commands: [] = [];
+    const entries = createTimelineEntryCache();
+    const rows = createTimelineRowCache();
+    const derive = () =>
+      deriveTimelineEntries(state.threads[0]!.messages, plans, work, commands, entries);
+    const build = () =>
+      buildTimelineRows({
+        timelineEntries: derive(),
+        completionDividerBeforeEntryId: null,
+        completionSummary: null,
+        isWorking: false,
+        activeTurnStartedAt: null,
+        liveActivity: null,
+        expandMcpToolCalls: false,
+        cache: rows,
+      });
+    const fixedRow = build()[0];
+    for (let index = 2; index < 20; index++) {
+      state = applyDomainEvent(state, event("a", index), batch);
+      expect(state.threads).toBe(owned);
+      const rendered = build();
+      expect(rendered[1]?.kind === "message" && rendered[1].message.text.length).toBe(index);
+      expect(rendered[0]).toBe(fixedRow);
+      expect(messageAttachmentSources(state.threads[0]!.messages)).toBe(attachments);
+    }
+    expect(original.threads[0]?.messages).toEqual([fixed]);
+    expect(entries.structuralDerivations).toBe(1);
+    expect(rows.structuralDerivations).toBe(1);
+    expect(entries.contentUpdates).toBe(18);
+    expect(rows.contentUpdates).toBe(18);
+    expect(state.detailCoverageByThreadId?.get(original.threads[0]!.id)?.latestMutation).toBe(19);
+    // History replacement gets a fresh structural identity and invalidates caches.
+    state = {
+      ...state,
+      threads: [
+        {
+          ...state.threads[0]!,
+          messages: state.threads[0]!.messages.map((message) => ({
+            ...message,
+            text: "replacement",
+          })),
+        },
+      ],
+    };
+    build();
+    expect(entries.structuralDerivations).toBe(2);
+    expect(rows.structuralDerivations).toBe(2);
+  });
 });

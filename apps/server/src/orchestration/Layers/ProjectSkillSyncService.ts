@@ -1,11 +1,16 @@
+import { registerShutdown } from "../../shutdown.ts";
 import { CommandId, type ProjectId } from "@t3tools/contracts";
-import { makeDrainableWorker, type DrainableWorker } from "@t3tools/shared/DrainableWorker";
+import {
+  makeBackgroundWorker,
+  type BackgroundWorker as DrainableWorker,
+} from "../../backgroundWorker.ts";
 import {
   Cause,
   Deferred,
   Effect,
   Exit,
   FileSystem,
+  Fiber,
   Layer,
   Ref,
   Schedule,
@@ -38,6 +43,7 @@ const make = Effect.gen(function* () {
   let stopping = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let worker!: DrainableWorker<void>;
+  let poller: Fiber.Fiber<unknown, never> | undefined;
 
   const queueRefresh = (ids: Iterable<ProjectId>) =>
     Effect.sync(() => {
@@ -151,12 +157,14 @@ const make = Effect.gen(function* () {
     }
   }).pipe(Effect.ensuring(reconcileWatchers));
 
-  worker = yield* makeDrainableWorker(() =>
-    refresh.pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("project skill refresh failed", { cause: String(cause) }),
+  worker = yield* makeBackgroundWorker(
+    () =>
+      refresh.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("project skill refresh failed", { cause: String(cause) }),
+        ),
       ),
-    ),
+    { name: "ProjectSkillSyncService", key: () => "projects" },
   );
 
   const drain = Effect.gen(function* () {
@@ -166,9 +174,27 @@ const make = Effect.gen(function* () {
     }
     for (const [id, paths] of pathsByProject)
       if (paths.some((path) => failedWatchPaths.has(path))) dirty.add(id);
-    if (dirty.size > 0) yield* worker.enqueue(undefined);
+    if (!stopping && dirty.size > 0) yield* worker.enqueue(undefined);
     yield* worker.drain;
   });
+
+  const stopSources = Effect.gen(function* () {
+    stopping = true;
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (poller) {
+      yield* Fiber.interrupt(poller);
+      poller = undefined;
+    }
+    for (const [path, watcher] of watchers) {
+      watchers.delete(path);
+      yield* Scope.close(watcher.scope, Exit.void);
+    }
+  });
+  yield* registerShutdown("project-skill-sources", "admission", () => stopSources);
+  yield* registerShutdown("project-skill-work", "drain", () => worker.drain);
 
   const start: ProjectSkillSyncServiceShape["start"] = Ref.getAndSet(startedRef, true).pipe(
     Effect.flatMap((alreadyStarted) =>
@@ -181,11 +207,11 @@ const make = Effect.gen(function* () {
               event.type === "project.deleted"
                 ? queueRefresh([event.aggregateId as ProjectId])
                 : Effect.void,
-            ).pipe(Effect.forkIn(scope));
+            ).pipe(Effect.forkIn(scope, { startImmediately: true }));
             for (const project of (yield* engine.getReadModel()).projects) dirty.add(project.id);
-            yield* drain;
+            yield* drain.pipe(Effect.orDie);
             // Watch failures/deleted roots recover even if the OS emits no final event.
-            yield* Effect.sync(
+            poller = yield* Effect.sync(
               () =>
                 new Set([
                   ...dirty,
@@ -203,15 +229,7 @@ const make = Effect.gen(function* () {
     ),
   );
   yield* Effect.addFinalizer(() =>
-    Effect.gen(function* () {
-      stopping = true;
-      if (timer !== undefined) clearTimeout(timer);
-      for (const [path, watcher] of watchers) {
-        watchers.delete(path);
-        yield* Scope.close(watcher.scope, Exit.void);
-      }
-      failedWatchPaths.clear();
-    }),
+    stopSources.pipe(Effect.andThen(Effect.sync(() => failedWatchPaths.clear()))),
   );
 
   return {

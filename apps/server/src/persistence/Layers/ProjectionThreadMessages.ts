@@ -6,6 +6,7 @@ import { ChatAttachment, UserMessageSkillCall } from "@t3tools/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   ProjectionThreadMessageRepository,
+  AppendStreamingTextInput,
   type ProjectionThreadMessageRepositoryShape,
   DeleteProjectionThreadMessagesInput,
   GetProjectionThreadMessageInput,
@@ -170,6 +171,30 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       `,
   });
 
+  const appendStreamingTextRows = SqlSchema.findAll({
+    Request: AppendStreamingTextInput,
+    Result: Schema.Struct({ messageId: Schema.String }),
+    execute: (input) => sql`
+      UPDATE projection_thread_messages SET
+        text = text || ${input.delta},
+        reasoning_text = CASE WHEN ${input.reasoningDelta === undefined ? 1 : 0} = 1 THEN reasoning_text
+          ELSE COALESCE(reasoning_text, '') || ${input.reasoningDelta ?? ""} END,
+        updated_at = ${input.updatedAt}, is_streaming = 1
+      WHERE message_id = ${input.messageId} AND thread_id = ${input.threadId}
+        AND turn_id IS ${input.turnId} AND role = ${input.role}
+      RETURNING message_id AS "messageId"
+    `,
+  });
+  const appendStreamingText: ProjectionThreadMessageRepositoryShape["appendStreamingText"] = (
+    input,
+  ) =>
+    appendStreamingTextRows(input).pipe(
+      Effect.map((rows) => rows.length),
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionThreadMessageRepository.appendStreamingText:query"),
+      ),
+    );
+
   const upsert: ProjectionThreadMessageRepositoryShape["upsert"] = (row) =>
     upsertProjectionThreadMessageRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadMessageRepository.upsert:query")),
@@ -199,6 +224,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
     );
 
   return {
+    appendStreamingText,
     upsert,
     listByThreadId,
     getByMessageId,

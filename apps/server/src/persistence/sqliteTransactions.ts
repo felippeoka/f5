@@ -20,7 +20,3 @@ const transaction = (sql: SqlClient.SqlClient, begin: "BEGIN" | "BEGIN IMMEDIATE
 
 /** Consistent multi-query reads share one snapshot without reserving the write lock. */
 export const withReadTransaction = (sql: SqlClient.SqlClient) => transaction(sql, "BEGIN");
-
-/** Bun's driver defaults to deferred transactions; match the Node writer policy. */
-export const withImmediateTransactions = (sql: SqlClient.SqlClient): SqlClient.SqlClient =>
-  Object.assign(sql, { withTransaction: transaction(sql, "BEGIN IMMEDIATE") });

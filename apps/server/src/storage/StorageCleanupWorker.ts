@@ -78,6 +78,11 @@ import { StorageMaintenance } from "./StorageMaintenance.ts";
  * agent session. Every check is repeated under the worktree lifecycle lock
  * right before `git worktree remove` (never `--force`). The branch and the
  * thread's worktree path are kept, so resuming the thread recreates it.
+ * The content rules (`unchanged`, `onMerge`) also wait until every thread
+ * using the worktree has been idle `minIdleHours`: a new worktree has no
+ * commits until the agent makes one, and after a restart an interrupted thread
+ * has no session claiming it. Idle age (`afterDays`) also counts from the
+ * latest of those threads.
  *
  * With `storageCleanup.inactiveWorktrees`, each pass also runs the Storage
  * settings cleanup of inactive F5 worktrees and missing registrations (see
@@ -98,7 +103,8 @@ export class StorageCleanupWorker extends ServiceMap.Service<
   StorageCleanupWorkerShape
 >()("t3/storage/StorageCleanupWorker") {}
 
-const DAY_MS = 24 * 60 * 60 * 1_000;
+const HOUR_MS = 60 * 60 * 1_000;
+const DAY_MS = 24 * HOUR_MS;
 const STARTUP_DELAY = "30 seconds";
 const CLEANUP_INTERVAL = "1 hour";
 const EVALUATION_CONCURRENCY = 2;
@@ -139,6 +145,11 @@ const terminalLogsLabel = (includeArchived: boolean) =>
 
 const CODEX_LEFTOVER_MIN_AGE_HOURS = CODEX_MARKETPLACE_LEFTOVER_MIN_AGE_MS / (60 * 60 * 1_000);
 
+export type WorktreeCleanupRuleMatch =
+  | { readonly kind: "remove"; readonly reason: string }
+  /** A content rule matched, but the thread was active too recently. */
+  | { readonly kind: "wait"; readonly reason: string };
+
 /** Which rule makes a worktree eligible, or null when none applies. */
 export function matchWorktreeCleanupRule(input: {
   readonly rules: WorktreeCleanupRules;
@@ -150,29 +161,56 @@ export function matchWorktreeCleanupRule(input: {
   readonly pullRequestMerged: boolean | null;
   /** The merged pull request names the worktree's exact HEAD as its head commit. */
   readonly pullRequestHeadIsWorktreeHead?: boolean;
-}): string | null {
-  if (input.deleted && input.rules.onDelete) return "the thread was deleted";
+}): WorktreeCleanupRuleMatch | null {
+  if (input.deleted && input.rules.onDelete) {
+    return { kind: "remove", reason: "the thread was deleted" };
+  }
   if (input.deleted) return null;
-  if (input.settled && input.rules.onSettle) return "the thread was settled";
-  if (input.rules.afterDays !== null) {
-    const idleMs = input.nowMs - Date.parse(input.lastInteractionAt);
-    if (Number.isFinite(idleMs) && idleMs >= input.rules.afterDays * DAY_MS) {
-      return `idle for ${Math.floor(idleMs / DAY_MS)} days`;
-    }
+  if (input.settled && input.rules.onSettle)
+    return { kind: "remove", reason: "the thread was settled" };
+  // An unreadable timestamp counts as just active: never removes early.
+  const parsedIdleMs = input.nowMs - Date.parse(input.lastInteractionAt);
+  const idleMs = Number.isFinite(parsedIdleMs) ? parsedIdleMs : 0;
+  if (input.rules.afterDays !== null && idleMs >= input.rules.afterDays * DAY_MS) {
+    return { kind: "remove", reason: `idle for ${Math.floor(idleMs / DAY_MS)} days` };
   }
-  if (input.rules.unchanged && input.headInDefaultBranch === true) {
-    return "no commits beyond the default branch";
-  }
-  // A squash or rebase merge leaves HEAD outside the default branch, so the
-  // merged pull request must then name this exact commit.
-  if (
-    input.rules.onMerge &&
-    input.pullRequestMerged &&
-    (input.headInDefaultBranch === true || input.pullRequestHeadIsWorktreeHead === true)
-  ) {
-    return "the pull request was merged";
-  }
-  return null;
+  const contentReason =
+    input.rules.unchanged && input.headInDefaultBranch === true
+      ? "no commits beyond the default branch"
+      : // A squash or rebase merge leaves HEAD outside the default branch, so the
+        // merged pull request must then name this exact commit.
+        input.rules.onMerge &&
+          input.pullRequestMerged &&
+          (input.headInDefaultBranch === true || input.pullRequestHeadIsWorktreeHead === true)
+        ? "the pull request was merged"
+        : null;
+  if (contentReason === null) return null;
+  const hours = input.rules.minIdleHours;
+  return idleMs >= hours * HOUR_MS
+    ? { kind: "remove", reason: contentReason }
+    : {
+        kind: "wait",
+        reason: `${contentReason}, but a thread using it was active within the last ${hours} ${
+          hours === 1 ? "hour" : "hours"
+        }`,
+      };
+}
+
+/** The later of two interaction times; an unreadable one wins, so it never removes early. */
+export function newerInteraction(a: string, b: string): string {
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (!Number.isFinite(aMs)) return a;
+  if (!Number.isFinite(bMs)) return b;
+  return aMs >= bMs ? a : b;
+}
+
+/** What a removal re-checks under the lock, with the activity read again. */
+interface RuleInputs {
+  readonly rules: WorktreeCleanupRules;
+  readonly headInDefaultBranch: boolean | null;
+  readonly pullRequestMerged: boolean | null;
+  readonly pullRequestHeadIsWorktreeHead: boolean;
 }
 
 type Evaluation =
@@ -183,6 +221,8 @@ type Evaluation =
       readonly worktreePath: string;
       readonly projectRoot: string;
       readonly headSha: string | null;
+      /** Null for targets skipped before any rule ran. */
+      readonly ruleInputs: RuleInputs | null;
     };
 
 export const makeStorageCleanupWorker = Effect.gen(function* () {
@@ -228,6 +268,39 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
     reason: string,
   ): StorageAutomationTarget => ({ ...base, action: "skip", reason });
 
+  /**
+   * The latest interaction of every non-deleted thread per canonical worktree
+   * path: one idle thread must not evict a worktree another thread just used.
+   */
+  const activityByWorktree = (threads: ReadonlyArray<OrchestrationThread>) =>
+    Effect.gen(function* () {
+      const activity = new Map<string, string>();
+      for (const thread of threads) {
+        if (thread.worktreePath === null || thread.deletedAt !== null) continue;
+        const path = yield* canonical(thread.worktreePath);
+        if (path === null) continue;
+        const previous = activity.get(path);
+        activity.set(
+          path,
+          previous === undefined
+            ? thread.lastInteractionAt
+            : newerInteraction(previous, thread.lastInteractionAt),
+        );
+      }
+      return activity as ReadonlyMap<string, string>;
+    });
+
+  const worktreeLastInteraction = (
+    thread: OrchestrationThread,
+    worktreePath: string,
+    activity: ReadonlyMap<string, string>,
+  ) => {
+    const shared = activity.get(worktreePath);
+    return shared === undefined
+      ? thread.lastInteractionAt
+      : newerInteraction(thread.lastInteractionAt, shared);
+  };
+
   /** Safety checks shared by the dry run and the re-check under the lock. */
   const safetyBlock = (thread: OrchestrationThread, worktreePath: string) =>
     Effect.gen(function* () {
@@ -248,6 +321,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
     readonly global: ServerSettings;
     readonly worktreesRoot: string;
     readonly nowMs: number;
+    readonly activity: ReadonlyMap<string, string>;
   }): Effect.Effect<Evaluation> =>
     Effect.gen(function* () {
       const { thread } = input;
@@ -279,6 +353,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
             worktreePath,
             projectRoot,
             headSha: null,
+            ruleInputs: null,
           } as const;
         }
       }
@@ -289,6 +364,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
           worktreePath,
           projectRoot,
           headSha: null,
+          ruleInputs: null,
         } as const;
       }
 
@@ -311,27 +387,43 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
           }
         }
       }
-      const matched = matchWorktreeCleanupRule({
+      const ruleInputs = {
         rules,
-        deleted: thread.deletedAt !== null,
-        settled: !!thread.settledAt,
-        lastInteractionAt: thread.lastInteractionAt,
-        nowMs: input.nowMs,
         headInDefaultBranch,
         pullRequestMerged,
         pullRequestHeadIsWorktreeHead,
+      };
+      const matched = matchWorktreeCleanupRule({
+        ...ruleInputs,
+        deleted: thread.deletedAt !== null,
+        settled: !!thread.settledAt,
+        lastInteractionAt: worktreeLastInteraction(thread, worktreePath, input.activity),
+        nowMs: input.nowMs,
       });
       if (matched === null) return { kind: "ignore" } as const;
+      // A waiting worktree skips the safety checks and their git work; any
+      // other blocker shows up once the wait is over.
+      if (matched.kind === "wait") {
+        return {
+          kind: "target",
+          target: skip(base, matched.reason),
+          worktreePath,
+          projectRoot,
+          headSha,
+          ruleInputs,
+        } as const;
+      }
       const blocked = yield* safetyBlock(thread, worktreePath);
       return {
         kind: "target",
         target:
           blocked === null
-            ? { ...base, action: "remove" as const, reason: matched }
-            : skip(base, `${matched}, but ${blocked}`),
+            ? { ...base, action: "remove" as const, reason: matched.reason }
+            : skip(base, `${matched.reason}, but ${blocked}`),
         worktreePath,
         projectRoot,
         headSha,
+        ruleInputs,
       } as const;
     }).pipe(
       Effect.catchCause((cause) =>
@@ -353,9 +445,11 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
     }
     const model = yield* engine.getReadModel();
     const nowMs = Date.now();
+    const activity = yield* activityByWorktree(model.threads);
     const evaluations = yield* Effect.forEach(
       model.threads.filter((thread) => thread.worktreePath !== null),
-      (thread) => evaluate({ thread, projects: model.projects, global, worktreesRoot, nowMs }),
+      (thread) =>
+        evaluate({ thread, projects: model.projects, global, worktreesRoot, nowMs, activity }),
       { concurrency: EVALUATION_CONCURRENCY },
     );
     return { global, evaluations };
@@ -403,8 +497,32 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
           commonDir,
           Effect.gen(function* () {
             // Re-check everything under the locks: a send, a terminal or a new
-            // thread may have claimed the worktree since the evaluation.
-            const blocked = yield* safetyBlock(thread, evaluation.worktreePath);
+            // thread may have claimed the worktree since the evaluation, and
+            // any activity restarts the content rules' wait.
+            const model = yield* engine.getReadModel();
+            const current =
+              model.threads.find((entry) => entry.id === evaluation.target.threadId) ?? thread;
+            if (evaluation.ruleInputs !== null) {
+              const activity = yield* activityByWorktree(model.threads);
+              const rematched = matchWorktreeCleanupRule({
+                ...evaluation.ruleInputs,
+                deleted: current.deletedAt !== null,
+                settled: !!current.settledAt,
+                lastInteractionAt: worktreeLastInteraction(
+                  current,
+                  evaluation.worktreePath,
+                  activity,
+                ),
+                nowMs: Date.now(),
+              });
+              if (rematched?.kind !== "remove") {
+                return skip(
+                  evaluation.target,
+                  rematched?.reason ?? `${evaluation.target.reason}, but no rule applies any more`,
+                );
+              }
+            }
+            const blocked = yield* safetyBlock(current, evaluation.worktreePath);
             const head = yield* git
               .resolveCommit(evaluation.worktreePath, "HEAD")
               .pipe(Effect.orElseSucceed(() => null));
@@ -425,7 +543,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
             const removed = yield* removeWorktreeSafely({
               projectCwd: evaluation.projectRoot,
               path: evaluation.worktreePath,
-              policy: { kind: "autoCleanup", ownThreadId: thread.id },
+              policy: { kind: "autoCleanup", ownThreadId: current.id },
             }).pipe(Effect.provideServices(services));
             if (removed.blockedReasons.length)
               return skip(evaluation.target, removed.blockedReasons.join("; "));
@@ -987,7 +1105,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
         event.payload.activity.kind === "settlement.script")
         ? trigger.pipe(Effect.forkScoped, Effect.asVoid)
         : Effect.void,
-    ).pipe(Effect.forkScoped);
+    ).pipe(Effect.forkScoped({ startImmediately: true }));
   });
 
   return { start, dryRun, runOnce } satisfies StorageCleanupWorkerShape;

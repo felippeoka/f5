@@ -1875,7 +1875,7 @@
         "apps/server/src/provider/Layers/ProviderService.test.ts:4108",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:1234",
         "apps/server/src/orchestration/Layers/TurnLifecycle.test.ts:364",
-        "apps/server/src/persistence/Migrations/130_RestartBackgroundWork.test.ts:1"
+        "apps/server/src/persistence/Migrations/133_RestartBackgroundWork.test.ts:1"
       ]
     },
     {
@@ -4655,7 +4655,7 @@
       "classification": "equivalent:apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13165",
       "reason": "Equivalent: a native stop in F5 waits for the task notification that confirms the outcome, and settles the exact persisted run when the session stops. The orchestration-v2 adapter and effect worker that upstream changed do not exist in F5. Upstream change: fix(server): apply confirmed Claude subagent outcomes (#18778)",
       "reviewStatus": "reviewed",
-      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13960"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13850"],
       "f5Shas": [
         "f9dd5cbdb535d96c38fec8137275a3bfc9fc3b08",
         "9c6934ecdb66243b8b7553f1f0c9738661316dbe"
@@ -6247,7 +6247,7 @@
       "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"],
       "evidence": [
         "apps/server/src/provider/claudeSubagentSelection.test.ts:1",
-        "apps/server/src/persistence/Migrations/129_BackgroundWorkEffort.test.ts:1",
+        "apps/server/src/persistence/Migrations/132_BackgroundWorkEffort.test.ts:1",
         "apps/web/src/components/AgentsPanel.browser.tsx:1"
       ]
     },

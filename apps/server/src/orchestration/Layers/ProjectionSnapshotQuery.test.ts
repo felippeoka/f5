@@ -420,6 +420,18 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           },
         },
       ]);
+      yield* sql`UPDATE projection_threads SET deleted_at = '2026-02-24T00:00:09.000Z' WHERE thread_id = 'thread-1'`;
+      const filtered = yield* snapshotQuery.getBootstrapSnapshot();
+      const deleted = filtered.threads.find((thread) => thread.id === "thread-1")!;
+      assert.deepStrictEqual(deleted.messages, []);
+      assert.deepStrictEqual(deleted.proposedPlans, []);
+      assert.deepStrictEqual(deleted.activities, []);
+      const retained = yield* snapshotQuery.getRetainedThreadDetails!(
+        ThreadId.makeUnsafe("thread-1"),
+      );
+      assert.equal(retained.messages[0]?.text, "hello from projection");
+      assert.equal(retained.proposedPlans[0]?.planMarkdown, "# Ship it");
+      assert.equal(retained.activities[0]?.summary, "provider started");
     }),
   );
 

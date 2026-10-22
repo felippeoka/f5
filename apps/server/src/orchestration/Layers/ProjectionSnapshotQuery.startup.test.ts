@@ -40,34 +40,28 @@ const resetProjectionTables = (sql: SqlClient.SqlClient) =>
     yield* sql`DELETE FROM projection_state`;
   });
 
-const withoutTransactions = <A, E, R>(
+const expectReadTransactions = <A, E, R>(
   sql: SqlClient.SqlClient,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  Effect.acquireUseRelease(
+): Effect.Effect<A, E, R> => {
+  const client = sql as { withTransaction: SqlClient.SqlClient["withTransaction"] };
+  let calls = 0;
+  return Effect.acquireUseRelease(
     Effect.sync(() => {
-      const client = sql as any;
-      const originalWithTransaction = client.withTransaction;
-      client.withTransaction = () => Effect.never;
-      return originalWithTransaction;
+      const original = client.withTransaction;
+      client.withTransaction = (effect) => {
+        calls++;
+        return original(effect);
+      };
+      return original;
     }),
-    () => effect,
-    (originalWithTransaction) =>
+    () => effect.pipe(Effect.tap(() => Effect.sync(() => assert.equal(calls, 3)))),
+    (original) =>
       Effect.sync(() => {
-        (sql as any).withTransaction = originalWithTransaction;
+        client.withTransaction = original;
       }),
   );
-
-const withQueryTimeout = <A, E, R>(
-  label: string,
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | Error, R> =>
-  effect.pipe(
-    Effect.timeoutOrElse({
-      duration: "1 second",
-      onTimeout: () => Effect.fail(new Error(`Timed out waiting for ${label}`)),
-    }),
-  );
+};
 
 const seedProjectionFixture = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
@@ -814,39 +808,34 @@ projectionSnapshotLayer("ProjectionSnapshotQuery lazy loading", (it) => {
       }),
   );
 
-  it.effect(
-    "getSnapshot, getBootstrapSnapshot, and getStartupSnapshot do not depend on read transactions",
-    () =>
-      Effect.gen(function* () {
-        const snapshotQuery = yield* ProjectionSnapshotQuery;
-        const sql = yield* SqlClient.SqlClient;
+  it.effect("pins each snapshot response to one read transaction", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
 
-        yield* seedProjectionFixture(sql);
+      yield* seedProjectionFixture(sql);
 
-        const [snapshot, bootstrapSnapshot, startupResult] = yield* withoutTransactions(
-          sql,
-          Effect.all(
-            [
-              withQueryTimeout("getSnapshot", snapshotQuery.getSnapshot()),
-              withQueryTimeout("getBootstrapSnapshot", snapshotQuery.getBootstrapSnapshot()),
-              withQueryTimeout(
-                "getStartupSnapshot",
-                snapshotQuery.getStartupSnapshot({
-                  detailThreadId: asThreadId("thread-1"),
-                }),
-              ),
-            ],
-            { concurrency: 1 },
-          ),
-        );
+      const [snapshot, bootstrapSnapshot, startupResult] = yield* expectReadTransactions(
+        sql,
+        Effect.all(
+          [
+            snapshotQuery.getSnapshot(),
+            snapshotQuery.getBootstrapSnapshot(),
+            snapshotQuery.getStartupSnapshot({
+              detailThreadId: asThreadId("thread-1"),
+            }),
+          ],
+          { concurrency: 1 },
+        ),
+      );
 
-        assert.equal(snapshot.threads.length, 1);
-        assert.equal(snapshot.threads[0]?.id, asThreadId("thread-1"));
-        assert.equal(bootstrapSnapshot.threads.length, 1);
-        assert.equal(bootstrapSnapshot.threads[0]?.id, asThreadId("thread-1"));
-        assert.isNotNull(startupResult.threadTailDetails);
-        assert.equal(startupResult.threadTailDetails.threadId, asThreadId("thread-1"));
-      }),
+      assert.equal(snapshot.threads.length, 1);
+      assert.equal(snapshot.threads[0]?.id, asThreadId("thread-1"));
+      assert.equal(bootstrapSnapshot.threads.length, 1);
+      assert.equal(bootstrapSnapshot.threads[0]?.id, asThreadId("thread-1"));
+      assert.isNotNull(startupResult.threadTailDetails);
+      assert.equal(startupResult.threadTailDetails.threadId, asThreadId("thread-1"));
+    }),
   );
 
   it.effect("getThreadTailDetails and getThreadHistoryPage page thread history from the tail", () =>
@@ -1137,7 +1126,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery lazy loading", (it) => {
     }),
   );
 
-  it.effect("thread detail reads do not depend on read transactions", () =>
+  it.effect("pins each tail, history and full detail response to one read transaction", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
@@ -1200,35 +1189,26 @@ projectionSnapshotLayer("ProjectionSnapshotQuery lazy loading", (it) => {
         )
       `;
 
-      const [tail, page, details] = yield* withoutTransactions(
+      const [tail, page, details] = yield* expectReadTransactions(
         sql,
         Effect.gen(function* () {
-          const tail = yield* withQueryTimeout(
-            "getThreadTailDetails",
-            snapshotQuery.getThreadTailDetails({
-              threadId: asThreadId("thread-1"),
-              messageLimit: 1,
-              checkpointLimit: 1,
-            }),
-          );
-          const page = yield* withQueryTimeout(
-            "getThreadHistoryPage",
-            snapshotQuery.getThreadHistoryPage({
-              threadId: asThreadId("thread-1"),
-              beforeMessageCursor: tail.oldestLoadedMessageCursor,
-              beforeCheckpointTurnCount: tail.oldestLoadedCheckpointTurnCount,
-              activityCursor: null,
-              beforeCommandExecutionCursor: null,
-              messageLimit: 1,
-              checkpointLimit: 1,
-            }),
-          );
-          const details = yield* withQueryTimeout(
-            "getThreadDetails",
-            snapshotQuery.getThreadDetails({
-              threadId: asThreadId("thread-1"),
-            }),
-          );
+          const tail = yield* snapshotQuery.getThreadTailDetails({
+            threadId: asThreadId("thread-1"),
+            messageLimit: 1,
+            checkpointLimit: 1,
+          });
+          const page = yield* snapshotQuery.getThreadHistoryPage({
+            threadId: asThreadId("thread-1"),
+            beforeMessageCursor: tail.oldestLoadedMessageCursor,
+            beforeCheckpointTurnCount: tail.oldestLoadedCheckpointTurnCount,
+            activityCursor: null,
+            beforeCommandExecutionCursor: null,
+            messageLimit: 1,
+            checkpointLimit: 1,
+          });
+          const details = yield* snapshotQuery.getThreadDetails({
+            threadId: asThreadId("thread-1"),
+          });
 
           return [tail, page, details] as const;
         }),

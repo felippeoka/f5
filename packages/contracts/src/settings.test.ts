@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
+import { ProjectId } from "./baseSchemas";
 import { ProviderInstanceId } from "./providerInstance";
 import {
   ClientSettingsSchema,
@@ -11,6 +12,24 @@ import {
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+describe("ServerSettings.computerUsePasswordMasking", () => {
+  it("defaults new and legacy settings to fast and preserves conservative settings", () => {
+    expect(DEFAULT_SERVER_SETTINGS.computerUsePasswordMasking).toBe("fast");
+    expect(decodeServerSettings({}).computerUsePasswordMasking).toBe("fast");
+    expect(
+      decodeServerSettings({ computerUsePasswordMasking: "conservative" })
+        .computerUsePasswordMasking,
+    ).toBe("conservative");
+    expect(decodeServerSettingsPatch({ computerUsePasswordMasking: "conservative" })).toEqual({
+      computerUsePasswordMasking: "conservative",
+    });
+    for (const computerUsePasswordMasking of ["off", "", null, true]) {
+      expect(() => decodeServerSettings({ computerUsePasswordMasking })).toThrow();
+      expect(() => decodeServerSettingsPatch({ computerUsePasswordMasking })).toThrow();
+    }
+  });
+});
 
 describe("ServerSettings.sourceControlWriting", () => {
   it("decodes legacy settings with safe defaults", () => {
@@ -55,6 +74,35 @@ describe("ServerSettings.sourceControlWriting", () => {
         generatePrContent: false,
       },
     });
+  });
+});
+
+describe("ServerSettings.storageCleanup.worktree.minIdleHours", () => {
+  it("defaults existing global and project rules to a 24-hour wait", () => {
+    const settings = decodeServerSettings({
+      storageCleanup: { worktree: { unchanged: true } },
+      projectSettingsOverrides: {
+        "project-1": { worktreeCleanup: { mode: "custom", rules: { onMerge: true } } },
+      },
+    });
+    expect(settings.storageCleanup.worktree.minIdleHours).toBe(24);
+    const override =
+      settings.projectSettingsOverrides[ProjectId.makeUnsafe("project-1")]?.worktreeCleanup;
+    expect(override?.mode === "custom" ? override.rules.minIdleHours : null).toBe(24);
+  });
+
+  it("accepts whole hours from 1 to 720 in patches", () => {
+    expect(
+      decodeServerSettingsPatch({ storageCleanup: { worktree: { minIdleHours: 6 } } }),
+    ).toEqual({ storageCleanup: { worktree: { minIdleHours: 6 } } });
+    for (const minIdleHours of [0, 721, 1.5]) {
+      expect(() =>
+        decodeServerSettingsPatch({ storageCleanup: { worktree: { minIdleHours } } }),
+      ).toThrow();
+      expect(() =>
+        decodeServerSettings({ storageCleanup: { worktree: { minIdleHours } } }),
+      ).toThrow();
+    }
   });
 });
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);

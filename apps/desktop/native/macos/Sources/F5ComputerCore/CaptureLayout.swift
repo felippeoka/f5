@@ -68,3 +68,16 @@ func computerNeutralCanvasPixel() -> [Int]? {
   let pixel = data.assumingMemoryBound(to: UInt8.self)
   return [Int(pixel[0]), Int(pixel[1]), Int(pixel[2])]
 }
+
+/// Foreground actions without coordinates follow the focused window, never an arbitrary first
+/// display or the user's pointer. An unresolved explicit ID remains unresolved.
+public func computerActionDisplayID(
+  requestedID: String?, windowFrame: CGRect?, displays: [(id: String, bounds: CGRect)]
+) -> String? {
+  if let requestedID, !requestedID.isEmpty {
+    return displays.first(where: { $0.id == requestedID })?.id
+  }
+  guard let windowFrame, computerSecureAuditRectIsValid(windowFrame) else { return nil }
+  let center = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
+  return displays.first(where: { $0.bounds.contains(center) })?.id
+}

@@ -394,6 +394,12 @@ const makeAcpSessionRuntime = (
 
     const acpContext = yield* Layer.build(
       EffectAcpClient.layerChildProcess(child, {
+        onTermination: () =>
+          Queue.offer(eventQueue, {
+            _tag: "TransportTerminated",
+            message:
+              "ACP transport closed unexpectedly. Reconnect the provider session to continue.",
+          }).pipe(Effect.asVoid),
         ...(options.transformStdoutLine
           ? { transformStdoutLine: options.transformStdoutLine }
           : {}),

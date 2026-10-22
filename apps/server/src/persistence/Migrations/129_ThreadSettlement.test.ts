@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqliteClient from "../NodeSqliteClient.ts";
-import migration from "./126_ThreadSettlement.ts";
+import migration from "./129_ThreadSettlement.ts";
 
 it.effect("repairs missing core tables without requiring historical provenance", () =>
   Effect.scoped(

@@ -415,6 +415,7 @@ export function makeServerOrchestrationRuntimeLayer() {
   const usageServiceLayer = UsageServiceLive.pipe(Layer.provide(ServerSecretStoreLive));
   const { gitLayer, checkpointDiffQueryLayer } = makeServerGitLayers();
   const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provide(providerSessionDirectoryLayer),
     Layer.provideMerge(WorkspaceTransitionsLive),
     Layer.provideMerge(gitLayer),
     Layer.provide(NextTurnQueueStoreLive),

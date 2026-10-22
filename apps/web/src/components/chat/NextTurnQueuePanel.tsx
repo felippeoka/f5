@@ -1,5 +1,4 @@
 import { WorkspaceTransitionSummary } from "./WorkspaceTransitionBanner";
-import { WorktreeMissingBanner } from "./WorktreeMissingBanner";
 import type {
   CommandId,
   CompactRuntimeConfiguredActivityPayload,
@@ -91,6 +90,7 @@ export function NextTurnQueuePanel({
             sessionGeneration: entry.session?.capabilities?.generation ?? null,
             interactionMode: entry.interactionMode,
             runtimeMode: entry.runtimeMode,
+            hasWorktree: entry.worktreePath != null,
           }
         : undefined;
     }),
@@ -252,7 +252,9 @@ export function NextTurnQueuePanel({
   ) {
     return null;
   }
-  const blockedDescription = describeQueueBlockedState(snapshot);
+  const blockedDescription = describeQueueBlockedState(snapshot, {
+    workspaceBannerShown: thread?.hasWorktree ?? false,
+  });
   // Gate on the delivery the server can still act on, not on the pause reason:
   // a superseded delivery can leave a stale reason with nothing to recover.
   const unresolvedDelivery = snapshot.unresolvedDelivery ?? null;
@@ -410,14 +412,6 @@ export function NextTurnQueuePanel({
           {snapshot.workspaceTransition && (
             <WorkspaceTransitionSummary transition={snapshot.workspaceTransition} />
           )}
-          {snapshot.reasonCode === "worktree_missing" ||
-          snapshot.reasonCode === "worktree_setup_failed" ? (
-            <WorktreeMissingBanner
-              threadId={threadId}
-              queue
-              recoveryOnly={snapshot.reasonCode === "worktree_setup_failed"}
-            />
-          ) : null}
           {hasDeliveryFailure || hasDeliveryPause ? (
             <span className="ml-1 inline-flex gap-1">
               <Button

@@ -25,7 +25,7 @@ const holder: ComputerLeaseHolder = {
   scope: { kind: "foreground" },
   policyRevision: 0,
 };
-function make() {
+function make(platform: "darwin" | "win32" = "darwin") {
   let event: (message: Record<string, unknown>) => void = () => {};
   const request = vi.fn(
     async (_request: ComputerAutomationRequest): Promise<unknown> => ({ ok: true }),
@@ -67,7 +67,7 @@ function make() {
   const controller = new ComputerController(lease, helper, overlay, {
     f5Pids: () => [1],
     f5BundlePath: "F5",
-    platform: "darwin",
+    platform,
     activity,
     paused,
   });
@@ -478,4 +478,21 @@ it("blocks capture and inspection while paused, including when there is no lease
   } finally {
     h.controller.close();
   }
+});
+
+it("rejects subtree inspection off macOS instead of silently inspecting the whole window", async () => {
+  const h = make("win32");
+  await expect(
+    h.controller.invoke(
+      envelope("subtree", auth, {
+        op: "inspect",
+        appId: "one",
+        maxNodes: 400,
+        snapshotId: "s",
+        elementRef: "e1",
+      }),
+    ),
+  ).rejects.toMatchObject({ error: { _tag: "UnsupportedAction" } });
+  expect(h.request).not.toHaveBeenCalled();
+  h.controller.close();
 });

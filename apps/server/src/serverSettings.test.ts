@@ -29,6 +29,21 @@ const makeServerSettingsLayer = () =>
   );
 
 it.layer(NodeServices.layer)("server settings", (it) => {
+  it.effect("defaults legacy password masking to fast and persists a conservative choice", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsService;
+      const config = yield* ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.writeFileString(config.settingsPath!, "{}");
+      assert.equal((yield* service.getSettings).computerUsePasswordMasking, "fast");
+      yield* service.updateSettings({ computerUsePasswordMasking: "conservative" });
+      const saved = Schema.decodeUnknownSync(ServerSettings)(
+        JSON.parse(yield* fs.readFileString(config.settingsPath!)),
+      );
+      assert.equal(saved.computerUsePasswordMasking, "conservative");
+      assert.equal((yield* service.getSettings).computerUsePasswordMasking, "conservative");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
   it.effect(
     "keeps the old browser streaming default until a client or global edit records a choice",
     () =>

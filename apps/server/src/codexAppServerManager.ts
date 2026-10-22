@@ -1,5 +1,9 @@
 import { stringifyWithinBytes } from "@t3tools/shared/boundedJson";
 import { findMcpAppToolPolicy } from "@t3tools/shared/mcpApp";
+import { raceWithAbort } from "@t3tools/shared/abortSignal";
+import { probeCodexCliVersion } from "./codex/cliVersionProbe.ts";
+import { Utf8Lines } from "@t3tools/shared/utf8Lines";
+import { ProviderLineReader } from "./codex/lineReader.ts";
 import type { ProviderAdapterSessionStartInput } from "./provider/Services/ProviderAdapter.ts";
 import { readBoundedPages } from "./codex/readBoundedPages.ts";
 import {
@@ -26,11 +30,10 @@ import {
   ElicitationRegistry,
   type ElicitationTerminalReceipt,
 } from "./provider/elicitationRegistry.ts";
-import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as OS from "node:os";
-import readline from "node:readline";
 
 import {
   ApprovalRequestId,
@@ -68,11 +71,6 @@ import { assertNever } from "@t3tools/shared/exhaustive";
 import { killProcessTree } from "@t3tools/shared/processTree";
 import { Effect, ServiceMap } from "effect";
 
-import {
-  formatCodexCliUpgradeMessage,
-  isCodexCliVersionSupported,
-  parseCodexCliVersion,
-} from "./provider/codexCliVersion";
 import { formatCodexUnsupportedModelError } from "./provider/codexErrors.ts";
 import {
   buildCodexAssistantInstructions,
@@ -92,7 +90,13 @@ import {
   normalizeSupportedSlashCommands,
   type SupportedSlashCommand,
 } from "./provider/supportedSlashCommands";
-import { createJsonRpcStdinWriter, type JsonRpcStdinWriter } from "./codex/JsonRpcStdinWriter.ts";
+import {
+  createJsonRpcStdinWriter,
+  JsonRpcDeliveryError,
+  jsonRpcWriteLane,
+  type JsonRpcWriteOptions,
+  type JsonRpcStdinWriter,
+} from "./codex/JsonRpcStdinWriter.ts";
 import { resolveCodexHome } from "./os-jank.ts";
 import { resolveInvocation } from "./spawn/resolveCommand.ts";
 
@@ -100,6 +104,8 @@ type PendingRequestKey = string;
 
 interface PendingRequest {
   method: string;
+  wasWritten?: boolean;
+  cancelWrite?: () => void;
   timeout: ReturnType<typeof setTimeout>;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -159,7 +165,7 @@ interface CodexSessionContext {
   mcpObservationContext?: object;
   account: CodexAccountSnapshot;
   child: ChildProcessWithoutNullStreams;
-  output: readline.Interface;
+  output: ProviderLineReader;
   writer: JsonRpcStdinWriter;
   pending: Map<PendingRequestKey, PendingRequest>;
   pendingApprovals: Map<ApprovalRequestId, PendingApprovalRequest>;
@@ -193,6 +199,8 @@ interface CodexSessionContext {
   protocolDecodeFailureCount: number;
   nextRequestId: number;
   stopping: boolean;
+  phase?: "accepting" | "draining" | "closed";
+  beginDrain?: (error: Error, method: string, message: string) => void;
   turnPaginationUnsupported?: boolean;
   /** Set once the CLI rejects `thread/revert` as unknown; rollback then uses `thread/rollback`. */
   revertUnsupported?: boolean;
@@ -339,7 +347,6 @@ export interface CodexThreadSnapshot {
   turns: CodexThreadTurnSnapshot[];
 }
 
-const CODEX_VERSION_CHECK_TIMEOUT_MS = 4_000;
 const CODEX_JSON_RPC_TIMEOUT_MS = 20_000;
 export const CODEX_THREAD_OPEN_TIMEOUT_MS = 60_000;
 /** Internal event methods for private MCP form/URL requests (value-free payloads). */
@@ -1125,6 +1132,8 @@ export interface CodexAppServerManagerEvents {
 
 export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEvents> {
   private readonly sessions = new Map<ThreadId, CodexSessionContext>();
+  private shutdownDeadline: number | undefined;
+  private readonly sourceDrains = new Map<Promise<void>, () => void>();
   private readonly sessionStartLocks = new Map<ThreadId, Promise<void>>();
   private readonly oneOffWorkers = new Map<ThreadId, CodexOneOffWorker>();
 
@@ -1134,7 +1143,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     this.runPromise = services ? Effect.runPromiseWith(services) : Effect.runPromise;
   }
 
-  async startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
+  async startSession(
+    input: CodexAppServerStartSessionInput,
+    signal?: AbortSignal,
+  ): Promise<ProviderSession> {
     const previous = this.sessionStartLocks.get(input.threadId) ?? Promise.resolve();
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => {
@@ -1142,25 +1154,32 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     });
     const current = previous.catch(() => undefined).then(() => barrier);
     this.sessionStartLocks.set(input.threadId, current);
-    await previous.catch(() => undefined);
     try {
+      await raceWithAbort(
+        previous.catch(() => undefined),
+        signal,
+      );
+      signal?.throwIfAborted();
       if (this.sessions.has(input.threadId)) {
         this.stopSession(input.threadId);
       }
-      return await this.startSessionUnlocked(input);
+      return await this.startSessionUnlocked(input, signal);
     } finally {
       release();
-      if (this.sessionStartLocks.get(input.threadId) === current) {
-        this.sessionStartLocks.delete(input.threadId);
-      }
+      void current.finally(() => {
+        if (this.sessionStartLocks.get(input.threadId) === current)
+          this.sessionStartLocks.delete(input.threadId);
+      });
     }
   }
 
   private async startSessionUnlocked(
     input: CodexAppServerStartSessionInput,
+    signal?: AbortSignal,
   ): Promise<ProviderSession> {
     const threadId = input.threadId;
     const now = new Date().toISOString();
+    let removeStartupAbort: (() => void) | undefined;
     let context: CodexSessionContext | undefined;
     const resumeThreadId = readResumeThreadId(input);
     const requestedModel = normalizeCodexModelSlug(input.model);
@@ -1185,10 +1204,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const codexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = resolveCodexHome({ homePath: codexOptions.homePath });
       const processCwd = input.processCwd ?? resolvedCwd;
-      const cliVersion = this.assertSupportedCodexCliVersion({
+      const cliVersion = await this.assertSupportedCodexCliVersion({
         processEnvironment: input.processEnvironment ?? process.env,
         binaryPath: codexBinaryPath,
         cwd: processCwd,
+        ...(signal ? { signal } : {}),
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
       const childEnvironment = buildProviderChildProcessEnv(
@@ -1222,12 +1242,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           cwd: processCwd,
         },
       );
+      signal?.throwIfAborted();
       const child = spawn(invocation.file, [...invocation.args], {
         cwd: processCwd,
         env: childEnvironment,
         stdio: ["pipe", "pipe", "pipe"],
       });
-      const output = readline.createInterface({ input: child.stdout });
+      const output = new ProviderLineReader(child.stdout);
       const writer = createJsonRpcStdinWriter({
         stdin: child.stdin,
         closedMessage: "Cannot write to codex app-server stdin.",
@@ -1267,6 +1288,18 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       this.sessions.set(threadId, context);
       this.attachProcessListeners(context);
+      if (signal) {
+        const startedContext = context;
+        const abort = () => {
+          if (this.sessions.get(threadId) === startedContext) this.stopSession(threadId);
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        removeStartupAbort = () => signal.removeEventListener("abort", abort);
+        if (signal.aborted) {
+          abort();
+          signal.throwIfAborted();
+        }
+      }
 
       this.emitLifecycleEvent(context, "session/connecting", "Starting codex app-server");
 
@@ -1459,14 +1492,14 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       return { ...context.session };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to start Codex session.";
-      if (context) {
+      if (context && this.sessions.get(threadId) === context) {
         this.updateSession(context, {
           status: "error",
           lastError: message,
         });
         this.emitErrorEvent(context, "session/startFailed", message);
         this.stopSession(threadId);
-      } else {
+      } else if (!context) {
         this.emitEvent({
           id: EventId.makeUnsafe(randomUUID()),
           kind: "error",
@@ -1478,6 +1511,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         });
       }
       throw new Error(message, { cause: error });
+    } finally {
+      removeStartupAbort?.();
     }
   }
 
@@ -2639,6 +2674,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       pendingRequest.sessionAllowance?.add(pendingRequest.requestKind);
 
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
@@ -2698,6 +2734,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context.pendingUserInputs.delete(requestId);
 
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
@@ -2791,6 +2828,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       resolvedLocally: false,
     });
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "request",
       provider: "codex",
@@ -2820,6 +2858,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     receipt: ElicitationTerminalReceipt,
   ): void {
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
@@ -3000,41 +3039,35 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
     context.stopping = true;
 
-    for (const pending of context.pending.values()) {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error("Session stopped before request completed."));
-    }
-    context.pending.clear();
-    context.pendingApprovals.clear();
-    context.pendingUserInputs.clear();
+    const error = new Error("Session stopped before request completed.");
+    this.failPendingRequests(context, error);
     this.abortElicitations(context);
-    context.nativeRequestCorrelations.clear();
-    this.clearInitialSkillsRetry(context);
-
-    context.output.close();
-    context.writer.close();
+    context.writer.close(error);
+    context.beginDrain?.(error, "session/closed", "Session stopped");
 
     if (!context.child.killed) {
       killChildTree(context.child);
     }
 
-    this.updateSession(context, {
-      status: "closed",
-      activeTurnId: undefined,
-    });
-    this.emitLifecycleEvent(context, "session/closed", "Session stopped");
-    this.sessions.delete(threadId);
+    if (!context.beginDrain) {
+      context.output.close();
+      if (this.sessions.get(threadId) === context) this.sessions.delete(threadId);
+    }
   }
 
   /** Thread sessions only; one-off app-servers are internal and never bound to a thread. */
   listSessions(): ProviderSession[] {
     return Array.from(this.sessions.values())
-      .filter(({ session }) => !isSyntheticOneOffThreadId(session.threadId))
+      .filter(
+        ({ session, phase }) =>
+          phase !== "draining" && !isSyntheticOneOffThreadId(session.threadId),
+      )
       .map(({ session }) => ({ ...session }));
   }
 
   hasSession(threadId: ThreadId): boolean {
-    return this.sessions.has(threadId);
+    const context = this.sessions.get(threadId);
+    return context !== undefined && context.phase !== "draining";
   }
 
   /** Native discovery state: the skills catalog is Codex's session command catalog. */
@@ -3058,70 +3091,159 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
   }
 
+  async shutdown(deadline = Date.now() + 1_800): Promise<void> {
+    this.shutdownDeadline = deadline;
+    this.stopAll();
+    const timer = setTimeout(
+      () => {
+        for (const finish of this.sourceDrains.values()) finish();
+      },
+      Math.max(0, deadline - Date.now()),
+    );
+    try {
+      await Promise.all([...this.sourceDrains.keys()]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private requireSession(threadId: ThreadId): CodexSessionContext {
     const context = this.sessions.get(threadId);
     if (!context) {
       throw new Error(`Unknown session for thread: ${threadId}`);
     }
 
-    if (context.session.status === "closed") {
+    if (context.session.status === "closed" || context.phase === "draining") {
       throw new Error(`Session is closed for thread: ${threadId}`);
     }
 
     return context;
   }
 
-  private attachProcessListeners(context: CodexSessionContext): void {
-    context.output.on("line", (line) => {
-      if (!this.isLiveContext(context)) return;
-      this.handleStdoutLine(context, line);
-    });
-
-    context.child.stderr.on("data", (chunk: Buffer) => {
-      if (!this.isLiveContext(context)) return;
-      const raw = chunk.toString();
-      const lines = raw.split(/\r?\n/g);
-      for (const rawLine of lines) {
-        const classified = classifyCodexStderrLine(rawLine);
-        if (!classified) {
-          continue;
-        }
-
-        this.emitErrorEvent(context, "process/stderr", classified.message);
-      }
-    });
-
-    context.child.on("error", (error) => {
-      context.writer.close(error);
-      if (!this.isLiveContext(context)) return;
-      const message = error.message || "codex app-server process errored.";
-      this.updateSession(context, {
-        status: "error",
-        lastError: message,
-      });
-      this.emitErrorEvent(context, "process/error", message);
-    });
-
-    context.child.on("exit", (code, signal) => {
-      context.writer.close(
-        new Error(`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`),
+  private failPendingRequests(context: CodexSessionContext, error: Error): void {
+    for (const pending of context.pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(
+        new JsonRpcDeliveryError(
+          error.message,
+          pending.wasWritten === false ? "not_sent" : "unknown",
+        ),
       );
-      if (!this.isLiveContext(context)) {
-        return;
-      }
-      this.abortElicitations(context);
+      pending.cancelWrite?.();
+    }
+    context.pending.clear();
+    context.pendingApprovals.clear();
+    context.pendingUserInputs.clear();
+    context.nativeRequestCorrelations.clear();
+    this.clearInitialSkillsRetry(context);
+  }
 
-      const message = `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`;
-      this.updateSession(context, {
-        status: "closed",
-        activeTurnId: undefined,
-        lastError: code === 0 ? context.session.lastError : message,
-      });
-      this.emitLifecycleEvent(context, "session/exited", message);
-      if (this.sessions.get(context.session.threadId) === context) {
-        this.sessions.delete(context.session.threadId);
+  private attachProcessListeners(context: CodexSessionContext): void {
+    const drained = Promise.withResolvers<void>();
+    const stderr = new Utf8Lines(1024 * 1024, "truncate");
+    let stdoutClosed = false;
+    let stderrClosed = false;
+    let finishing = false;
+    let terminal: { method: string; message: string } | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const isCurrent = () => this.sessions.get(context.session.threadId) === context;
+    const acceptsOutput = () => context.phase !== "closed";
+    const emitStderr = (line: string) => {
+      if (!acceptsOutput()) return;
+      const classified = classifyCodexStderrLine(line);
+      if (classified) this.emitErrorEvent(context, "process/stderr", classified.message);
+    };
+    const onStderr = (chunk: Buffer) => {
+      for (const line of stderr.push(chunk)) emitStderr(line);
+    };
+    const onLine = (line: string) => {
+      if (acceptsOutput()) this.handleStdoutLine(context, line);
+    };
+    const finish = () => {
+      if (!terminal || context.phase === "closed" || finishing) return;
+      finishing = true;
+      if (deadline) clearTimeout(deadline);
+      // A descendant can hold stdout open after the provider exits. Finish
+      // bytes already received while the context still accepts notifications.
+      context.output.finish();
+      for (const line of stderr.finish()) emitStderr(line);
+      context.phase = "closed";
+      this.sourceDrains.delete(drained.promise);
+      drained.resolve();
+      context.output.off("line", onLine);
+      context.output.off("close", onStdoutClose);
+      context.child.stderr.off("data", onStderr);
+      context.child.stderr.off("end", onStderrClose);
+      context.child.stderr.off("close", onStderrClose);
+      context.child.off("exit", onExit);
+      context.child.off("close", onClose);
+      context.child.off("error", onError);
+      const retiredTurnId = context.session.activeTurnId;
+      this.updateSession(context, { status: "closed", activeTurnId: undefined });
+      this.emitLifecycleEvent(context, terminal.method, terminal.message, retiredTurnId);
+      if (isCurrent()) this.sessions.delete(context.session.threadId);
+      context.output.close();
+      // Descendants can inherit pipes after the provider exits. At EOF/the
+      // deadline, release those handles instead of keeping shutdown alive.
+      context.child.stdout?.destroy?.();
+      context.child.stderr.destroy?.();
+      context.child.stdin?.destroy?.();
+    };
+    this.sourceDrains.set(drained.promise, finish);
+    const maybeFinish = () => {
+      if (stdoutClosed && stderrClosed) finish();
+    };
+    const onStdoutClose = () => {
+      stdoutClosed = true;
+      maybeFinish();
+    };
+    const onStderrClose = () => {
+      stderrClosed = true;
+      maybeFinish();
+    };
+    const beginDrain = (error: Error, method: string, message: string) => {
+      // Written RPCs reject immediately on exit, even if a response remains in
+      // the pipe. Notifications keep draining until EOF or the shared budget.
+      this.failPendingRequests(context, error);
+      this.abortElicitations(context);
+      context.writer.close(error);
+      if (terminal || context.phase === "closed") return;
+      terminal = { method, message };
+      context.phase = "draining";
+      deadline = setTimeout(
+        finish,
+        Math.max(0, (this.shutdownDeadline ?? Date.now() + 1_800) - Date.now()),
+      );
+      deadline.unref?.();
+      maybeFinish();
+    };
+    const onError = (error: Error) => {
+      if (!terminal && isCurrent()) {
+        this.updateSession(context, { status: "error", lastError: error.message });
+        this.emitErrorEvent(context, "process/error", error.message);
       }
-    });
+      beginDrain(error, "session/exited", error.message);
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      const message = `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`;
+      if (!terminal && code !== 0 && isCurrent())
+        this.updateSession(context, { lastError: message });
+      beginDrain(new Error(message), "session/exited", message);
+    };
+    const onClose = () => {
+      stdoutClosed = stderrClosed = true;
+      finish();
+      context.child.off("error", onError);
+    };
+    context.beginDrain = beginDrain;
+    context.output.on("line", onLine);
+    context.output.on("close", onStdoutClose);
+    context.child.stderr.on("data", onStderr);
+    context.child.stderr.on("end", onStderrClose);
+    context.child.stderr.on("close", onStderrClose);
+    context.child.on("error", onError);
+    context.child.on("exit", onExit);
+    context.child.on("close", onClose);
   }
 
   private handleStdoutLine(context: CodexSessionContext, line: string): void {
@@ -3233,6 +3355,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         }
 
         this.emitEvent({
+          ...context.mcpEventIdentity,
           id: EventId.makeUnsafe(randomUUID()),
           kind: "notification",
           provider: "codex",
@@ -3316,6 +3439,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const goal = asObject(asObject(notification.params)?.goal);
       if (goal && goal.status !== "active") context.nativeGoalActive = false;
       if (
+        this.isLiveContext(context) &&
         goal?.status === "active" &&
         (!context.nativeGoalActive ||
           (context.nativeGoalBudget !== undefined &&
@@ -3329,6 +3453,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           status: "paused",
         })
           .catch(() => {
+            if (!this.isLiveContext(context)) return;
             this.emitLifecycleEvent(
               context,
               "session/goalPauseFailed",
@@ -3379,6 +3504,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         : undefined;
 
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
@@ -3431,6 +3557,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (notification.method === "account/login/completed") {
+      if (!this.isLiveContext(context)) return;
       const login = asObject(notification.params);
       if (login?.success !== true) {
         context.account = {
@@ -3509,6 +3636,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   private handleServerRequest(context: CodexSessionContext, request: JsonRpcRequest): void {
+    if (!this.isLiveContext(context)) return;
     const route = this.readRouteFields(request.params);
     if (
       request.method === "mcpServer/elicitation/request" &&
@@ -3593,6 +3721,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       });
 
       this.emitEvent({
+        ...context.mcpEventIdentity,
         id: EventId.makeUnsafe(randomUUID()),
         kind: "request",
         provider: "codex",
@@ -3726,6 +3855,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     message: string,
   ): void {
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
@@ -3770,23 +3900,38 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context.nextRequestId += 1;
 
     const result = await new Promise<unknown>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        context.pending.delete(String(id));
-        reject(new Error(`Timed out waiting for ${method}.`));
-      }, timeoutMs);
-
-      context.pending.set(String(id), {
+      const controller = new AbortController();
+      const pending: PendingRequest = {
         method,
-        timeout,
         resolve,
         reject,
-      });
-      void this.writeMessage(context, {
-        method,
-        id,
-        params,
-      }).catch((error) => {
-        clearTimeout(timeout);
+        wasWritten: false,
+        cancelWrite: () => controller.abort(),
+        timeout: setTimeout(() => {
+          context.pending.delete(String(id));
+          controller.abort();
+          reject(
+            new JsonRpcDeliveryError(
+              `Timed out waiting for ${method}.`,
+              pending.wasWritten ? "unknown" : "not_sent",
+            ),
+          );
+        }, timeoutMs),
+      };
+      context.pending.set(String(id), pending);
+      void this.writeMessage(
+        context,
+        { method, id, params },
+        {
+          signal: controller.signal,
+          deadline: Date.now() + timeoutMs,
+          lane: method === "turn/interrupt" ? "control" : "ordinary",
+          onWrite: () => {
+            pending.wasWritten = true;
+          },
+        },
+      ).catch((error) => {
+        clearTimeout(pending.timeout);
         context.pending.delete(String(id));
         reject(error);
       });
@@ -3795,8 +3940,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     return result as TResponse;
   }
 
-  private async writeMessage(context: CodexSessionContext, message: unknown): Promise<void> {
-    await context.writer.write(message);
+  private async writeMessage(
+    context: CodexSessionContext,
+    message: unknown,
+    options?: JsonRpcWriteOptions,
+  ): Promise<void> {
+    await context.writer.write(message, { lane: jsonRpcWriteLane(message), ...options });
   }
 
   private emitSessionConfigured(
@@ -3812,6 +3961,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       : config;
 
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "session",
       provider: "codex",
@@ -3827,12 +3977,19 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     });
   }
 
-  private emitLifecycleEvent(context: CodexSessionContext, method: string, message: string): void {
+  private emitLifecycleEvent(
+    context: CodexSessionContext,
+    method: string,
+    message: string,
+    turnId?: TurnId,
+  ): void {
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "session",
       provider: "codex",
       threadId: context.session.threadId,
+      ...(turnId ? { turnId } : {}),
       createdAt: new Date().toISOString(),
       method,
       message,
@@ -3858,6 +4015,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     payload?: unknown,
   ): void {
     this.emitEvent({
+      ...context.mcpEventIdentity,
       id: EventId.makeUnsafe(randomUUID()),
       kind: "error",
       provider: "codex",
@@ -3996,7 +4154,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   private isLiveContext(context: CodexSessionContext): boolean {
-    return !context.stopping && this.sessions.get(context.session.threadId) === context;
+    return (
+      !context.stopping &&
+      context.phase !== "draining" &&
+      context.phase !== "closed" &&
+      this.sessions.get(context.session.threadId) === context
+    );
   }
 
   private assertSupportedCodexCliVersion(input: {
@@ -4004,7 +4167,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     readonly binaryPath: string;
     readonly cwd: string;
     readonly homePath?: string;
-  }): string | null {
+    readonly signal?: AbortSignal;
+  }): Promise<string | null> {
     return assertSupportedCodexCliVersion(input);
   }
 
@@ -4221,61 +4385,7 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
   };
 }
 
-export function assertSupportedCodexCliVersion(input: {
-  readonly processEnvironment: NodeJS.ProcessEnv;
-  readonly binaryPath: string;
-  readonly cwd: string;
-  readonly homePath?: string;
-}): string | null {
-  const codexHomePath = resolveCodexHome(input);
-  const environment = buildProviderChildProcessEnv(
-    input.processEnvironment,
-    codexHomePath ? { CODEX_HOME: codexHomePath } : undefined,
-  );
-  const invocation = resolveInvocation(
-    input.binaryPath,
-    prependCodexCliTelemetryDisabledConfig(["--version"], {
-      managedCredentials: environment.F5_PROFILE_ISOLATED === "1",
-    }),
-    environment,
-    { cwd: input.cwd },
-  );
-  const result = spawnSync(invocation.file, [...invocation.args], {
-    cwd: input.cwd,
-    env: environment,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: CODEX_VERSION_CHECK_TIMEOUT_MS,
-    maxBuffer: 1024 * 1024,
-  });
-
-  if (result.error) {
-    const lower = result.error.message.toLowerCase();
-    if (
-      lower.includes("enoent") ||
-      lower.includes("command not found") ||
-      lower.includes("not found")
-    ) {
-      throw new Error(`Codex CLI (${input.binaryPath}) is not installed or not executable.`);
-    }
-    throw new Error(
-      `Failed to execute Codex CLI version check: ${result.error.message || String(result.error)}`,
-    );
-  }
-
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  if (result.status !== 0) {
-    const detail = stderr.trim() || stdout.trim() || `Command exited with code ${result.status}.`;
-    throw new Error(`Codex CLI version check failed. ${detail}`);
-  }
-
-  const parsedVersion = parseCodexCliVersion(`${stdout}\n${stderr}`);
-  if (parsedVersion && !isCodexCliVersionSupported(parsedVersion)) {
-    throw new Error(formatCodexCliUpgradeMessage(parsedVersion));
-  }
-  return parsedVersion;
-}
+export const assertSupportedCodexCliVersion = probeCodexCliVersion;
 
 function readResumeCursorThreadId(resumeCursor: unknown): string | undefined {
   if (!resumeCursor || typeof resumeCursor !== "object" || Array.isArray(resumeCursor)) {

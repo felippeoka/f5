@@ -2,9 +2,9 @@ import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqliteClient from "../NodeSqliteClient.ts";
-import migration from "./130_RestartBackgroundWork.ts";
+import migration from "./133_RestartBackgroundWork.ts";
 
-it.layer(SqliteClient.layerMemory())("130_RestartBackgroundWork", (it) => {
+it.layer(SqliteClient.layerMemory())("133_RestartBackgroundWork", (it) => {
   it.effect(
     "preserves old restart markers with no claimed background cut and bounds new counts",
     () =>

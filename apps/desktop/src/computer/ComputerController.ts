@@ -593,6 +593,12 @@ export class ComputerController {
     }
   }
   private validate(request: ComputerAutomationRequest): void {
+    if (
+      request.op === "inspect" &&
+      (request.snapshotId || request.elementRef) &&
+      this.options.platform !== "darwin"
+    )
+      throw new ComputerControlError({ _tag: "UnsupportedAction" });
     if (request.deadlineAtMs <= this.now())
       throw new ComputerControlError({
         _tag: "Execution",
@@ -729,7 +735,7 @@ export class ComputerController {
       this.confirmed.delete(request.requestId);
       const limit =
         request.op === "inspect"
-          ? 256 * 1024
+          ? 512 * 1024
           : request.op === "screenshot" || request.op === "zoom" || request.screenshot
             ? 16 * 1024 * 1024
             : 64 * 1024;

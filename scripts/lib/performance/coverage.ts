@@ -10,6 +10,7 @@ const required = {
     "git.status-large-nested-submodules",
     "upload.decode-persist-release-8MiB",
     "orchestration.assistant-stream",
+    "orchestration.assistant-stream-claude-uncoalesced",
   ],
   interactive: [
     "transport.slow-disconnecting-client",

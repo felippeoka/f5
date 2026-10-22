@@ -91,3 +91,32 @@ it("keeps the offered streaming workload bounded under real client delta semanti
   expect(deltas).toBe(1900);
   expect(replacements).toBe(100);
 });
+
+it("answers current workspace recovery reads without creating a transition", () => {
+  const fixture = createBrowserFixture();
+  expect(fixture.rpc({ _tag: "worktrees.getTransition", threadId: "perf-small" })).toBeNull();
+  const state = fixture.rpc({ _tag: "worktrees.threadState", threadId: "perf-small" });
+  expect(Schema.is(WorktreesThreadStateResult)(state)).toBe(true);
+  expect([...fixture.unknownMethods]).toEqual([]);
+});
+
+it("answers reconciliation probes at the same head and incarnation as its snapshot", () => {
+  const fixture = createBrowserFixture(30);
+  for (let index = 0; index < 3; index++) {
+    const snapshot = fixture.rpc({ _tag: "orchestration.getSnapshot" }) as {
+      snapshotSequence: number;
+    };
+    expect(fixture.rpc({ _tag: "orchestration.getLatestSequence" })).toEqual({
+      latestSequence: snapshot.snapshotSequence,
+      backendIncarnation: fixture.welcome.backendIncarnation,
+    });
+    fixture.nextEvents();
+  }
+  expect(fixture.welcome.backendIncarnation).toBe("performance-fixture");
+  expect([...fixture.unknownMethods]).toEqual([]);
+});
+it("acknowledges page diagnostics without injecting benchmark work", () => {
+  const fixture = createBrowserFixture();
+  expect(fixture.rpc({ _tag: "server.reportClientDiagnostics" })).toBeNull();
+  expect([...fixture.unknownMethods]).toEqual([]);
+});

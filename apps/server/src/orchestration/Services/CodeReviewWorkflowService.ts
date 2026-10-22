@@ -1,3 +1,4 @@
+import type { WorkerAdmissionError } from "@t3tools/shared/DrainableWorker";
 import type {
   CodeReviewWorkflow,
   CodeReviewWorkflowId,
@@ -11,7 +12,7 @@ import type { Effect, Scope } from "effect";
 
 export interface CodeReviewWorkflowServiceShape {
   readonly start: Effect.Effect<void, never, Scope.Scope>;
-  readonly drain: Effect.Effect<void>;
+  readonly drain: Effect.Effect<void, WorkerAdmissionError>;
   readonly createWorkflow: (
     input: OrchestrationCreateCodeReviewWorkflowInput,
   ) => Effect.Effect<CodeReviewWorkflowId, Error>;

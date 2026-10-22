@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  buildQueueRowDisplay,
   describeQueueBlockedState,
   isFoldedUsageLimitItem,
   mergeVisibleOrder,
@@ -91,5 +92,48 @@ describe("describeQueueBlockedState", () => {
     expect(describeQueueBlockedState(snapshot)).toBe(
       "Resume to recheck the previous message. If the queue pauses again, its delivery is still unconfirmed.",
     );
+  });
+
+  it("points a workspace pause at the banner instead of repeating its details", () => {
+    const snapshot: NextTurnQueueSnapshot = {
+      threadId: ThreadId.makeUnsafe("drifted"),
+      items: [],
+      revision: 1,
+      paused: true,
+      blockedKind: "error",
+      reasonCode: "worktree_missing",
+      reasonDetail: "The recorded worktree does not match this repository and branch.",
+      maxItems: 10,
+      quarantinedCount: 0,
+    };
+    expect(describeQueueBlockedState(snapshot, { workspaceBannerShown: true })).toBe(
+      "Queue paused: workspace needs attention (see above).",
+    );
+    // Without a recorded worktree no banner renders, so keep the server's detail.
+    expect(describeQueueBlockedState(snapshot)).toBe(snapshot.reasonDetail);
+  });
+});
+
+describe("buildQueueRowDisplay", () => {
+  const item = (commandId: string, text: string) =>
+    ({
+      command: {
+        commandId: CommandId.makeUnsafe(commandId),
+        message: { text, attachments: [] },
+      },
+    }) as unknown as NextTurnQueueItem;
+
+  it("renders message-mode answers instead of their JSON payload", () => {
+    expect(
+      buildQueueRowDisplay(
+        item("answer-delivery:1", JSON.stringify({ 0: { answers: ["Connected successfully"] } })),
+      ).label,
+    ).toBe("Answer · Connected successfully");
+  });
+
+  it("keeps the raw text for malformed answers and ordinary turns", () => {
+    expect(buildQueueRowDisplay(item("answer-delivery:2", "not json")).label).toBe("not json");
+    const ordinary = JSON.stringify({ 0: { answers: ["x"] } });
+    expect(buildQueueRowDisplay(item("plain", ordinary)).label).toBe(ordinary);
   });
 });

@@ -205,8 +205,9 @@ deltas for that message wait for its authoritative completion so the stored text
 stays a valid prefix. Other events and other threads continue. Set
 `F5_COALESCE_STREAMING_DELTAS=false` before startup to disable batching independently.
 
-SQLite helper ownership (R12), non-handling projector skipping (P1b), and pragma
-tuning (P3) remain measurement-gated. `synchronous = NORMAL` is not enabled.
+Non-handling projector skipping now runs within the existing command transaction;
+each projector cursor advances once at the final sequence. SQLite helper ownership
+and pragma tuning remain measurement-gated. `synchronous = NORMAL` is not enabled.
 
 The storage gate can run the same ingestion workload while each repetition
 exports a backup and a separate SQLite process holds a read transaction:
@@ -224,6 +225,205 @@ comparison runs without this additional workload.
 ### Section 5.4 validation
 
 Results are recorded in [reviews/server-performance-storage-validation.md](reviews/server-performance-storage-validation.md).
+
+## Stability instrumentation
+
+The Node SQLite adapter records successful and failed execution durations on both
+row and positional result paths. Statements taking more than 100 ms log a warning
+containing the duration and at most 160 characters of the source SQL; bound
+parameters and expanded SQL are never logged. Unit tests inject elapsed time into
+a recursive CTE check, rather than asserting a machine-dependent execution time.
+
+The push bus records encoded frame bytes, replaced/subsumed coalesced pushes and
+slow-client closures. Frame/replacement labels contain only static channel
+families, never workspace paths, thread IDs or MCP identities. Queue depth is
+sampled every 250 ms, at the same cadence as the existing event-loop-delay sampler.
+Repeated callbacks from an already closed client do not count another close.
+
+The four-stream workload includes an uncoalesced `claudeAgent` variant beside
+Codex. Delta latency ends at the production push bus's send callback. Report-only
+`diagnostics` contain queue entries/bytes, SQLite page growth/WAL bytes, event-loop
+percentiles, SQL admission/execution times, ingestion lookup, in-memory projection,
+per-projector time/counts and push admission. Snapshot transactions, worker entries,
+bytes/age/failures and shutdown phase durations also have production metrics. The
+optional stage probe is disabled in normal execution and never records SQL parameters.
+
+The 2026-10-19 smoke used one warmup/two repetitions: Codex delta-to-push p95 was
+68.46 ms; uncoalesced Claude was 538.43 ms, with 80,264 SQL statements in its busiest
+repetition. This validates the C0 harness and identifies a projection workload to
+measure; a smoke run certifies no performance improvement. Browser operation
+inventories and full before/after qualification remain required.
+
+### Baseline qualification status, 2026-10-19
+
+The server foundation baseline is pinned at commit
+`3bdf4bf66cf1287453c8a94e71c63f767eab4b50` (tree
+`d2ec874d0f02bc3982702f9db1c9da77ab5091a5`). It was collected in a clean,
+isolated checkout with Node 24.13.1, Bun 1.3.11, five warmups and thirty
+repetitions, without concurrent builds or tests. The complete local report is
+`.performance/stability-c0-foundation-full-20261019.json`; preserve that report
+as a CI artifact when publishing this change. Earlier smoke reports remain
+exploratory and cannot qualify improvements.
+
+Reproduce with `git worktree add --detach /tmp/f5-stability-c0
+3bdf4bf66cf1287453c8a94e71c63f767eab4b50`, install the frozen lockfile, then run
+`bun run perf:server --output=.performance/baseline.json` in that checkout.
+Collect candidates sequentially on the same host and runtime and use
+`bun run perf:compare`; incompatible metadata never qualifies a comparison.
+
+All existing server resource checks passed. Codex delta-to-push p95 was 79.66 ms;
+uncoalesced Claude was 823.50 ms. Claude's arrival-sampled command queue p95 was
+one entry and event-loop delay p99 was 28.95 ms. Retained read-model heap was
+51,800,456 bytes. These measurements justify measuring the append projection
+optimization; they do not enable Claude coalescing, a SQLite worker, or read-model
+slimming. Browser and desktop qualification remain separate.
+
+The interactive fixture now answers `worktrees.getTransition` and
+`worktrees.threadState`; missing responses previously crashed the production chat
+route. Local smoke diagnostics ran, but full interactive qualification failed
+because the production process-table probe returned `spawn EPERM`. Full runs now
+check that capability before allocating the fixture or starting the soak. Rerun
+qualification on a host permitting that probe and retain its complete report.
+
+## Nightly performance reports
+
+`perf-nightly.yml` runs the full server component harness at 04:17 UTC and on
+manual dispatch. It runs separately from `CI result` and does not open
+`ci-main-red` issues or gate merges. Each report uses five warmups and thirty
+measured repetitions. Candidates and diagnostics are retained as workflow artifacts.
+
+The latest retained `perf-baseline` from a successful main run of this repository's
+nightly workflow supplies the comparison; fork heads and other workflows are excluded. A missing
+baseline, the dispatch's `reset-baseline` option, or incompatible fixture, harness,
+hardware, OS, Git, browser or runtime metadata records a new baseline, with the
+reason in the step summary. Incompatibility and missing artifacts both emit a workflow warning: no
+performance comparison was made, and the previous baseline remains in the candidate
+diagnostics artifact. Re-baselining does not qualify performance acceptance.
+Compatible reports run `bun run perf:compare`;
+regressions fail that workflow and appear in its summary. Feature-branch dispatches
+can compare reports but cannot replace main's baseline. Every successful comparison
+re-uploads the unchanged comparison baseline to refresh its 90-day artifact retention;
+the anchor changes only on explicit reset, incompatibility, or a missing artifact.
+Failed comparisons never promote candidates or refresh retention. If a long failure
+streak expires the artifact, initialization explicitly warns that comparison was
+skipped and the new baseline does not establish performance qualification. This report covers server
+components; interactive qualification still requires the production-browser report.
+
+The deleted-thread memory fixture can be run independently with
+`F5_PERF_READ_MODEL=1 F5_PERF_DELETED_MEMORY_REPORT=/absolute/new-report.json bun run --cwd apps/server test:file --config vitest.performance.config.ts`.
+It seeds 500 threads with 300 messages each, marks exactly 5% deleted, and takes
+the median of three fresh-process hydrations. Use the same fixture on both pinned
+source trees for a comparison; the ordinary all-live foundation fixture is unchanged.
+
+Streaming reducer tests count structural timeline and row derivations independently
+of content updates, verify one private thread-array copy per batch, and preserve
+unchanged-row identity. Markdown state exposes parsed/validated character counts;
+revision-based plain-paragraph and fenced-code tests verify linear growth without
+a whole-prefix validation. These deterministic invariants do not establish the
+production browser composer-latency gate.
+
+The 2026-10-19 deleted-thread measurement used clean local source snapshots
+`ebe292b4c85957f824621591224d30a0de23ce77` (foundation plus the matching harness)
+and `1f405a6f0787efd92eb098ce8fbdd9fed222948d` (candidate). Both recorded the
+same fixture and harness digests. The baseline retained 7,500 deleted-thread
+messages; the candidate retained zero. Median retained heap was 51,804,104 versus
+49,419,472 bytes; RSS was 304,611,328 versus 295,223,296 bytes. Reports are
+`.performance/stability-{baseline,candidate}-deleted-memory-20261019-37.json`.
+This is a three-process memory comparison, not a streaming or browser latency gate.
+
+The next controlled full comparison used baseline
+`ebe292b4c85957f824621591224d30a0de23ce77` and candidate
+`4089fda501eda0adf0715c29616a0ded6b7e7099`, five warmups and thirty repetitions.
+All latency and resource bounds passed, including terminal persistence and replay.
+For uncoalesced Claude, median wall time changed from 7,569.44 to 6,369.71 ms,
+median CPU from 6,494.09 to 5,876.95 ms, and SQL statements from 80,266 to 37,022.
+However CPU p95 changed only from 7,870.84 to 7,535.64 ms, so the required 20%
+CPU improvement failed. This candidate is not performance-qualified. Reports are
+`.performance/stability-baseline-full-20261019-37.json` and
+`.performance/stability-candidate-full-20261019-45.json`; do not substitute median
+improvements for the documented p95 comparison gate.
+
+The follow-up candidate `f4d4fd0fb30306452d1501819c572b868a1fb036` passes the
+same full comparison against that baseline, including the 20% CPU p95 gate.
+Uncoalesced Claude wall p95 was 6,184.10 ms and CPU p95 was 5,264.97 ms, versus
+9,474.05 and 7,870.84 ms in the baseline. Median wall/CPU were 4,975.99/4,738.49 ms;
+SQL statements were 29,034. All other latency and resource bounds passed.
+The candidate report is `.performance/stability-candidate-full-20261019-53.json`.
+This qualifies the guarded append, token-estimate and cursor updates in that
+pinned source tree; subsequent lifecycle changes still need correctness checks.
+
+The production-browser runner opts into report-only work counters before app startup:
+row renders (a bounded 2,048-row sample), structural/content timeline derivations,
+markdown parsed/validated characters, highlight jobs/bytes, and resource samples for
+hydration buffers, retained messages, WebSocket listeners/timers and pending RPCs.
+Before/after streaming snapshots remain in the browser artifact; numeric final
+samples also enter the interactive report. Ordinary application sessions do not
+collect these counters. This changes the harness digest; older reports remain valid
+for their pinned comparison, but new comparisons require a matching harness baseline.
+
+The clean-source production-browser smoke at
+`3d89c5d5dbb488549372d94e99a564f17b397f72` recorded composer input p95
+32.10 ms and streaming input p95 32.40 ms in
+`.performance/stability-interactive-smoke-20261019-88.json` (one warmup, two
+repetitions). It is a smoke result, not the full 50 ms qualification. The subsequent
+full run failed its native process-table preflight with `spawn EPERM`, before the
+soak started. Electron smoke also fails before opening the application on this host.
+
+`F5_PERF_LIFECYCLE=1 bun run perf:interactive --smoke --output=.performance/lifecycle-smoke.json`
+adds correctness checks after the measurements: the renderer reconnects, switches
+threads and loads older history while streaming, then sends stop and approval controls while the production admission queue holds 1,024 ordinary
+entries, then displays a provider crash with an editable preserved draft. The wire
+provider is scripted; engine/reactor/writer saturation remains covered by their
+separate tests. This optional phase does not replace full desktop qualification.
+The lifecycle phase also verifies the captured reading row's offset after a prepend;
+it waits for the virtual list's initial scroll to settle before generating wheel input.
+Resource collection, the bounded row sample and history-anchor diagnostics are installed by the browser runner;
+ordinary app sessions retain only the opt-in recording calls.
+
+The follow-up clean-source lifecycle smoke at
+`02ae8d4dfe8f758f0cf2a4c9f6537bd71bc07f84` passed all optional lifecycle
+checks, including history prepend anchor preservation, thread switching during
+streaming, reserved stop/approval admission and provider-crash draft recovery.
+Composer input p95 was 32.4 ms both idle and streaming; the report is
+`.performance/stability-lifecycle-smoke-20261020-155.json`, with detailed checks
+in its `.browser.json` companion. It uses one warmup/two repetitions and does not
+qualify the full 50 ms gate or memory soak. The rebuilt desktop smoke still fails
+before opening a window; Playwright records `kill EPERM` during launch cleanup.
+
+Client diagnostics reporting loads separately from stream subscription setup.
+Router counters accumulate immediately; the reporter reads those accumulated values
+when it starts. Disposal before its module loads creates no timers or listeners,
+and a reporting-module failure does not prevent synchronization. With the subsequent
+main changes included, the initial web JavaScript is 1,506,835 bytes, below the
+unchanged 1,507,108-byte budget.
+
+### Largest atomic compaction group
+
+`apps/server/scripts/performance/compaction.ts` measures one file-backed group of
+50,000 message events using the streaming fixture's maximum 64-character ASCII
+delta (3,199,936 folded characters), with an ordinary writer admitted at the first rewrite.
+Fixture reset is outside timing; five warmups precede thirty measured repetitions.
+The normal server report includes this scenario and its writer/transaction maxima.
+To run it alone from this revision:
+
+```sh
+F5_PERF_COMPACTION=1 F5_PERF_REPORT=/tmp/f5-compaction.json bun run --cwd apps/server test:file --config vitest.performance.config.ts
+```
+
+A clean-source macOS arm64 / Node 24.13.1 / SQLite 3.51.2 run on 2026-10-20 at
+`e6fd4d92ae8eacb8c844725bc063c297ecd8d018` measured 355.33 ms median and
+390.89 ms p95 total compaction wall time, 349.35 ms median CPU, 302.56 ms maximum
+transaction duration and 298.14 ms maximum ordinary-writer wait. Percentiles use
+`percentile95` from the existing report harness. This measures the event-count
+ceiling; larger payloads can hold the writer longer. It is not a baseline
+comparison or a Windows result.
+Atomicity preserves replay equivalence; yielding between delete statements does
+not release the writer lease. The 2,000-event target still packs complete small
+groups, while a group up to the 50,000-event ceiling runs alone. Time budgets are
+checked between groups. Large-group write stalls remain an explicit tradeoff;
+observe production statement/event-loop data before starting the gated SQLite
+worker track. A deterministic interruption test verifies the writer remains
+blocked until rollback and then resumes.
 
 ## October diagnostics
 

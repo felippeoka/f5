@@ -1,7 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { readFile, writeFile, copyFile, rename, readdir, chmod, unlink } from "node:fs/promises";
-import { createReadStream } from "node:fs";
-import readline from "node:readline";
+import { readCompleteLogLines } from "./completeLogLines.ts";
 import path from "node:path";
 import {
   hasClaudeParentChain,
@@ -41,6 +40,22 @@ export async function repairClaudeResumePoint(input: {
     skipMalformed: true,
     onMalformed: (line) => malformed.push(line),
   });
+  // Quarantine deletes by line number, so a reader that splits lines differently
+  // from split("\n") would delete valid records. Refuse instead of guessing.
+  // The reader's UTF-8 decoder drops a leading BOM, which JSON.parse rejects.
+  const originalLines = (original.charCodeAt(0) === 0xfeff ? original.slice(1) : original).split(
+    "\n",
+  );
+  for (const line of malformed) {
+    let parsed = false;
+    try {
+      JSON.parse(originalLines[line - 1] ?? "");
+      parsed = true;
+    } catch {
+      /* Expected: the reported line is really malformed. */
+    }
+    if (parsed) throw new Error("Transcript line mapping is inconsistent; no changes were made.");
+  }
   if (hasClaudeParentChain(persisted, input.target)) {
     if (malformed.length === 0)
       return {
@@ -53,19 +68,13 @@ export async function repairClaudeResumePoint(input: {
           resumeRecoveryGeneration: randomUUID(),
         },
       };
-    const repaired = original
-      .split("\n")
-      .filter((_, index) => !malformed.includes(index + 1))
-      .join("\n");
+    const repaired = originalLines.filter((_, index) => !malformed.includes(index + 1)).join("\n");
     return await writeTranscriptRepair(input, original, repaired, input.target, 0, malformed);
   }
   const events: Array<Record<string, unknown>> = [];
   for (const name of await readdir(input.providerLogsDir)) {
     if (name !== `${input.threadId}.log` && !name.startsWith(`${input.threadId}.log.`)) continue;
-    const lines = readline.createInterface({
-      input: createReadStream(path.join(input.providerLogsDir, name), { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
+    const lines = readCompleteLogLines(path.join(input.providerLogsDir, name));
     for await (const line of lines) {
       const index = line.indexOf("NTIVE: ");
       if (index < 0) continue;
@@ -290,8 +299,7 @@ export async function repairClaudeResumePoint(input: {
   // An unresolved tool at the cursor must be closed before the next user turn.
   closeTools();
   const replaced = new Set(additions.map((entry) => String(entry.uuid)));
-  const preserved = original
-    .split("\n")
+  const preserved = originalLines
     .filter((line, index) => {
       if (malformed.includes(index + 1)) return false;
       return !line.trim() || !replaced.has(String(record(JSON.parse(line))?.uuid));
@@ -361,7 +369,20 @@ async function writeTranscriptRepair(
       throw new Error("Transcript changed during repair; retry after the session stops.");
     await rename(temporary, input.file);
     replaced = true;
-    if (!hasClaudeParentChain(await readClaudeTranscript(input.file), target)) {
+    // Any verification failure, including a read error, must restore the backup.
+    // Otherwise the file and receipt change without the cursor following them.
+    let verified = false;
+    try {
+      let malformed = 0;
+      const entries = await readClaudeTranscript(input.file, false, {
+        skipMalformed: true,
+        onMalformed: () => malformed++,
+      });
+      verified = malformed === 0 && hasClaudeParentChain(entries, target);
+    } catch {
+      /* Treated as a failed verification below. */
+    }
+    if (!verified) {
       await copyFile(backup, input.file);
       replaced = false;
       throw new Error("Transcript verification failed; restored the backup.");

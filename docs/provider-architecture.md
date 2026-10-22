@@ -72,3 +72,64 @@ There are three layers, each with its own owner:
 
 Instances may also expose `inventory` (read-only hooks, plugins, connectors and agents,
 served by `server.getProviderInventory`) and `deleteNativeSession`.
+
+## Transport framing and delivery outcomes
+
+Codex and ACP use the shared incremental UTF-8/CRLF line framer. It preserves
+empty lines, split code points and final unterminated lines. ACP retains its
+16 MiB frame limit and fails its transport on decode/framing failure, settling
+pending requests. Codex session stdout has no new frame ceiling: large history
+responses remain valid. A malformed session line produces a protocol error event
+and leaves the session alive. Codex stderr is framed incrementally and can carry
+a truncation marker on unusually long diagnostic lines.
+
+The Codex stdin writer tracks queued admission separately from physical writes.
+Expired or cancelled queued entries are removed before `stdin.write`; they fail
+as `not_sent`. Once writing has begun, timeout/abort is an `unknown` outcome and
+cannot authorize an automatic resend. Interrupts and approval/input replies have
+reserved admission and run after the active physical write. Delivery certainty
+and retryability survive adapter/service wrapping into the durable delivery result.
+
+Exit/error settles pending Codex RPCs immediately, including replaced contexts.
+Notification sources drain to EOF or the shutdown budget and retain the originating
+session generation. Per-generation FIFO preparation orders native logging, mapping,
+image preparation and publication; completion cannot overtake earlier output.
+Version probes are asynchronous, share only concurrent checks of the same resolved
+executable identity/environment, and cancel the child when their last waiter exits.
+MSP child exit closes its incoming channel immediately, settling in-flight SDK
+requests. Close waits for child exit with bounded escalation, removes its timeout
+waiters, and observes the application deadline when shutting down. The spawned-host
+fixture verifies request failure after exit and forced termination.
+
+ACP malformed input is fatal to the transport: pending requests reject, and a
+FIFO termination notification reaches the adapter after prior notifications.
+Cursor, Grok and Antigravity publish one runtime error and one session exit,
+retire the matching context and close its scope from a sibling fiber. A stale
+context cannot close its replacement. Their spawned-agent tests cover both malformed
+JSON and child exit, request settlement within one second, repeated disposal and
+confirmed child termination. The POSIX OpenCode process-group fixture also verifies
+that shutdown reaps an owned server and its descendant when both ignore TERM;
+Windows keeps its separate descendant teardown path.
+
+Claude completion records carry exact emitted block text in `payload.data.text`,
+including leading newlines and trailing whitespace; display detail is not the recovery
+source. Ingestion can restore a missing suffix from that text. Claude delta coalescing
+remains disabled until its server-crash/transcript-resume test passes and the C0
+comparison meets the proposed latency/queue criteria.
+
+OpenCode SDK fetches share an owning-session abort signal, installed before
+`session.create`. An owned server exit aborts pending HTTP requests immediately;
+the adapter emits one runtime error followed by one exit and closes the session
+from its adapter scope, avoiding a fiber waiting for its own scope to close.
+Remote tree cleanup and process escalation respect the shared shutdown deadline.
+
+The killed-server Claude gate (`integration/chaos/claudeRecoveryGate.integration.test.ts`)
+retains complete native transcript text across restart but observes partial, empty
+runtime history after resume. Claude coalescing remains disabled. The shared SDK
+query fake exercises F5 recovery; live CLI compatibility remains separate.
+
+ACP native log records classify `session/update` by its update subtype. Message
+and thought chunks batch without delaying delivery; plans, tool updates, turn
+boundaries and unknown updates await append completion. Intentional PTY restarts,
+working-directory/environment replacements and shutdown drain their source without
+publishing a tab-closing `exited` event. Natural exits still publish it.

@@ -65,7 +65,35 @@ export interface ProviderMcpStateUpdate {
   readonly unconvergedVersion: string | null;
 }
 
+export interface ProviderTerminalLifecycleUpdate {
+  readonly threadId: ThreadId;
+  readonly instanceId: ProviderInstanceId;
+  readonly generation: number;
+  readonly turnId: string | null;
+  readonly eventType: "turn.completed" | "session.exited";
+  readonly createdAt: string;
+}
+
+export interface ProviderHistoryReconciliationUpdate {
+  readonly threadId: ThreadId;
+  readonly instanceId: ProviderInstanceId;
+  readonly generation: number;
+  readonly marker: {
+    readonly eventId: string;
+    readonly turnId: string | null;
+    readonly historyIdentity: string | null;
+  } | null;
+  /** Clearing is allowed only for the exact marker whose history was verified. */
+  readonly expectedMarkerId?: string;
+}
+
 export interface ProviderSessionRuntimeRepositoryShape {
+  readonly updateHistoryReconciliationIfCurrent: (
+    input: ProviderHistoryReconciliationUpdate,
+  ) => Effect.Effect<boolean, ProviderSessionRuntimeRepositoryError>;
+  readonly updateTerminalLifecycleIfCurrent: (
+    input: ProviderTerminalLifecycleUpdate,
+  ) => Effect.Effect<boolean, ProviderSessionRuntimeRepositoryError>;
   readonly updateMcpStateIfCurrent: (
     input: ProviderMcpStateUpdate,
   ) => Effect.Effect<boolean, ProviderSessionRuntimeRepositoryError>;

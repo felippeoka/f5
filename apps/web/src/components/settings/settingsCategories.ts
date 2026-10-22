@@ -4,26 +4,6 @@ import {
   type SettingsCategory,
   type SettingsScope,
 } from "./settingsRouting";
-import {
-  ArchiveIcon,
-  BellIcon,
-  BotIcon,
-  FolderCogIcon,
-  FolderIcon,
-  GitBranchIcon,
-  GlobeIcon,
-  HardDriveIcon,
-  InfoIcon,
-  KeyboardIcon,
-  ListTreeIcon,
-  type LucideIcon,
-  MessageSquareTextIcon,
-  PaletteIcon,
-  SlidersHorizontalIcon,
-  UsersIcon,
-  WrenchIcon,
-} from "lucide-react";
-
 import { ABOUT_SETTINGS_DESCRIPTORS } from "./categories/AboutSettings.descriptors";
 import { ACCOUNTS_SETTINGS_DESCRIPTORS } from "./categories/AccountsSettings.descriptors";
 import { APPEARANCE_SETTINGS_DESCRIPTORS } from "./categories/AppearanceSettings.descriptors";
@@ -45,25 +25,6 @@ import {
   settingsItemVisibleInScope,
   type SettingsItemDescriptor,
 } from "./settingsSearch";
-
-export const SETTINGS_CATEGORY_ICONS = {
-  general: SlidersHorizontalIcon,
-  appearance: PaletteIcon,
-  conversation: MessageSquareTextIcon,
-  keyboard: KeyboardIcon,
-  notifications: BellIcon,
-  providers: BotIcon,
-  threads: ListTreeIcon,
-  tools: WrenchIcon,
-  browser: GlobeIcon,
-  projects: FolderIcon,
-  git: GitBranchIcon,
-  accounts: UsersIcon,
-  storage: HardDriveIcon,
-  archive: ArchiveIcon,
-  about: InfoIcon,
-  project: FolderCogIcon,
-} as const satisfies Record<SettingsCategory, LucideIcon>;
 
 export const SETTINGS_ITEM_DESCRIPTORS: ReadonlyArray<SettingsItemDescriptor> = [
   ...GENERAL_SETTINGS_DESCRIPTORS,

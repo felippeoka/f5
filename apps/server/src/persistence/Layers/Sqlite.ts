@@ -1,9 +1,9 @@
-import { Effect, Layer, FileSystem, Path } from "effect";
+import { SnapshotReadClients, makeLeasedSqlClient } from "../snapshotReadExecutor.ts";
+import { Effect, Layer, FileSystem, Path, ServiceMap } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
 import { ServerConfig } from "../../config.ts";
-import { withImmediateTransactions } from "../sqliteTransactions.ts";
 import { ReadSqlClient } from "../ReadSqlClient.ts";
 
 type RuntimeSqliteLayerConfig = {
@@ -21,7 +21,7 @@ const defaultSqliteClientLoaders = {
   node: () => import("../NodeSqliteClient.ts"),
 } satisfies Record<string, () => Promise<Loader>>;
 
-const makeRuntimeSqliteLayer = (
+export const makeRuntimeSqliteLayer = (
   config: RuntimeSqliteLayerConfig,
 ): Layer.Layer<SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -29,23 +29,26 @@ const makeRuntimeSqliteLayer = (
     const loader = defaultSqliteClientLoaders[runtime];
     const clientModule = yield* Effect.promise<Loader>(loader);
     // Bun otherwise enables WAL while opening the connection, before our busy timeout.
-    const layer = clientModule.layer({
+    const native = clientModule.layer({
       ...config,
       disableWAL: true,
       checkpointWorker: runtime === "node" && !config.readonly,
     });
-    return runtime === "bun" && !config.readonly
-      ? Layer.effect(
-          SqlClient.SqlClient,
-          Effect.map(Effect.service(SqlClient.SqlClient), withImmediateTransactions),
-        ).pipe(Layer.provide(layer))
-      : layer;
+    return Layer.effect(
+      SqlClient.SqlClient,
+      Effect.gen(function* () {
+        const client = yield* SqlClient.SqlClient;
+        // This pragma is connection-local: Bun readers need it too, before any
+        // snapshot or crash-recovery read can contend with the writer.
+        yield* client`PRAGMA busy_timeout = 5000`.pipe(Effect.orDie);
+        return yield* makeLeasedSqlClient(client, config.readonly === true);
+      }),
+    ).pipe(Layer.provide(native));
   }).pipe(Layer.unwrap);
 
 const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA busy_timeout = 5000;`;
     yield* sql`PRAGMA checkpoint_fullfsync = ON;`;
     // Takes effect only before the first table exists, so new databases start
     // incremental; an existing one switches at its next VACUUM (see
@@ -66,20 +69,42 @@ export const makeSqlitePersistenceLive = (dbPath: string) =>
     yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
 
     const writer = Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: dbPath }));
-    // The dependency ensures schema setup finishes before the read-only connection opens.
-    const reader = Layer.effect(
+    const readers = Layer.effect(
+      SnapshotReadClients,
+      Effect.gen(function* () {
+        // Building these graphs after the writer setup guarantees migrations
+        // finish before either query-only connection can observe the file.
+        yield* SqlClient.SqlClient;
+        const openReader = Effect.gen(function* () {
+          const services = yield* Layer.build(
+            makeRuntimeSqliteLayer({ filename: dbPath, readonly: true }),
+          );
+          const client = ServiceMap.get(services, SqlClient.SqlClient);
+          yield* client`PRAGMA query_only = ON`;
+          return client;
+        });
+        return { foreground: yield* openReader, background: yield* openReader };
+      }),
+    );
+    // Thread find scans long histories on its own connection, so it never holds the
+    // snapshot readers' leases. Building it after the writer orders it after setup too.
+    const searchReader = Layer.effect(
       ReadSqlClient,
       Effect.service(SqlClient.SqlClient).pipe(
         Effect.tap((sql) => sql`PRAGMA query_only = ON`.pipe(Effect.orDie, Effect.asVoid)),
       ),
     ).pipe(Layer.provide(makeRuntimeSqliteLayer({ filename: dbPath, readonly: true })));
-    return Layer.provideMerge(reader, writer);
+    return readers.pipe(Layer.provideMerge(Layer.provideMerge(searchReader, writer)));
   }).pipe(Layer.unwrap);
 
-export const SqlitePersistenceMemory = Layer.provideMerge(
-  setup,
-  makeRuntimeSqliteLayer({ filename: ":memory:" }),
-);
+const memoryWriter = Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: ":memory:" }));
+export const SqlitePersistenceMemory = Layer.effect(
+  SnapshotReadClients,
+  Effect.map(SqlClient.SqlClient.asEffect(), (client) => ({
+    foreground: client,
+    background: client,
+  })),
+).pipe(Layer.provideMerge(memoryWriter));
 
 export const layerConfig = Effect.gen(function* () {
   const { dbPath } = yield* ServerConfig;

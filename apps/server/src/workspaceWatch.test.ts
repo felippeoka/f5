@@ -78,6 +78,127 @@ describe("normalizeWatchedRelativePath", () => {
 describe("WorkspaceWatchRegistry", () => {
   const client = { name: "client" };
 
+  it("retains a rename hint when a later change hint arrives before observation", async () => {
+    registry.dispose();
+    let hint!: (eventType: string) => void;
+    const watch = vi.fn((_path: string, listener: (eventType: string) => void) => {
+      hint = listener;
+      return Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher;
+    });
+    registry = createRegistry({ watch });
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+    const temporary = path.join(root, "src", "replacement");
+    await fsp.writeFile(temporary, "replaced");
+    await fsp.rename(temporary, path.join(root, "src", "app.ts"));
+    hint("rename");
+    hint("change");
+    await waitForChange("client", { relativePath: "src/app.ts", change: "changed" });
+    expect(watch).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks by the maximum debounce delay during continuous hints", async () => {
+    registry.dispose();
+    let hint!: (eventType: string) => void;
+    registry = createRegistry({
+      debounceMs: 50,
+      maxDebounceMs: 100,
+      watch: (_target, listener) => {
+        hint = listener;
+        return Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher;
+      },
+    });
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+    const internals = registry as unknown as {
+      observe: (entry: unknown) => Promise<string | null>;
+    };
+    const observe = vi.spyOn(internals, "observe").mockResolvedValue("changed");
+    vi.useFakeTimers();
+    try {
+      hint("change");
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(20);
+        hint("change");
+      }
+      expect(observe).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(observe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases polling capacity between dirty observations and caps concurrent polls", async () => {
+    registry.dispose();
+    registry = createRegistry({
+      debounceMs: 60_000,
+      maxDebounceMs: 60_000,
+      pollIntervalMs: 60_000,
+      watch: () => {
+        throw new Error("unavailable");
+      },
+    });
+    const files = Array.from({ length: 5 }, (_, i) => `src/${i}.ts`);
+    await Promise.all(files.map((file) => fsp.writeFile(path.join(root, file), "x")));
+    await registry.setWatchedPaths(client, { cwd: root, files, directories: [] });
+    const internals = registry as unknown as {
+      observe: (entry: { absolutePath: string }) => Promise<string | null>;
+      scheduleCheck: (entry: unknown, rearm: boolean) => void;
+      poll: () => Promise<void>;
+    };
+    const original = internals.observe.bind(registry);
+    const releases: Array<() => void> = [];
+    let active = 0,
+      maximum = 0;
+    const observed = new Set<string>();
+    vi.spyOn(internals, "observe").mockImplementation(async (entry) => {
+      observed.add(entry.absolutePath);
+      maximum = Math.max(maximum, ++active);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      const result = await original(entry);
+      active--;
+      // Every completed path remains dirty; that cannot retain a poll lease.
+      internals.scheduleCheck(entry, false);
+      return result;
+    });
+    const polling = internals.poll();
+    await vi.waitFor(() => expect(releases).toHaveLength(4));
+    expect(observed.size).toBe(4);
+    for (const release of releases.splice(0)) release();
+    await vi.waitFor(() => expect(observed.size).toBe(5));
+    registry.dispose();
+    for (const release of releases.splice(0)) release();
+    await polling;
+    expect(maximum).toBeLessThanOrEqual(4);
+  });
+
+  it("disposal during observation prevents notifications and rearming", async () => {
+    registry.dispose();
+    let hint!: (eventType: string) => void;
+    const watch = vi.fn((_target: string, listener: (eventType: string) => void) => {
+      hint = listener;
+      return Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher;
+    });
+    registry = createRegistry({ watch });
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+    let release!: (value: string) => void;
+    const internals = registry as unknown as {
+      observe: (entry: unknown) => Promise<string | null>;
+    };
+    const observe = vi.spyOn(internals, "observe").mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    hint("rename");
+    await vi.waitFor(() => expect(observe).toHaveBeenCalledTimes(1));
+    registry.dispose();
+    release("replacement");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notifications).toEqual([]);
+    expect(watch).toHaveBeenCalledTimes(1);
+  });
+
   it("reports external edits with advancing revisions", async () => {
     await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
 
@@ -118,17 +239,57 @@ describe("WorkspaceWatchRegistry", () => {
   });
 
   it("reports entries added to and renamed within a watched directory", async () => {
+    // The registry consumes OS hints; native directory hints may be coalesced
+    // across both mutations. Inject them to test directory signatures without
+    // relying on platform event-delivery timing or adding periodic I/O.
+    registry.dispose();
+    let hint!: (eventType: string) => void;
+    registry = createRegistry({
+      watch: (_target, listener) => {
+        hint = listener;
+        return Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher;
+      },
+    });
     await registry.setWatchedPaths(client, { cwd: root, files: [], directories: ["src"] });
 
     await fsp.writeFile(path.join(root, "src", "new.ts"), "");
+    hint("rename");
     await waitForChange("client", { relativePath: "src", change: "changed" });
 
     notifications = [];
     await fsp.rename(path.join(root, "src", "new.ts"), path.join(root, "src", "renamed.ts"));
+    hint("rename");
     await waitForChange("client", { relativePath: "src", change: "changed" });
   });
 
+  it("does not poll healthy directory watchers", async () => {
+    registry.dispose();
+    registry = createRegistry({
+      watch: () => Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher,
+    });
+    await registry.setWatchedPaths(client, { cwd: root, files: [], directories: ["src"] });
+    const internals = registry as unknown as {
+      observe: (entry: unknown) => Promise<string | null>;
+    };
+    const observe = vi.spyOn(internals, "observe");
+    vi.useFakeTimers();
+    try {
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(observe).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports a rename within a watched directory whose mtime did not move", async () => {
+    registry.dispose();
+    let hint!: (eventType: string) => void;
+    registry = createRegistry({
+      watch: (_target, listener) => {
+        hint = listener;
+        return Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher;
+      },
+    });
     const dir = path.join(root, "src");
     // Whole seconds, so restoring the mtime yields an identical mtimeMs.
     fs.utimesSync(dir, 1_700_000_000, 1_700_000_000);
@@ -136,6 +297,7 @@ describe("WorkspaceWatchRegistry", () => {
 
     fs.renameSync(path.join(dir, "app.ts"), path.join(dir, "main.ts"));
     fs.utimesSync(dir, 1_700_000_000, 1_700_000_000);
+    hint("rename");
     await waitForChange("client", { relativePath: "src", change: "changed" });
   });
 

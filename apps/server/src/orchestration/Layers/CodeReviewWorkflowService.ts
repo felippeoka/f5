@@ -1,3 +1,4 @@
+import { makeShutdownSourceScope, registerShutdown } from "../../shutdown.ts";
 import { userFacingCauseMessage } from "../../causeMessage.ts";
 import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
 import {
@@ -12,8 +13,8 @@ import {
   type CodeReviewWorkflow,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Cause, Effect, Layer, Stream } from "effect";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { Cause, Effect, Layer, Scope, Stream } from "effect";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { buildFallbackTitle, resolveBestEffortGeneratedTitle } from "../../threadTitle.ts";
@@ -605,6 +606,7 @@ function startConsolidationTurn(input: {
 }
 
 export const makeCodeReviewWorkflowService = Effect.gen(function* () {
+  const sources = yield* makeShutdownSourceScope("code-review-workflows-sources");
   const baseOrchestrationEngine = yield* OrchestrationEngineService;
   const textGeneration = yield* TextGeneration;
   const providerRegistry = yield* Effect.serviceOption(ProviderRegistry);
@@ -667,7 +669,7 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
       );
     });
 
-  const titleGenerationWorker = yield* makeDrainableWorker(
+  const titleGenerationWorker = yield* makeBackgroundWorker(
     (item: CodeReviewWorkflowTitleGenerationWorkItem) =>
       Effect.gen(function* () {
         const snapshot = yield* orchestrationEngine.getReadModel();
@@ -726,6 +728,7 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
           }),
         ),
       ),
+    { name: "CodeReviewWorkflowService", key: (item) => String(item.workflowId) },
   );
 
   const maybeStartConsolidation = (
@@ -1394,6 +1397,8 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
     );
 
   const start: CodeReviewWorkflowServiceShape["start"] = Effect.gen(function* () {
+    if (sources.stopped) return;
+    yield* Effect.addFinalizer(() => sources.stop);
     yield* reconcileStuckWorkflows.pipe(
       Effect.catchCause((cause) =>
         Effect.logError("CodeReviewWorkflowService.reconcileStuckWorkflows failed", {
@@ -1417,7 +1422,11 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
         : domainEvents;
     yield* Stream.runForEach(work, (item) =>
       item.kind === "event" ? handleDomainEvent(item.event) : handleDeliveryOutcome(item.outcome),
-    ).pipe(Effect.forkScoped, Effect.asVoid);
+    ).pipe(
+      Scope.provide(sources.scope),
+      Effect.forkIn(sources.scope, { startImmediately: true }),
+      Effect.asVoid,
+    );
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logError("CodeReviewWorkflowService.start failed", { cause }).pipe(
@@ -1971,6 +1980,15 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
       ),
       Effect.orElseSucceed(() => null),
     );
+
+  yield* registerShutdown(
+    "code-review-workflows-titles",
+    "drain",
+    () => titleGenerationWorker.drain,
+    ["provider-ingestion"],
+  );
+
+  yield* Effect.addFinalizer(() => sources.stop);
 
   return {
     start,

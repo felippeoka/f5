@@ -1,6 +1,7 @@
 import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
 import type {
   NativeOperationCommand,
+  NativeHistoryRecovery,
   NativeOperationRecord,
   OrchestrationThreadActivity,
   ProviderSessionCapabilities,
@@ -115,6 +116,8 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   const { threadId, capabilities, activities, prompt } = props;
   const [records, setRecords] = useState<readonly NativeOperationRecord[]>([]);
   const [tasks, setTasks] = useState<readonly ThreadBackgroundWorkEntry[]>([]);
+  const [historyRecovery, setHistoryRecovery] = useState<NativeHistoryRecovery | null>(null);
+  const [reviewingHistory, setReviewingHistory] = useState(false);
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
   const mounted = useRef(true);
@@ -215,14 +218,19 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
       refreshing = true;
       try {
         const version = mutationVersion.current;
-        const [next, snapshot] = await Promise.all([
+        const [next, snapshot, recovery] = await Promise.all([
           api.nativeOperations.list({ threadId }),
           api.agents.getSnapshot(),
+          api.nativeOperations.historyRecovery?.({ threadId, action: "inspect" }) ??
+            Promise.resolve(null),
         ]);
         if (alive) {
           // A poll that started before a local receipt is older than that
           // receipt; the next poll replaces the list authoritatively.
-          if (version === mutationVersion.current) setRecords(next);
+          if (version === mutationVersion.current) {
+            setRecords(next);
+            setHistoryRecovery(recovery);
+          }
           setTasks(snapshot.entries.filter((entry) => entry.threadId === threadId));
           setNowMs(Date.now());
         }
@@ -455,10 +463,64 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
         .join(" · ")
     : null;
 
-  if (!capabilities) return null;
+  if (!capabilities && !historyRecovery) return null;
 
   return (
     <>
+      {historyRecovery ? (
+        <div className={ROW_CLASS_NAME} role="status">
+          <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">Provider history is incomplete</span>
+          <Button size="xs" variant="outline" onClick={() => setReviewingHistory(true)}>
+            Review recovery
+          </Button>
+        </div>
+      ) : null}
+      <AlertDialog open={reviewingHistory} onOpenChange={setReviewingHistory}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Accept incomplete provider history?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Some provider output could not be saved, including reasoning, tools or images.
+              Continuing accepts incomplete local history and stops the provider. It will not resend
+              the interrupted turn.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" disabled={busy} />}>
+              Cancel
+            </AlertDialogClose>
+            <Button
+              disabled={busy || !historyRecovery}
+              onClick={() => {
+                const api = readNativeApi()?.nativeOperations;
+                if (!api?.historyRecovery || !historyRecovery || busy) return;
+                setBusy(true);
+                mutationVersion.current++;
+                void api
+                  .historyRecovery({ threadId, action: "acknowledge", expected: historyRecovery })
+                  .then((current) => {
+                    if (mounted.current) {
+                      setHistoryRecovery(current);
+                      setReviewingHistory(false);
+                    }
+                  })
+                  .catch((cause) =>
+                    showError(
+                      "History recovery failed",
+                      errorMessage(cause, "Review the current provider history before retrying."),
+                    ),
+                  )
+                  .finally(() => {
+                    if (mounted.current) setBusy(false);
+                  });
+              }}
+            >
+              Stop provider and accept incomplete history
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
       {rows.map((row) => {
         switch (row.kind) {
           case "suggestion":

@@ -2,6 +2,8 @@ import { McpAppFrame } from "./McpAppFrame";
 import { ThreadFindContext } from "./threadFindContext";
 import { highlightThreadFind } from "./threadFindHighlights";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
+import { recordTimelineRowRender } from "../../lib/performanceCounters";
+import { messageTextRevision, messageReasoningContent } from "../../lib/streamingTextRevision";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
 import type { PromptLinkRepository } from "@t3tools/shared/promptLinks";
 import { NativeFilePreview } from "./NativeFilePreview";
@@ -38,6 +40,7 @@ import type { InlineFileChangeDiffProps } from "./InlineFileChangeDiff";
 import { LegendList, type LegendListRef, type OnViewableItemsChanged } from "@legendapp/list/react";
 import {
   deriveTimelineEntries,
+  timelineEntriesStructure,
   formatDuration,
   formatElapsed,
   type LiveWorkActivity,
@@ -555,6 +558,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const requestOlderHistory = useCallback(() => {
     if (
       !hasOlderHistory ||
+      initialScrollAtEndEnabled ||
       isLoadingOlderHistory ||
       hasHistoryLoadError ||
       !onLoadOlderHistory ||
@@ -562,6 +566,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ) {
       return;
     }
+    const node = listRef.current?.getScrollableNode?.();
+    if (
+      !(node instanceof HTMLElement) ||
+      (isAtEndRef.current && node.scrollHeight > node.clientHeight + 2)
+    )
+      return;
     const controller = new AbortController();
     historyLoadControllerRef.current = controller;
     void onLoadOlderHistory(controller.signal)
@@ -575,7 +585,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           historyLoadControllerRef.current = null;
         }
       });
-  }, [hasHistoryLoadError, hasOlderHistory, isLoadingOlderHistory, onLoadOlderHistory]);
+  }, [
+    hasHistoryLoadError,
+    hasOlderHistory,
+    initialScrollAtEndEnabled,
+    isLoadingOlderHistory,
+    listRef,
+    onLoadOlderHistory,
+  ]);
   const handleViewableItemsChanged = useCallback<NonNullable<OnViewableItemsChanged<TimelineRow>>>(
     ({ viewableItems }) => {
       const firstVisibleIndex = viewableItems.reduce(
@@ -672,7 +689,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         return;
       }
       isAtEndRef.current = true;
-      list.scrollToEnd?.({ animated: true });
+      // A submitted turn can be thousands of virtual rows away. Jump to its
+      // measured tail instead of animating through estimated intermediate rows.
+      list.scrollToEnd?.({ animated: !followRequested });
       onIsAtEndChange(true);
     };
     frame = window.requestAnimationFrame(scrollToEndWhenReady);
@@ -815,7 +834,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const handleScroll = useCallback(() => {
     syncIsAtEndFromListState();
-  }, [syncIsAtEndFromListState]);
+    if (!isAtEndRef.current && pendingViewableRowIndexRef.current <= 3) requestOlderHistory();
+  }, [requestOlderHistory, syncIsAtEndFromListState]);
 
   // A disclosure toggled at the end keeps the end in view while rows re-measure.
   // Anywhere else, maintainVisibleContentPosition holds the toggled row in place.
@@ -1499,6 +1519,7 @@ const TimelineRowWrapper = memo(function TimelineRowWrapper({
       clear();
     };
   }, [active, find]);
+  recordTimelineRowRender(row.id);
   return (
     <div
       ref={element}
@@ -3931,7 +3952,8 @@ function AssistantMessageRowContent(props: {
   const { row, externals } = props;
   const { markdownCwd, showReasoningExpanded, timestampFormat } = useTimelineRowContext();
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-  const reasoningText = row.message.reasoningText?.trim();
+  const reasoning = messageReasoningContent(row.message);
+  const reasoningText = reasoning.text;
   const isStreamingReasoning =
     Boolean(row.message.streaming) && row.message.text.length === 0 && Boolean(reasoningText);
   return (
@@ -3949,6 +3971,7 @@ function AssistantMessageRowContent(props: {
         {reasoningText ? (
           <ReasoningSection
             reasoningText={reasoningText}
+            textRevision={reasoning.revision}
             defaultExpanded={showReasoningExpanded}
             isStreaming={isStreamingReasoning}
             cwd={markdownCwd}
@@ -3963,6 +3986,7 @@ function AssistantMessageRowContent(props: {
         >
           <ChatMarkdown
             text={messageText}
+            textRevision={messageTextRevision(row.message)}
             cwd={markdownCwd}
             isStreaming={Boolean(row.message.streaming)}
           />
@@ -4233,12 +4257,16 @@ function sameRowInputs(left: ReadonlyArray<unknown>, right: ReadonlyArray<unknow
  * current build are pruned.
  */
 export interface TimelineRowCache {
+  structure?: object | undefined;
+  parameters?: ReadonlyArray<unknown>;
+  structuralDerivations: number;
+  contentUpdates: number;
   rows: Map<string, { readonly inputs: ReadonlyArray<unknown>; readonly row: TimelineRow }>;
   result: TimelineRow[] | null;
 }
 
 export function createTimelineRowCache(): TimelineRowCache {
-  return { rows: new Map(), result: null };
+  return { rows: new Map(), result: null, structuralDerivations: 0, contentUpdates: 0 };
 }
 
 export function buildTimelineRows(input: {
@@ -4252,6 +4280,49 @@ export function buildTimelineRows(input: {
   cache: TimelineRowCache;
 }): TimelineRow[] {
   const { timelineEntries, cache } = input;
+  const structure = timelineEntriesStructure(timelineEntries);
+  const parameters = [
+    input.completionDividerBeforeEntryId,
+    input.completionSummary,
+    input.isWorking,
+    input.activeTurnStartedAt,
+    input.liveActivity,
+    input.expandMcpToolCalls,
+  ];
+  if (
+    structure &&
+    cache.structure === structure &&
+    cache.result &&
+    cache.parameters &&
+    sameRowInputs(cache.parameters, parameters)
+  ) {
+    const messages = new Map(
+      timelineEntries.flatMap((entry) =>
+        entry.kind === "message" ? [[entry.id, entry.message] as const] : [],
+      ),
+    );
+    let changed = false;
+    const result = cache.result.map((row) => {
+      if (row.kind !== "message") return row;
+      const message = messages.get(row.id);
+      if (!message || message === row.message) return row;
+      changed = true;
+      const next = { ...row, message };
+      const entry = cache.rows.get(row.id)!;
+      const inputs = [...entry.inputs];
+      inputs[1] = message;
+      cache.rows.set(row.id, { inputs, row: next });
+      return next;
+    });
+    if (changed) {
+      cache.contentUpdates++;
+      cache.result = result;
+    }
+    return cache.result;
+  }
+  cache.structure = structure;
+  cache.parameters = parameters;
+  cache.structuralDerivations++;
   const nextCacheRows: TimelineRowCache["rows"] = new Map();
   const reuse = <R extends TimelineRow>(
     id: string,

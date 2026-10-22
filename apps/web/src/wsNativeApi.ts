@@ -759,6 +759,8 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     server: {
+      reportClientDiagnostics: (input) =>
+        transport.request(WS_METHODS.serverReportClientDiagnostics, input, { trackLatency: false }),
       getClaudeTranscriptRepair: (input) =>
         transport.request(WS_METHODS.serverGetClaudeTranscriptRepair, input),
       repairClaudeTranscript: (input) =>
@@ -953,6 +955,8 @@ export function createWsNativeApi(): NativeApi {
       getQuotaHistory: () => transport.request(USAGE_WS_METHODS.getQuotaHistory, {}),
     },
     nativeOperations: {
+      historyRecovery: (input) =>
+        transport.request(NATIVE_OPERATION_WS_METHODS.historyRecovery, input),
       resolve: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.resolve, input),
       fork: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.fork, input),
       execute: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.execute, input),
@@ -1049,6 +1053,7 @@ export function createWsNativeApi(): NativeApi {
       onAdvisoriesUpdated: (callback) => onPrHubAdvisoriesUpdated(callback),
     },
     orchestration: {
+      getLatestSequence: () => transport.request(ORCHESTRATION_WS_METHODS.getLatestSequence),
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       getStartupSnapshot: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getStartupSnapshot, input),

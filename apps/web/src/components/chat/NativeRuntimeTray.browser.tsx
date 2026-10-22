@@ -4,6 +4,8 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 import {
   ThreadId,
+  ProviderInstanceId,
+  type NativeHistoryRecovery,
   type NativeOperationRecord,
   type ThreadBackgroundWorkEntry,
 } from "@t3tools/contracts";
@@ -18,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
   execute: vi.fn(),
   inspect: vi.fn(),
+  historyRecovery: vi.fn(async (): Promise<NativeHistoryRecovery | null> => null),
 }));
 vi.mock("../../nativeApi", () => ({
   readNativeApi: () => ({
@@ -26,6 +29,7 @@ vi.mock("../../nativeApi", () => ({
       resolve: mocks.resolve,
       execute: mocks.execute,
       inspect: mocks.inspect,
+      historyRecovery: mocks.historyRecovery,
     },
     agents: { getSnapshot: mocks.snapshot },
   }),
@@ -97,11 +101,70 @@ describe("NativeRuntimeTray", () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     mocks.list.mockResolvedValue([]);
+    mocks.historyRecovery.mockResolvedValue(null);
     mocks.snapshot.mockResolvedValue({ entries: [] });
   });
   afterEach(() => {
     vi.useRealTimers();
     document.body.innerHTML = "";
+  });
+
+  it("requires confirmation before accepting incomplete non-text history and sends its exact fence", async () => {
+    const expected = {
+      instanceId: ProviderInstanceId.make("codex"),
+      generation: 4,
+      eventId: "missing-reasoning-tools-images",
+    };
+    mocks.historyRecovery.mockResolvedValue(expected);
+    const screen = await render(<NativeRuntimeTray {...props} prompt="unsent draft" />);
+    try {
+      await expect.element(page.getByText("Provider history is incomplete")).toBeVisible();
+      expect(mocks.historyRecovery).toHaveBeenCalledWith({ threadId, action: "inspect" });
+      await page.getByRole("button", { name: "Review recovery", exact: true }).click();
+      await expect.element(page.getByText(/including reasoning, tools or images/)).toBeVisible();
+      expect(mocks.historyRecovery).toHaveBeenCalledTimes(1);
+      mocks.historyRecovery.mockResolvedValue(null);
+      await page
+        .getByRole("button", { name: "Stop provider and accept incomplete history", exact: true })
+        .click();
+      await expect.poll(() => mocks.historyRecovery.mock.calls.length).toBe(2);
+      expect(mocks.historyRecovery).toHaveBeenLastCalledWith({
+        threadId,
+        action: "acknowledge",
+        expected,
+      });
+      await expect
+        .element(page.getByText("Provider history is incomplete"))
+        .not.toBeInTheDocument();
+      expect(mocks.execute).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps the recovery warning when a stale acknowledgement fails", async () => {
+    const marker = {
+      instanceId: ProviderInstanceId.make("codex"),
+      generation: 3,
+      eventId: "old-marker",
+    };
+    mocks.historyRecovery.mockResolvedValue(marker);
+    const screen = await render(<NativeRuntimeTray {...props} prompt="keep draft" />);
+    const errors = vi.spyOn(toastManager, "add");
+    try {
+      await page.getByRole("button", { name: "Review recovery", exact: true }).click();
+      mocks.historyRecovery.mockRejectedValue(new Error("The provider session changed."));
+      await page
+        .getByRole("button", { name: "Stop provider and accept incomplete history", exact: true })
+        .click();
+      await expect.poll(() => errors.mock.calls.length).toBe(1);
+      await expect.element(page.getByText("Provider history is incomplete")).toBeVisible();
+      await expect.element(page.getByRole("alertdialog")).toBeVisible();
+      expect(mocks.execute).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+      await screen.unmount();
+    }
   });
 
   it("renders nothing for an idle thread", async () => {

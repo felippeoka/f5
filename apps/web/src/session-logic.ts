@@ -1,5 +1,7 @@
 import { readMcpAppView, type McpAppView } from "@t3tools/shared/mcpApp";
 import { HtmlRenderReference } from "@t3tools/contracts";
+import { recordBrowserWork } from "./lib/performanceCounters";
+import { messageListStructure } from "./lib/streamingTextRevision";
 import { Schema } from "effect";
 import {
   AGENT_BRIDGE_TURN_SUBMITTED_ACTIVITY_KIND,
@@ -1922,13 +1924,23 @@ export function hasToolActivityForTurn(
  * object, and an unchanged entry list keeps its previous array, so memoized
  * timeline rows only re-render when their own entry changed.
  */
+const timelineStructures = new WeakMap<ReadonlyArray<TimelineEntry>, object>();
+export const timelineEntriesStructure = (
+  entries: ReadonlyArray<TimelineEntry>,
+): object | undefined => timelineStructures.get(entries);
+const EMPTY_COMMAND_EXECUTIONS: ReadonlyArray<OrchestrationCommandExecutionSummary> = [];
+
 export interface TimelineEntryCache {
+  structure?: object;
+  otherSources?: ReadonlyArray<unknown>;
+  structuralDerivations: number;
+  contentUpdates: number;
   entries: Map<string, { readonly sources: ReadonlyArray<unknown>; readonly entry: TimelineEntry }>;
   result: TimelineEntry[] | null;
 }
 
 export function createTimelineEntryCache(): TimelineEntryCache {
-  return { entries: new Map(), result: null };
+  return { entries: new Map(), result: null, structuralDerivations: 0, contentUpdates: 0 };
 }
 
 function sameSources(left: ReadonlyArray<unknown>, right: ReadonlyArray<unknown>): boolean {
@@ -1941,9 +1953,43 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
-  commandExecutions: ReadonlyArray<OrchestrationCommandExecutionSummary> = [],
+  commandExecutions: ReadonlyArray<OrchestrationCommandExecutionSummary> = EMPTY_COMMAND_EXECUTIONS,
   cache?: TimelineEntryCache,
 ): TimelineEntry[] {
+  const structure = messageListStructure(messages);
+  const otherSources = [proposedPlans, workEntries, commandExecutions];
+  if (
+    cache?.result &&
+    cache.structure === structure &&
+    cache.otherSources &&
+    sameSources(cache.otherSources, otherSources)
+  ) {
+    const byId = new Map<string, ChatMessage>(messages.map((message) => [message.id, message]));
+    let changed = false;
+    const result = cache.result.map((entry) => {
+      if (entry.kind !== "message") return entry;
+      const message = byId.get(entry.id);
+      if (!message || message === entry.message) return entry;
+      changed = true;
+      const next = { ...entry, message };
+      cache.entries.set(entry.id, { sources: [message], entry: next });
+      return next;
+    });
+    if (changed) {
+      const identity = timelineStructures.get(cache.result);
+      if (identity) timelineStructures.set(result, identity);
+      cache.contentUpdates++;
+      recordBrowserWork("timelineContentUpdates");
+      cache.result = result;
+    }
+    return cache.result;
+  }
+  if (cache) {
+    cache.structure = structure;
+    cache.otherSources = otherSources;
+    cache.structuralDerivations++;
+    recordBrowserWork("timelineDerivations");
+  }
   const nextCacheEntries: TimelineEntryCache["entries"] = new Map();
   const reuse = (
     id: string,
@@ -2043,6 +2089,7 @@ export function deriveTimelineEntries(
     ...uncorrelatedDiagnosticRows,
     ...commandRows,
   ].toSorted(compareTimelineEntries);
+  timelineStructures.set(result, {});
   if (!cache) return result;
   cache.entries = nextCacheEntries;
   if (cache.result && sameSources(cache.result, result)) return cache.result;

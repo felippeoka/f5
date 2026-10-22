@@ -258,6 +258,7 @@ const RuntimeWarningType = Schema.Literal("runtime.warning");
 const RuntimeErrorType = Schema.Literal("runtime.error");
 
 const ProviderRuntimeEventBase = Schema.Struct({
+  sessionGeneration: Schema.optional(NonNegativeInt),
   eventId: EventId,
   provider: ProviderKind,
   providerInstanceId: Schema.optional(ProviderInstanceId),
@@ -714,6 +715,7 @@ const RuntimeWarningPayload = Schema.Struct({
 export type RuntimeWarningPayload = typeof RuntimeWarningPayload.Type;
 
 const RuntimeErrorPayload = Schema.Struct({
+  historyReconciliationRequired: Schema.optional(Schema.Boolean),
   usageLimit: Schema.optional(RuntimeUsageLimit),
   message: TrimmedNonEmptyStringSchema,
   class: Schema.optional(RuntimeErrorClass),

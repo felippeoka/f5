@@ -80,7 +80,7 @@ import {
   MAX_THREAD_MESSAGES,
   MAX_THREAD_PROPOSED_PLANS,
 } from "./readModelRetention.ts";
-import { canRepairErroredTurnFromSuccessfulSettlement } from "./turnStateTransitions.ts";
+import { projectLatestTurnSession } from "@t3tools/shared/turnStateTransitions";
 import { revertTaskToolState } from "@t3tools/shared/claudeTaskToolProjection";
 import { mergeSessionCapabilities } from "../provider/sessionCapabilities.ts";
 
@@ -90,21 +90,6 @@ function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error"
   if (status === "error") return "error" as const;
   if (status === "missing") return "interrupted" as const;
   return "completed" as const;
-}
-
-function terminalLatestTurnStateForSessionStatus(
-  status: OrchestrationSession["status"],
-): "completed" | "error" | "interrupted" | null {
-  if (status === "ready") {
-    return "completed";
-  }
-  if (status === "error") {
-    return "error";
-  }
-  if (status === "stopped") {
-    return "interrupted";
-  }
-  return null;
 }
 
 function messageCharacters(
@@ -1299,57 +1284,10 @@ export function projectEvent(
             ? { workflowExecutionProfile: thread.session.workflowExecutionProfile }
             : {}),
         };
-        const terminalState = terminalLatestTurnStateForSessionStatus(nextSession.status);
-        const repairsErroredTurn =
-          terminalState === "completed" &&
-          thread.latestTurn !== null &&
-          canRepairErroredTurnFromSuccessfulSettlement({
-            currentTurnId: thread.latestTurn.turnId,
-            currentState: thread.latestTurn.state,
-            completedAt: thread.latestTurn.completedAt,
-            settledTurnId: payload.settledTurnId,
-            settlementAt: nextSession.updatedAt,
-          });
-        const latestTurn =
-          nextSession.status === "running" && nextSession.activeTurnId !== null
-            ? {
-                turnId: nextSession.activeTurnId,
-                state: "running" as const,
-                requestedAt:
-                  thread.latestTurn?.turnId === nextSession.activeTurnId
-                    ? thread.latestTurn.requestedAt
-                    : nextSession.updatedAt,
-                startedAt:
-                  thread.latestTurn?.turnId === nextSession.activeTurnId
-                    ? (thread.latestTurn.startedAt ?? nextSession.updatedAt)
-                    : nextSession.updatedAt,
-                completedAt: null,
-                processingQuiescedAt: null,
-                assistantMessageId:
-                  thread.latestTurn?.turnId === nextSession.activeTurnId
-                    ? thread.latestTurn.assistantMessageId
-                    : null,
-                ...(nextSession.workflowExecutionProfile
-                  ? { workflowExecutionProfile: nextSession.workflowExecutionProfile }
-                  : {}),
-              }
-            : thread.latestTurn?.state === "running" &&
-                terminalState !== null &&
-                (payload.settledTurnId === undefined ||
-                  thread.latestTurn.turnId === payload.settledTurnId)
-              ? {
-                  ...thread.latestTurn,
-                  state: terminalState,
-                  startedAt: thread.latestTurn.startedAt ?? nextSession.updatedAt,
-                  completedAt: nextSession.updatedAt,
-                }
-              : repairsErroredTurn && thread.latestTurn
-                ? {
-                    ...thread.latestTurn,
-                    state: "completed" as const,
-                    completedAt: nextSession.updatedAt,
-                  }
-                : thread.latestTurn;
+        const latestTurn = projectLatestTurnSession(thread.latestTurn, {
+          session: nextSession,
+          settledTurnId: payload.settledTurnId,
+        });
 
         return {
           ...nextBase,

@@ -1,3 +1,4 @@
+import ChatMarkdown from "./ChatMarkdown";
 import { RepositoryLinks } from "../repositoryLinkContext";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -50,7 +51,6 @@ const STREAMING_FIXTURE = [
 const SETTLED_FIXTURE = `${STREAMING_FIXTURE}\n\`\`\``;
 
 async function renderMarkup(text: string, isStreaming: boolean): Promise<string> {
-  const { default: ChatMarkdown } = await import("./ChatMarkdown");
   return renderToStaticMarkup(
     <ChatMarkdown text={text} cwd="/tmp/project" isStreaming={isStreaming} />,
   );
@@ -86,7 +86,6 @@ describe("ChatMarkdown streaming vs settled rendering", () => {
 });
 
 it("links repository references in rendered chat without changing code or existing links", async () => {
-  const { default: ChatMarkdown } = await import("./ChatMarkdown");
   const html = renderToStaticMarkup(
     <RepositoryLinks.Provider
       value={{ provider: "gitlab", webUrl: "https://gitlab.example/team/app" }}
@@ -120,7 +119,6 @@ it("leaves a file link with an unclosed angle-bracket destination as literal tex
 
 describe("ChatMarkdown external-bot policy", () => {
   const render = async (text: string) => {
-    const { default: ChatMarkdown } = await import("./ChatMarkdown");
     return renderToStaticMarkup(
       <RepositoryLinks.Provider value={{ provider: "github", webUrl: "https://github.com/o/r" }}>
         <ChatMarkdown text={text} cwd="/tmp/project" policy="external-bot" />

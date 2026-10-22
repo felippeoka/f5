@@ -1,3 +1,4 @@
+import { SETTINGS_CATEGORY_ICONS } from "./settingsCategoryIcons";
 import { useServerCapability } from "../../protocolState";
 import { SearchIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -36,7 +37,6 @@ import { cn } from "../../lib/utils";
 import { SectionLabel } from "../ui/section-label";
 import { resolveSettingsSearchShortcut } from "./settingsSearchShortcut";
 import {
-  SETTINGS_CATEGORY_ICONS,
   SETTINGS_CATEGORY_LABELS,
   filterSettingsItems,
   getSettingsItemDescriptor,

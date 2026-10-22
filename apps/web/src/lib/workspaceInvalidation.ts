@@ -1,8 +1,8 @@
 import type { OrchestrationEvent, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 
-import { projectQueryKeys } from "./projectReactQuery";
-import { providerQueryKeys } from "./providerReactQuery";
+import { projectQueryKeys } from "./projectQueryKeys";
+import { providerQueryKeys } from "./providerQueryKeys";
 import { isWorkspaceWatchReliable } from "./workspaceWatch";
 
 /**

@@ -1684,7 +1684,10 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "f5Shas": ["553ee4c282c6a3e5e811903ef80abc1b659bf11a"],
-      "evidence": ["apps/web/src/routes/__root.tsx:1196", "apps/web/src/lib/serverReactQuery.ts:10"]
+      "evidence": [
+        "apps/web/src/orchestration/syncController.ts:912",
+        "apps/web/src/lib/serverReactQuery.ts:10"
+      ]
     },
     {
       "upstreamSha": "0c5771d60a8ef2db34dfbbc142f7524badc829e0",
@@ -5336,7 +5339,7 @@
       ],
       "evidence": [
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13165",
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13960"
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13850"
       ]
     },
     {
@@ -10610,7 +10613,7 @@
     {
       "upstreamSha": "4befc863f54a3341911c346c8822286ec37e54af",
       "subject": "perf(server): traces keep ~40% more history and no longer block the event loop (#19430)",
-      "reason": "Ported: trace writes and rotation run in a separate writer process, and provider event logs now use an asynchronous rotating sink with one write at a time, a bound on chunks waiting behind a slow write, counted drops and failures, and a 2-second drain on close. Upstream's orchestration-v2 event-sink span change does not apply. Upstream change: perf(server): traces keep ~40% more history and no longer block the event loop (#19430)",
+      "reason": "Ported: trace writes and rotation run in a separate writer process, and provider event logs are written asynchronously. After merging main, provider logs use main's asynchronous provider log writer (logWriterRegistry.ts), which bounds queued records and counts failures; it replaced this branch's own asynchronous rotating sink. Upstream's orchestration-v2 event-sink span change does not apply. Upstream change: perf(server): traces keep ~40% more history and no longer block the event loop (#19430)",
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "15b",
@@ -10620,8 +10623,8 @@
       ],
       "evidence": [
         "apps/server/src/observability/TraceSink.test.ts:222",
-        "packages/shared/src/logging.test.ts:19",
-        "apps/server/src/provider/Layers/EventNdjsonLogger.ts:149"
+        "apps/server/src/provider/Layers/EventNdjsonLogger.test.ts:128",
+        "apps/server/src/provider/Layers/EventNdjsonLogger.ts:175"
       ]
     },
     {
@@ -12932,7 +12935,7 @@
       ],
       "evidence": [
         "apps/web/src/appSettings.ts:1230",
-        "apps/web/src/routes/__root.tsx:340",
+        "apps/web/src/routes/__root.tsx:122",
         "apps/web/src/hooks/useSettings.browser.tsx:202",
         "apps/web/src/components/ChatView.browser.tsx:8441"
       ]
@@ -15395,7 +15398,7 @@
       "f5Shas": ["7532d9212398154a3b444fdb22dcada43ff2a5c2"],
       "evidence": [
         "apps/web/src/components/chat/MessagesTimeline.tsx:4216",
-        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:3674"
+        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:3395"
       ]
     },
     {
@@ -15771,7 +15774,7 @@
         "apps/server/src/provider/Layers/ProviderService.test.ts:4179",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:1234",
         "apps/server/src/orchestration/Layers/TurnLifecycle.test.ts:365",
-        "apps/server/src/persistence/Migrations/130_RestartBackgroundWork.test.ts:8"
+        "apps/server/src/persistence/Migrations/133_RestartBackgroundWork.test.ts:8"
       ]
     },
     {
@@ -21075,7 +21078,7 @@
       "evidence": [
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7423",
         "apps/server/src/provider/claudeSubagentSelection.test.ts:14",
-        "apps/server/src/persistence/Migrations/129_BackgroundWorkEffort.test.ts:7",
+        "apps/server/src/persistence/Migrations/132_BackgroundWorkEffort.test.ts:7",
         "apps/web/src/components/AgentsPanel.browser.tsx:229"
       ]
     },
@@ -24060,7 +24063,7 @@
       "plannedWorkstream": "15r",
       "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
       "evidence": [
-        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13960",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13850",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13079",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13165"
       ]
@@ -25680,7 +25683,10 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "f5Shas": ["553ee4c282c6a3e5e811903ef80abc1b659bf11a"],
-      "evidence": ["apps/web/src/routes/__root.tsx:1196", "apps/web/src/lib/serverReactQuery.ts:10"]
+      "evidence": [
+        "apps/web/src/orchestration/syncController.ts:912",
+        "apps/web/src/lib/serverReactQuery.ts:10"
+      ]
     },
     {
       "upstreamSha": "bc8584bf8e967ecc1cd215d42bd7a47faf51a862",
@@ -30708,7 +30714,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1d",
       "evidence": [
-        "apps/web/src/routes/__root.tsx:510",
+        "apps/web/src/orchestration/syncController.ts:328",
         "apps/web/src/components/FileViewPanel.browser.tsx:1"
       ],
       "f5Shas": [
@@ -32509,7 +32515,7 @@
       "disposition": "equivalent",
       "f5Shas": ["d6ec48f17c2808edcd1cffb9db041e0e44bc0e9e"],
       "evidence": [
-        "apps/web/src/routes/__root.tsx:326",
+        "apps/web/src/routes/__root.tsx:130",
         "apps/web/src/components/ChatView.browser.tsx:8367"
       ]
     },

@@ -47,6 +47,10 @@ export interface ProviderThreadTurnSnapshot {
 
 /** Evidence is internal; absent metadata is never authoritative history. */
 export interface ProviderHistoryEvidence {
+  readonly origin?: {
+    readonly instanceId: import("@t3tools/contracts").ProviderInstanceId;
+    readonly generation: number;
+  };
   readonly sessionOrigin?: "fresh" | "resumed" | "unknown";
   readonly identity: string | null;
   readonly provenance: "provider-persisted" | "runtime-local" | "unavailable";
@@ -235,6 +239,10 @@ export interface ProviderAdapterShape<TError> {
   /**
    * Read a provider thread snapshot.
    */
+  readonly acknowledgeHistoryReconciliation?: (
+    threadId: ThreadId,
+    markerId: string,
+  ) => Effect.Effect<void>;
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;
 
   /**

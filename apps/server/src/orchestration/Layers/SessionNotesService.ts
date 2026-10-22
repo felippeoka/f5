@@ -1,11 +1,12 @@
+import { registerShutdown } from "../../shutdown.ts";
 import {
   CommandId,
   ThreadSessionNotes,
   type OrchestrationEvent,
   type ThreadId,
 } from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { Data, Effect, Layer, Schema, Stream } from "effect";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
+import { Data, Effect, Fiber, Layer, Schema, Stream } from "effect";
 
 import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { roughTokenEstimateFromCharacters } from "../../provider/providerContext.ts";
@@ -525,22 +526,35 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const worker = yield* makeDrainableWorker((threadId: ThreadId) =>
-    Effect.sync(() => {
-      queuedThreadIds.delete(threadId);
-    }).pipe(
-      Effect.flatMap(() => refreshThreadNotes(threadId)),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("session notes refresh failed", {
-          threadId,
-          cause: String(cause),
-        }),
+  const worker = yield* makeBackgroundWorker(
+    (threadId: ThreadId) =>
+      Effect.sync(() => {
+        queuedThreadIds.delete(threadId);
+      }).pipe(
+        Effect.flatMap(() => refreshThreadNotes(threadId)),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("session notes refresh failed", {
+            threadId,
+            cause: String(cause),
+          }),
+        ),
       ),
-    ),
+    { name: "SessionNotesService", key: (item) => String(item) },
   );
 
-  const start: SessionNotesServiceShape["start"] = Effect.forkScoped(
-    Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+  let stopping = false;
+  let subscriber: Fiber.Fiber<void, never> | undefined;
+  yield* registerShutdown("session-notes-source", "admission", () =>
+    Effect.gen(function* () {
+      stopping = true;
+      if (subscriber) yield* Fiber.interrupt(subscriber);
+    }),
+  );
+  yield* registerShutdown("session-notes-work", "drain", () => worker.drain);
+  const start: SessionNotesServiceShape["start"] = Effect.gen(function* () {
+    if (stopping || subscriber) return;
+    subscriber = yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+      if (stopping) return Effect.void;
       if (
         event.type !== "thread.session-set" &&
         event.type !== "thread.compacted" &&
@@ -556,8 +570,8 @@ const make = Effect.gen(function* () {
       }
       queuedThreadIds.add(event.payload.threadId);
       return worker.enqueue(event.payload.threadId);
-    }),
-  ).pipe(Effect.asVoid);
+    }).pipe(Effect.forkScoped({ startImmediately: true }));
+  });
 
   return {
     start,

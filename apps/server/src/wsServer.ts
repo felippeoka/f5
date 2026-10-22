@@ -12,6 +12,10 @@ import { makeThreadToolHandler } from "./mcp/threadToolRuntime.ts";
 import { PrHubFederation } from "./prHub/Layers/PrHubFederation.ts";
 import { PrHubReviewGuideService } from "./prHub/Layers/PrHubReviewGuideService.ts";
 import { publicOtlpConfiguration, resolveOtlpConfiguration } from "@t3tools/shared/observability";
+import { registerShutdown, ServerShutdown } from "./shutdown.ts";
+import { streamFileHandle } from "./assetHttp.ts";
+import { makeSocketLiveness, closeSocketsWithin } from "./wsServer/socketLiveness.ts";
+import { makeClientDiagnosticsReporter } from "./observability/clientDiagnostics.ts";
 import { withProviderThreadAccess } from "./provider/providerThreadAccess.ts";
 import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
 import { McpServerWriteDefinition } from "@t3tools/contracts";
@@ -19,7 +23,10 @@ import { makeMcpAccountExecutionResolver } from "./mcp/accountExecution.ts";
 import { detectMcpImports } from "./mcp/McpImportDetection.ts";
 import { probeMcpServer } from "./mcp/McpProbe.ts";
 import { resolveMcpSecrets } from "./mcp/McpSecretResolver.ts";
-import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
+import {
+  OrchestrationCommandInvariantError,
+  OrchestrationOverloadError,
+} from "./orchestration/Errors.ts";
 import {
   WorkspaceRequiresNewWorktreeError,
   GitWorkspaceSwitch,
@@ -399,6 +406,9 @@ export interface ServerShape {
 export class Server extends ServiceMap.Service<Server, ServerShape>()("t3/wsServer/Server") {}
 
 type SubmissionSource = "human" | "automation";
+
+const clientDiagnosticsReporter = makeClientDiagnosticsReporter();
+const BACKEND_INCARNATION = process.env.F5_DESKTOP_BACKEND_INCARNATION || crypto.randomUUID();
 
 const DESKTOP_RENDERER_ORIGIN = "t3://app";
 const PRIVATE_CORS_METHODS = new Set(["GET", "POST"]);
@@ -869,8 +879,11 @@ function formatRouteFailure(
   readonly message: string;
   readonly code?: string;
   readonly checkoutConflict?: GitCheckoutConflict;
+  readonly retryable?: boolean;
 } {
   const squashed = Cause.squash(cause);
+  if (Schema.is(OrchestrationOverloadError)(squashed))
+    return { message: squashed.message, code: squashed._tag, retryable: squashed.retryable };
   if (
     method === WS_METHODS.gitCheckout &&
     Schema.is(GitCommandError)(squashed) &&
@@ -988,6 +1001,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const gitManager = yield* GitManager;
   const terminalManager = yield* TerminalManager;
+  const shutdown = yield* Effect.serviceOption(ServerShutdown);
+  let shuttingDown = false;
+  yield* registerShutdown("websocket-admission", "admission", () =>
+    Effect.sync(() => {
+      shuttingDown = true;
+    }),
+  );
   const keybindingsManager = yield* Keybindings;
   const providerService = yield* ProviderService;
   const elicitationSubmissionsInFlight = new Set<string>();
@@ -2449,42 +2469,47 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           }
         }
 
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          respond(405, { Allow: "GET, HEAD" }, "Method not allowed");
+          return;
+        }
         const fileInfo = yield* fileSystem
           .stat(filePath)
           .pipe(Effect.catch(() => Effect.succeed(null)));
         if (!fileInfo || fileInfo.type !== "File") {
-          const indexPath = path.resolve(staticRoot, "index.html");
-          const indexData = yield* fileSystem
-            .readFile(indexPath)
-            .pipe(Effect.catch(() => Effect.succeed(null)));
-          if (!indexData) {
+          const wantsHtml =
+            req.headers["sec-fetch-mode"] === "navigate" ||
+            /(?:^|,)\s*text\/html(?:[;,]|$)/i.test(req.headers.accept ?? "");
+          const bundleRequest =
+            rawStaticRelativePath.startsWith("assets/") ||
+            /\.(?:[cm]?js|css|map|wasm|woff2?|ttf|otf|png|jpe?g|gif|svg|webp|ico)$/i.test(
+              rawStaticRelativePath,
+            );
+          if (!wantsHtml || bundleRequest) {
             respond(404, { "Content-Type": "text/plain" }, "Not Found");
             return;
           }
-          respond(
-            200,
-            { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
-            indexData,
-          );
-          return;
+          filePath = path.resolve(staticRoot, "index.html");
         }
-
+        const relative = path.relative(staticRoot, filePath);
+        const fingerprinted =
+          relative.startsWith(`assets${path.sep}`) && /-[a-zA-Z0-9_]{8,}\.[^.]+$/.test(relative);
         const contentType = Mime.getType(filePath) ?? "application/octet-stream";
-        const data = yield* fileSystem
-          .readFile(filePath)
-          .pipe(Effect.catch(() => Effect.succeed(null)));
-        if (!data) {
-          respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
-          return;
-        }
-        respond(
-          200,
-          {
-            "Content-Type": contentType,
-            ...(path.basename(filePath) === "index.html" ? { "Cache-Control": "no-cache" } : {}),
-          },
-          data,
-        );
+        yield* Effect.promise(async () => {
+          try {
+            const file = await openContainedFile(staticRoot, relative);
+            await streamFileHandle(req, res, file, {
+              "Content-Type": contentType.startsWith("text/")
+                ? `${contentType}; charset=utf-8`
+                : contentType,
+              "Cache-Control": fingerprinted ? "public, max-age=31536000, immutable" : "no-cache",
+              "X-Content-Type-Options": "nosniff",
+            });
+          } catch {
+            if (res.headersSent) res.destroy();
+            else respond(404, { "Content-Type": "text/plain" }, "Not Found");
+          }
+        });
       }),
     ).catch(() => {
       if (!res.headersSent) {
@@ -2505,6 +2530,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     perMessageDeflate: resolveServerPerMessageDeflate(),
   });
 
+  const socketLiveness = makeSocketLiveness();
+  yield* Effect.addFinalizer(() => Effect.sync(() => socketLiveness.dispose()));
   const closeWebSocketServer = Effect.callback<void, ServerLifecycleError>((resume) => {
     wss.close((error) => {
       if (error && !isServerNotRunningError(error)) {
@@ -2519,11 +2546,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     });
   });
 
-  const closeAllClients = Ref.get(clients).pipe(
-    Effect.flatMap(Effect.forEach((client) => Effect.sync(() => client.close()))),
-    Effect.flatMap(() => Ref.set(clients, new Set())),
-  );
+  const closeAllClients = Effect.promise(() =>
+    closeSocketsWithin(
+      wss.clients,
+      performance.now() +
+        Math.max(0, (Option.getOrUndefined(shutdown)?.deadline ?? Date.now() + 1500) - Date.now()),
+    ),
+  ).pipe(Effect.andThen(Ref.set(clients, new Set())));
 
+  yield* registerShutdown("websockets", "producers", () => closeAllClients);
   const listenOptions = host ? { host, port } : { port };
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const projectionWorkspaceQuery = yield* ProjectionWorkspaceQuery;
@@ -2601,6 +2632,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     },
   });
   yield* Effect.addFinalizer(() => Effect.sync(() => workspaceWatchRegistry.dispose()));
+  yield* registerShutdown("workspace-watchers", "admission", () =>
+    Effect.sync(() => workspaceWatchRegistry.dispose()),
+  );
   const threadCommandExecutionQuery = yield* ThreadCommandExecutionQuery;
   const threadFileChangeQuery = yield* ThreadFileChangeQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
@@ -2624,6 +2658,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const previewFileServer = makePreviewFileServer(workspaceAssetAuthorizer);
   yield* Effect.addFinalizer(() => Effect.promise(previewFileServer.close));
   const subscriptionsScope = yield* Scope.make("sequential");
+  if (git.subscribeStatusRefresh) {
+    const unsubscribe = yield* git.subscribeStatusRefresh((cwd) => {
+      Effect.runFork(pushBus.publishAll(WS_CHANNELS.gitStatusInvalidated, { cwd }));
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+  }
+
   yield* Effect.addFinalizer(() => Scope.close(subscriptionsScope, Exit.void));
 
   yield* Stream.runForEach(keybindingsManager.streamChanges, (event) =>
@@ -2853,7 +2894,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             });
           }
         }),
-      ).pipe(Effect.forkIn(subscriptionsScope));
+      ).pipe(Effect.forkIn(subscriptionsScope, { startImmediately: true }));
       yield* Stream.runForEach(nextTurnQueueDispatcher.changes, (threadId) =>
         nextTurnQueueDispatcher.getSnapshot(threadId).pipe(
           Effect.flatMap((snapshot) =>
@@ -3347,6 +3388,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             branch: workspaceThread.branch,
           },
           body.intent !== "steer",
+          {
+            allowBranchDrift:
+              body.intent === "steer" && Boolean(workspaceThread.session?.activeTurnId),
+          },
         ).pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
       const command = yield* normalizeDispatchCommand({
@@ -4164,6 +4209,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           )
           .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
+      case NATIVE_OPERATION_WS_METHODS.historyRecovery:
       case NATIVE_OPERATION_WS_METHODS.resolve:
       case NATIVE_OPERATION_WS_METHODS.execute:
       case NATIVE_OPERATION_WS_METHODS.list:
@@ -4178,6 +4224,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return yield* new RouteRequestError({
             message: "Native operations are unavailable for this conversation.",
           });
+        if (request.body._tag === NATIVE_OPERATION_WS_METHODS.historyRecovery) {
+          if (!providerService.nativeOperations.historyRecovery)
+            return yield* new RouteRequestError({ message: "History recovery is unavailable." });
+          return yield* providerService.nativeOperations
+            .historyRecovery(stripRequestTag(request.body))
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        }
         if (request.body._tag === NATIVE_OPERATION_WS_METHODS.resolve) {
           if (!providerService.nativeOperations.resolve)
             return yield* new RouteRequestError({
@@ -4242,6 +4295,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         );
       }
 
+      case ORCHESTRATION_WS_METHODS.getLatestSequence: {
+        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+        return {
+          latestSequence: (yield* orchestrationEngine.getReadModel()).snapshotSequence,
+          backendIncarnation: BACKEND_INCARNATION,
+        };
+      }
       case ORCHESTRATION_WS_METHODS.getSnapshot: {
         const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
         return yield* orchestrationEngine.getReadModel();
@@ -6104,6 +6164,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       }
 
+      case WS_METHODS.serverReportClientDiagnostics:
+        yield* clientDiagnosticsReporter.report(stripRequestTag(request.body));
+        return undefined;
       case WS_METHODS.serverProbe:
         return {};
 
@@ -7324,6 +7387,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const rpcAdmissions = new WeakMap<WebSocket, RpcAdmission>();
   const handleMessage = Effect.fnUntraced(function* (ws: WebSocket, raw: unknown) {
+    if (shuttingDown) {
+      ws.close(1012, "Server shutting down");
+      return;
+    }
     const sendWsResponse = (response: WsResponseMessage) =>
       encodeWsResponse(response).pipe(
         Effect.flatMap((encodedResponse) => webSocketSendController.send(ws, encodedResponse)),
@@ -7393,6 +7460,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   });
 
   httpServer.on("upgrade", (request, socket, head) => {
+    if (shuttingDown) {
+      socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      return;
+    }
     socket.on("error", () => {}); // Prevent unhandled `EPIPE`/`ECONNRESET` from crashing the process if the client disconnects mid-handshake
 
     let url: URL;
@@ -7427,6 +7498,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   });
 
   wss.on("connection", (ws) => {
+    socketLiveness.add(ws);
     logger.info("websocket transport negotiated", {
       runtime: webSocketRuntimeName(),
       extensions: ws.extensions.length > 0 ? ws.extensions : "none",
@@ -7441,6 +7513,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     const projectName = segments[segments.length - 1] ?? "project";
 
     const welcomeData = {
+      backendIncarnation: BACKEND_INCARNATION,
       bootstrap: SERVER_BOOTSTRAP,
       cwd,
       projectName,

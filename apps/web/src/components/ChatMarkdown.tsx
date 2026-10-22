@@ -1,3 +1,4 @@
+import { suffixSince, type TextRevision } from "../lib/streamingTextRevision";
 import { useOpenLink } from "../hooks/useOpenLink";
 import { PrLinkPreview } from "./prHub/PrLinkPreview";
 import { ChatAssetImage } from "./ChatAssetImage";
@@ -65,6 +66,7 @@ import { hasClosedCodeFence, runnableShellCode } from "../lib/shellCodeBlock";
 export type ChatMarkdownPolicy = "default" | "external-bot";
 
 interface ChatMarkdownProps {
+  textRevision?: TextRevision | undefined;
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
@@ -795,16 +797,21 @@ function shouldRenderActiveBlockAsRawPreview(
 function useStreamingMarkdownState(
   text: string,
   isStreaming: boolean,
+  textRevision?: TextRevision,
 ): {
   readonly committedState: StreamingMarkdownState;
   readonly liveActiveText: string;
   readonly fallbackToRawMessage: boolean;
 } | null {
   const [committedState, setCommittedState] = useState<StreamingMarkdownState>(() =>
-    isStreaming ? advanceStreamingMarkdown(null, text) : EMPTY_STREAMING_MARKDOWN_STATE,
+    isStreaming
+      ? advanceStreamingMarkdown(null, text, textRevision)
+      : EMPTY_STREAMING_MARKDOWN_STATE,
   );
   const committedStateRef = useRef(committedState);
   const latestTextRef = useRef(text);
+  const latestRevisionRef = useRef(textRevision);
+  latestRevisionRef.current = textRevision;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   latestTextRef.current = text;
@@ -833,7 +840,11 @@ function useStreamingMarkdownState(
 
     const commit = () => {
       clearPendingCommit();
-      const nextState = advanceStreamingMarkdown(committedStateRef.current, latestTextRef.current);
+      const nextState = advanceStreamingMarkdown(
+        committedStateRef.current,
+        latestTextRef.current,
+        latestRevisionRef.current,
+      );
       if (nextState === committedStateRef.current) {
         return;
       }
@@ -860,7 +871,10 @@ function useStreamingMarkdownState(
 
     const needsImmediateCommit =
       committedStateRef.current.text.length === 0 ||
-      !text.startsWith(committedStateRef.current.text);
+      (suffixSince(committedStateRef.current.textRevision, textRevision) === null &&
+        (textRevision !== undefined ||
+          committedStateRef.current.textRevision !== undefined ||
+          !text.startsWith(committedStateRef.current.text)));
 
     if (needsImmediateCommit) {
       commit();
@@ -872,13 +886,19 @@ function useStreamingMarkdownState(
     }
 
     timerRef.current = setTimeout(commit, STREAMING_PARSE_DELAY_MS);
-  }, [isStreaming, text]);
+  }, [isStreaming, text, textRevision]);
 
   if (!isStreaming) {
     return null;
   }
 
-  if (!text.startsWith(committedState.text)) {
+  const suffix = suffixSince(committedState.textRevision, textRevision);
+  if (
+    suffix === null &&
+    (textRevision !== undefined ||
+      committedState.textRevision !== undefined ||
+      !text.startsWith(committedState.text))
+  ) {
     return {
       committedState: EMPTY_STREAMING_MARKDOWN_STATE,
       liveActiveText: text,
@@ -888,7 +908,7 @@ function useStreamingMarkdownState(
 
   return {
     committedState,
-    liveActiveText: `${committedState.activeBlock}${text.slice(committedState.text.length)}`,
+    liveActiveText: `${committedState.activeBlock}${suffix ?? text.slice(committedState.text.length)}`,
     fallbackToRawMessage: false,
   };
 }
@@ -930,13 +950,26 @@ const ExternalBotMarkdown = memo(function ExternalBotMarkdown(props: { text: str
   );
 });
 
-function ChatMarkdown({ text, cwd, isStreaming = false, policy = "default" }: ChatMarkdownProps) {
+function ChatMarkdown({
+  text,
+  textRevision,
+  cwd,
+  isStreaming = false,
+  policy = "default",
+}: ChatMarkdownProps) {
   if (policy === "external-bot") return <ExternalBotMarkdown text={text} />;
-  return <TrustedChatMarkdown text={text} cwd={cwd} isStreaming={isStreaming} />;
+  return (
+    <TrustedChatMarkdown
+      text={text}
+      textRevision={textRevision}
+      cwd={cwd}
+      isStreaming={isStreaming}
+    />
+  );
 }
 
-function TrustedChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
-  const streamingState = useStreamingMarkdownState(text, isStreaming);
+function TrustedChatMarkdown({ text, textRevision, cwd, isStreaming = false }: ChatMarkdownProps) {
+  const streamingState = useStreamingMarkdownState(text, isStreaming, textRevision);
 
   if (streamingState) {
     if (streamingState.fallbackToRawMessage) {

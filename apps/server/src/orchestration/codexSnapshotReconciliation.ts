@@ -1,3 +1,5 @@
+import { readIncompleteHistory } from "../provider/runtimePayload.ts";
+import { readPersistedSessionGeneration } from "../provider/sessionCapabilities.ts";
 import { CommandId, MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 
@@ -103,9 +105,7 @@ function extractAssistantTextFromProviderSnapshotItem(
     extractTextFromProviderSnapshotContent(item.result),
     extractTextFromProviderSnapshotContent(item.message),
     typeof item.text === "string" ? item.text : "",
-  ]
-    .join("")
-    .trim();
+  ].join("");
   return text.length > 0 ? text : undefined;
 }
 
@@ -184,8 +184,11 @@ export interface ReconcileCodexThreadSnapshotsInput {
 
 export interface CodexSnapshotReconciliationDependencies {
   readonly orchestrationEngine: OrchestrationEngineShape;
-  readonly providerService: ProviderServiceShape;
-  readonly providerSessionDirectory: ProviderSessionDirectoryShape;
+  readonly providerService: Pick<
+    ProviderServiceShape,
+    "readThread" | "acknowledgeHistoryReconciliation"
+  >;
+  readonly providerSessionDirectory: Pick<ProviderSessionDirectoryShape, "getBinding">;
 }
 
 export const reconcileCodexThreadSnapshots = (
@@ -224,6 +227,134 @@ export const reconcileCodexThreadSnapshots = (
 
           const currentThread = yield* getCurrentThread(threadId);
           if (!currentThread || currentThread.deletedAt !== null) {
+            return;
+          }
+
+          const incomplete = readIncompleteHistory(binding.runtimePayload);
+          if (incomplete) {
+            candidateThreadCount++;
+            // A text-only persisted turn can be verified completely. Unknown,
+            // reasoning, image or tool shapes retain the marker: partial repair
+            // is never proof that the whole stream was recovered.
+            if (
+              !incomplete.turnId ||
+              currentThread.latestTurn?.turnId !== incomplete.turnId ||
+              currentThread.session?.activeTurnId != null ||
+              !incomplete.historyIdentity
+            )
+              return;
+            const snapshot = yield* dependencies.providerService.readThread(threadId);
+            providerReadCount++;
+            const history = snapshot.history;
+            if (
+              !history?.origin ||
+              history.provenance !== "provider-persisted" ||
+              history.coverage !== "complete" ||
+              history.identity !== incomplete.historyIdentity
+            )
+              return;
+            const turn = snapshot.turns.find((entry) => entry.id === incomplete.turnId);
+            if (!turn) return;
+            const isPlainTextContent = (value: unknown): boolean => {
+              if (value == null || typeof value === "string") return true;
+              if (Array.isArray(value)) return value.every(isPlainTextContent);
+              const record = asRecord(value);
+              if (!record) return false;
+              const type = normalizeProviderSnapshotItemType(record.type);
+              return (
+                ["text", "input text", "output text"].includes(type) &&
+                typeof record.text === "string"
+              );
+            };
+            if (
+              turn.items.some((raw) => {
+                const item = asRecord(raw);
+                if (!item) return true;
+                const type = normalizeProviderSnapshotItemType(
+                  item.type ?? item.itemType ?? item.kind,
+                );
+                if (["user message", "user"].includes(type)) return false;
+                return (
+                  !["agent message", "assistant message", "assistant"].includes(type) ||
+                  !asTrimmedNonEmptyString(item.id ?? item.itemId) ||
+                  !isPlainTextContent(item.content) ||
+                  item.attachments !== undefined ||
+                  item.reasoningText !== undefined
+                );
+              })
+            ) {
+              yield* Effect.logWarning(
+                "incomplete Codex history requires repair of non-text items",
+                { threadId, markerId: incomplete.eventId },
+              );
+              return;
+            }
+            const messages = assistantMessagesFromProviderSnapshotTurn(turn);
+            if (messages.length === 0) return;
+            const ids = new Set(messages.map((message) => message.messageId));
+            const currentMessages = currentThread.messages.filter(
+              (message) => message.role === "assistant" && message.turnId === incomplete.turnId,
+            );
+            if (
+              currentMessages.some(
+                (message) => !ids.has(message.id) || (message.reasoningText?.length ?? 0) > 0,
+              )
+            )
+              return;
+            const stillCurrent = Effect.gen(function* () {
+              const latest = Option.getOrUndefined(
+                yield* dependencies.providerSessionDirectory.getBinding(threadId),
+              );
+              const marker = readIncompleteHistory(latest?.runtimePayload);
+              const thread = yield* getCurrentThread(threadId);
+              return (
+                latest?.providerInstanceId === history.origin!.instanceId &&
+                readPersistedSessionGeneration(latest?.runtimePayload) ===
+                  history.origin!.generation &&
+                marker?.eventId === incomplete.eventId &&
+                thread?.deletedAt === null &&
+                thread.latestTurn?.turnId === incomplete.turnId &&
+                thread.session?.activeTurnId == null
+              );
+            });
+            for (const message of messages) {
+              if (!(yield* stillCurrent)) return;
+              const thread = yield* getCurrentThread(threadId);
+              const existing = thread?.messages.find((entry) => entry.id === message.messageId);
+              if (existing && !message.text.startsWith(existing.text)) return;
+              if (!existing || existing.streaming || existing.text !== message.text)
+                yield* dependencies.orchestrationEngine.dispatch({
+                  type: "thread.message.assistant.reconcile",
+                  commandId: buildSnapshotCommandId(
+                    input.reason,
+                    threadId,
+                    turn.id,
+                    "verified-history",
+                  ),
+                  threadId,
+                  messageId: message.messageId,
+                  turnId: turn.id,
+                  expectedText: existing?.text ?? null,
+                  expectedReasoningText: existing?.reasoningText ?? "",
+                  text: message.text,
+                  reasoningText: "",
+                  createdAt: input.createdAt,
+                });
+              const repaired = (yield* getCurrentThread(threadId))?.messages.find(
+                (entry) => entry.id === message.messageId,
+              );
+              if (!repaired || repaired.text !== message.text || repaired.streaming) return;
+              backfilledMessageCount++;
+            }
+            if (!(yield* stillCurrent)) return;
+            if (dependencies.providerService.acknowledgeHistoryReconciliation)
+              yield* dependencies.providerService.acknowledgeHistoryReconciliation({
+                threadId,
+                markerId: incomplete.eventId,
+                historyIdentity: incomplete.historyIdentity,
+                instanceId: history.origin.instanceId,
+                generation: history.origin.generation,
+              });
             return;
           }
 

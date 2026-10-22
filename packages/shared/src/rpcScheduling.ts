@@ -24,7 +24,9 @@ export function rpcLane(body: { readonly _tag: string; readonly command?: unknow
   )
     return "answer";
   if (
-    /^orchestration\.(?:getStartupSnapshot|getSnapshot|replayEvents)$/.test(body._tag) ||
+    /^orchestration\.(?:getStartupSnapshot|getSnapshot|getLatestSequence|replayEvents)$/.test(
+      body._tag,
+    ) ||
     body._tag === "terminal.snapshot" ||
     body._tag === "server.probe" ||
     body._tag === "storage.getStatus"
@@ -110,6 +112,7 @@ const READ_ONLY_METHODS = new Set([
   "orchestration.getFullThreadDiff",
   "orchestration.getRewindDrafts",
   "orchestration.getSnapshot",
+  "orchestration.getLatestSequence",
   "orchestration.getStartupSnapshot",
   "orchestration.getThreadCommandExecution",
   "orchestration.getThreadCommandExecutions",

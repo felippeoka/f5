@@ -48,7 +48,6 @@ const engineLayer = OrchestrationEngineLive.pipe(
 );
 const makeFixture = (savedBranch: string | null = null) =>
   Effect.gen(function* () {
-    yield* TestClock.setTime(Date.parse("2026-10-19T12:00:00.000Z"));
     const engine = yield* OrchestrationEngineService;
     const sql = yield* SqlClient.SqlClient;
     const snapshots = yield* ProjectionSnapshotQuery;
@@ -147,13 +146,19 @@ function run<A, E>(
   >,
   savedBranch: string | null = null,
 ) {
-  return Effect.scoped(makeFixture(savedBranch).pipe(Effect.flatMap(test))).pipe(
-    Effect.provide(
-      engineLayer.pipe(
-        Layer.provideMerge(SqlitePersistenceMemory),
-        Layer.provideMerge(ServerSettingsService.layerTest()),
-        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "f5-settlement-" })),
-        Layer.provideMerge(NodeServices.layer),
+  // Set the clock before the engine starts: its periodic delivery check would
+  // otherwise replay every one-second tick between the epoch and this date.
+  return TestClock.setTime(Date.parse("2026-10-19T12:00:00.000Z")).pipe(
+    Effect.andThen(
+      Effect.scoped(makeFixture(savedBranch).pipe(Effect.flatMap(test))).pipe(
+        Effect.provide(
+          engineLayer.pipe(
+            Layer.provideMerge(SqlitePersistenceMemory),
+            Layer.provideMerge(ServerSettingsService.layerTest()),
+            Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "f5-settlement-" })),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
       ),
     ),
   );

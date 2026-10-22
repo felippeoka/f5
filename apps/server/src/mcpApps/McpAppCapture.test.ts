@@ -111,19 +111,20 @@ it.effect("stores an owned app snapshot before admitting terminal turn completio
     }),
   ).pipe(Effect.provide(layer)),
 );
-it.effect(
-  "interrupts a pending capture and releases its turn barrier when the adapter scope closes",
-  () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const scope = yield* Scope.make("sequential");
-        const manager = new CaptureManager();
-        yield* makeCodexAdapter({ manager }).pipe(Scope.provide(scope));
-        const first = manager.fire(completed);
-        yield* Effect.promise(() => manager.reading);
-        yield* Scope.close(scope, Exit.void);
-        yield* Effect.promise(() => first);
-        assert.equal(manager.listenerCount("event"), 0);
-      }),
-    ).pipe(Effect.provide(layer)),
+// Live clock: closing the adapter waits a bounded real time for pending
+// preparation before it aborts the capture.
+it.live("interrupts a pending capture when the adapter scope closes", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const scope = yield* Scope.make("sequential");
+      const manager = new CaptureManager();
+      yield* makeCodexAdapter({ manager }).pipe(Scope.provide(scope));
+      const first = manager.fire(completed);
+      yield* Effect.promise(() => manager.reading);
+      yield* Scope.close(scope, Exit.void);
+      // The aborted preparation settles as an interruption.
+      yield* Effect.promise(() => Promise.allSettled([first]));
+      assert.equal(manager.listenerCount("event"), 0);
+    }),
+  ).pipe(Effect.provide(layer)),
 );

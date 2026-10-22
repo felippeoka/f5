@@ -463,6 +463,27 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
       };
     });
 
+  let actionableCursor: ThreadId | null = null;
+  const readActionablePage = (
+    afterThreadId: ThreadId | null,
+    throughThreadId: string | null = null,
+  ) =>
+    sql<{ readonly threadId: string }>`
+      SELECT DISTINCT queue.thread_id AS "threadId"
+      FROM next_turn_queue AS queue
+      LEFT JOIN next_turn_queue_state AS state ON state.thread_id = queue.thread_id
+      WHERE queue.deleted_at IS NULL
+        AND queue.status = 'queued'
+        AND (${afterThreadId} IS NULL OR queue.thread_id > ${afterThreadId})
+        AND (${throughThreadId} IS NULL OR queue.thread_id <= ${throughThreadId})
+        AND (queue.not_before IS NULL OR julianday(queue.not_before) <= julianday('now'))
+        AND COALESCE(state.paused, 0) = 0
+      ORDER BY queue.thread_id LIMIT 64
+    `.pipe(
+      Effect.map((rows) => rows.map((row) => ThreadId.makeUnsafe(row.threadId))),
+      Effect.mapError(normalizeError),
+    );
+
   const store: NextTurnQueueStoreShape = {
     readWorkspaceClaims: (threadIds) =>
       Effect.gen(function* () {
@@ -484,18 +505,36 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
       }).pipe(Effect.mapError(normalizeError)),
     listByThread: (threadId) => listByThread(threadId).pipe(Effect.mapError(normalizeError)),
 
-    listActionableThreadIds: sql<{ readonly threadId: string }>`
-      SELECT DISTINCT queue.thread_id AS "threadId"
-      FROM next_turn_queue AS queue
-      LEFT JOIN next_turn_queue_state AS state ON state.thread_id = queue.thread_id
-      WHERE queue.deleted_at IS NULL
-        AND queue.status = 'queued'
-        AND (queue.not_before IS NULL OR julianday(queue.not_before) <= julianday('now'))
-        AND COALESCE(state.paused, 0) = 0
-      ORDER BY queue.thread_id
-    `.pipe(
-      Effect.map((rows) => rows.map((row) => ThreadId.makeUnsafe(row.threadId))),
-      Effect.mapError(normalizeError),
+    scanActionableThreads: (visit) =>
+      Effect.gen(function* () {
+        // A fixed boundary prevents concurrent insertions from extending startup forever.
+        const rows = yield* sql<{
+          id: string | null;
+        }>`SELECT MAX(thread_id) AS id FROM next_turn_queue WHERE deleted_at IS NULL AND status = 'queued'`;
+        const through = rows[0]?.id;
+        if (through == null) return;
+        let after: ThreadId | null = null;
+        for (;;) {
+          const page: ReadonlyArray<ThreadId> = yield* readActionablePage(after, through);
+          if (page.length === 0) return;
+          yield* visit(page);
+          after = page.at(-1)!;
+        }
+      }).pipe(Effect.mapError(normalizeError)),
+
+    listActionableThreadIds: Effect.suspend(() =>
+      readActionablePage(actionableCursor).pipe(
+        Effect.flatMap((rows) =>
+          rows.length === 0 && actionableCursor !== null
+            ? readActionablePage(null)
+            : Effect.succeed(rows),
+        ),
+        Effect.tap((rows) =>
+          Effect.sync(() => {
+            actionableCursor = rows.at(-1) ?? null;
+          }),
+        ),
+      ),
     ),
 
     getItem: (itemId) => readItem(itemId).pipe(Effect.mapError(normalizeError)),

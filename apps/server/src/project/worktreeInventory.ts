@@ -1,5 +1,7 @@
 import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
+import path from "node:path";
+
 import type {
   WorktreeListEntry,
   WorktreesListInput,
@@ -105,7 +107,7 @@ export const listWorktreeInventory = (
             if (checkout)
               return yield* Effect.fail(
                 new Error(
-                  `Project folder is inside a Git checkout. Manage worktrees from its checkout root: ${checkout.path}`,
+                  `Project folder is inside a Git checkout. Manage worktrees from its checkout root: ${path.normalize(checkout.path)}`,
                 ),
               );
           }
@@ -115,16 +117,26 @@ export const listWorktreeInventory = (
           >(
             registrations.map((entry) => [
               entry.canonicalPath,
-              { path: entry.path, registration: entry, branch: entry.branch },
+              {
+                path: entry.path,
+                registration: entry,
+                branch: entry.branch,
+              },
             ]),
           );
           for (const thread of threads) {
-            const path = workspaceOf(thread);
-            const resolved = paths.get(path);
+            const recordedPath = workspaceOf(thread);
+            const resolved = paths.get(recordedPath);
             if (thread.projectId === project.id && !resolved)
-              return yield* Effect.fail(new Error(`Cannot resolve recorded workspace: ${path}`));
+              return yield* Effect.fail(
+                new Error(`Cannot resolve recorded workspace: ${recordedPath}`),
+              );
             if (resolved && thread.projectId === project.id && !entries.has(resolved))
-              entries.set(resolved, { path, registration: null, branch: thread.branch });
+              entries.set(resolved, {
+                path: recordedPath,
+                registration: null,
+                branch: thread.branch,
+              });
           }
           const rows = yield* Effect.forEach(
             [...entries],
@@ -139,8 +151,13 @@ export const listWorktreeInventory = (
                       : canonicalPath !== managedRoot && pathContains(managedRoot, canonicalPath)
                         ? "managed"
                         : "external";
+                  const displayPath = path.normalize(entry.path);
                   return {
                     ...entry,
+                    path: displayPath,
+                    registration: entry.registration
+                      ? { ...entry.registration, path: displayPath }
+                      : null,
                     canonicalPath,
                     classification,
                     missing,

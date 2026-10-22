@@ -1,4 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { makeRuntimeSqliteLayer } from "./persistence/Layers/Sqlite.ts";
 import { mkdtemp, mkdir, writeFile, rm, readdir, readFile, stat, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,10 +65,21 @@ async function fixture() {
 }
 
 describe("backup maintenance process", () => {
-  it("exports a consistent snapshot while live writes continue, retaining only owned attachments", async () => {
+  it("exports a consistent snapshot with live writes and two open snapshot readers, retaining only owned attachments", async () => {
     const { directory, config, db } = await fixture();
     const stagingDir = join(directory, "export");
     await mkdir(stagingDir);
+    const readers = Array.from({ length: 2 }, () =>
+      ManagedRuntime.make(makeRuntimeSqliteLayer({ filename: config.dbPath, readonly: true })),
+    );
+    for (const reader of readers)
+      await reader.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`PRAGMA query_only = ON`;
+          yield* sql`SELECT * FROM marker`;
+        }),
+      );
     let writes = 0;
     const timer = setInterval(() => {
       db.prepare("INSERT INTO marker VALUES (?)").run(`write-${writes++}`);
@@ -92,6 +105,7 @@ describe("backup maintenance process", () => {
       snapshot.close();
     } finally {
       clearInterval(timer);
+      await Promise.all(readers.map((reader) => reader.dispose()));
       db.close();
     }
   });

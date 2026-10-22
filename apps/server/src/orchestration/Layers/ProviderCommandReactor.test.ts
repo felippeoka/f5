@@ -76,7 +76,7 @@ import {
 } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
 import { TextGeneration, type TextGenerationShape } from "../../git/Services/TextGeneration.ts";
-import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
+import { ControlDeliveryClock, OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import {
@@ -219,6 +219,7 @@ describe("ProviderCommandReactor", () => {
   });
 
   async function createHarness(input?: {
+    readonly controlClock?: () => number;
     readonly mcpServers?: McpProjectServersConfig;
     readonly realCursorBinary?: string;
     readonly settings?: Partial<ServerSettings>;
@@ -594,6 +595,8 @@ describe("ProviderCommandReactor", () => {
           })),
         ),
       updateMcpStateIfCurrent: () => Effect.succeed(true),
+      updateHistoryReconciliationIfCurrent: () => Effect.succeed(true),
+      updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
       listBindingsByProject: (projectId) =>
         Effect.sync(() =>
           [...persistedBindings.values()]
@@ -674,6 +677,10 @@ describe("ProviderCommandReactor", () => {
     }).service;
     const workspaceGitLayer = Layer.succeed(GitCore, workspaceGit);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(
+        input?.controlClock ? Layer.succeed(ControlDeliveryClock, input.controlClock) : Layer.empty,
+      ),
+      Layer.provide(Layer.succeed(ProviderSessionDirectory, providerSessionDirectory)),
       Layer.provide(workspaceGitLayer),
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
@@ -843,7 +850,7 @@ describe("ProviderCommandReactor", () => {
               return delivery.finally(() => pendingDeliveries.delete(delivery));
             }).pipe(Effect.asVoid)
           : Effect.void,
-      ).pipe(Effect.forkScoped, Scope.provide(scope)),
+      ).pipe(Effect.forkScoped({ startImmediately: true }), Scope.provide(scope)),
     );
     const drain = () => Effect.runPromise(reactor.drain);
 
@@ -4372,6 +4379,156 @@ describe("ProviderCommandReactor", () => {
     expect(
       thread?.activities.some((activity) => activity.summary === "Session context reset"),
     ).toBe(false);
+  });
+
+  it.each(["generation", "turn"] as const)(
+    "fences queued controls when the provider %s changes",
+    async (change) => {
+      const harness = await createHarness();
+      const threadId = ThreadId.makeUnsafe("thread-1");
+      const createdAt = new Date().toISOString();
+      harness.upsertBinding({
+        threadId,
+        provider: "codex",
+        providerInstanceId: ProviderInstanceId.makeUnsafe("codex"),
+        runtimePayload: { sessionGeneration: 0 },
+      });
+      const session = {
+        threadId,
+        status: "running" as const,
+        providerName: "codex",
+        runtimeMode: "approval-required" as const,
+        activeTurnId: asTurnId("original-turn"),
+        lastError: null,
+        updatedAt: createdAt,
+      };
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("fence-session"),
+          threadId,
+          session,
+          createdAt,
+        }),
+      );
+      const barrier = Promise.withResolvers<void>();
+      let entered = false;
+      harness.interruptTurn.mockImplementationOnce(() =>
+        Effect.promise(async () => {
+          entered = true;
+          await barrier.promise;
+        }),
+      );
+      try {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.turn.interrupt",
+            commandId: CommandId.makeUnsafe("fence-blocker"),
+            threadId,
+            createdAt,
+          }),
+        );
+        await waitFor(() => entered);
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.session.stop",
+            commandId: CommandId.makeUnsafe("fence-stop"),
+            threadId,
+            createdAt,
+          }),
+        );
+        if (change === "generation")
+          harness.upsertBinding({
+            threadId,
+            provider: "codex",
+            runtimePayload: { sessionGeneration: 1 },
+          });
+        else
+          await Effect.runPromise(
+            harness.engine.dispatch({
+              type: "thread.session.set",
+              commandId: CommandId.makeUnsafe("fence-new-turn"),
+              threadId,
+              session: { ...session, activeTurnId: asTurnId("replacement-turn") },
+              createdAt,
+            }),
+          );
+        barrier.resolve();
+        await waitFor(async () =>
+          (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!.activities.some(
+            (activity) =>
+              activity.summary === "The provider session changed before this action ran",
+          ),
+        );
+        expect(harness.stopSession).not.toHaveBeenCalled();
+        expect(harness.engine.inspectQueue!().entries).toBe(0);
+      } finally {
+        barrier.resolve();
+      }
+    },
+  );
+
+  it("never sends a queued control that expired while the provider worker was blocked", async () => {
+    let time = 0;
+    const harness = await createHarness({ controlClock: () => time });
+    const threadId = ThreadId.makeUnsafe("thread-1"),
+      createdAt = new Date().toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("expired-session"),
+        threadId,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("expired-turn"),
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+    const entered = Promise.withResolvers<void>(),
+      release = Promise.withResolvers<void>();
+    harness.interruptTurn.mockImplementationOnce(() =>
+      Effect.promise(async () => {
+        entered.resolve();
+        await release.promise;
+      }),
+    );
+    try {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.interrupt",
+          commandId: CommandId.makeUnsafe("expiry-blocker"),
+          threadId,
+          createdAt,
+        }),
+      );
+      await entered.promise;
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("expiry-queued"),
+          threadId,
+          createdAt,
+        }),
+      );
+      time = 30_001;
+      await waitFor(async () =>
+        (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!.activities.some(
+          (activity) => activity.summary === "The provider action could not start",
+        ),
+      );
+      release.resolve();
+      await Effect.runPromise(harness.reactor.drain);
+      expect(harness.stopSession).not.toHaveBeenCalled();
+      expect(harness.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      release.resolve();
+    }
   });
 
   it("reacts to thread.turn.interrupt-requested by calling provider interrupt", async () => {
