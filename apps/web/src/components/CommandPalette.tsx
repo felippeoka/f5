@@ -892,8 +892,13 @@ function OpenCommandPaletteDialog(props: {
         icon: <ListOrderedIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
           const panel = document.getElementById("next-turn-queue-panel");
-          panel?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          panel?.focus();
+          if (!panel) {
+            // The compact chat layout keeps the queue behind a status chip.
+            document.querySelector<HTMLElement>('[data-status-chip="queue"]')?.click();
+            return;
+          }
+          panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          panel.focus();
         },
       },
     );

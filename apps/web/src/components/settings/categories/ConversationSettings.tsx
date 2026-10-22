@@ -49,7 +49,7 @@ const MESSAGE_KEYS = [
   "diffWordWrap",
   "diffFileDefaultState",
 ] as const;
-const WORK_LOG_KEYS = ["workLogMode", "workLogFilter"] as const;
+const WORK_LOG_KEYS = ["workLogMode", "workLogFilter", "compactChatLayout"] as const;
 
 function hasSettingsChanges<K extends keyof AppSettings>(
   keys: readonly K[],
@@ -292,6 +292,19 @@ export function ConversationSettings() {
                     ))}
                   </SelectPopup>
                 </Select>
+              }
+            />
+            <SettingsRow
+              title="Compact chat layout"
+              description="Show tasks, queued turns and non-critical notices as chips above the composer, and runtime info in the header."
+              control={
+                <Switch
+                  checked={settings.compactChatLayout}
+                  onCheckedChange={(checked) =>
+                    updateSettings({ compactChatLayout: Boolean(checked) })
+                  }
+                  aria-label="Compact chat layout"
+                />
               }
             />
           </div>

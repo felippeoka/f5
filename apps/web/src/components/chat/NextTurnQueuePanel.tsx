@@ -61,6 +61,31 @@ function rebuildEditedText(item: NextTurnQueueItem, visibleText: string): string
   return existingVisible === current ? visibleText.trim() : `${visibleText.trim()}\n`;
 }
 
+/**
+ * Lists the thread's queue on every (re)connect; pushed updates keep it
+ * current in between. Whatever shows the queue (the panel, or its status chip
+ * while the panel sits in a closed popover) keeps this mounted.
+ */
+export function useNextTurnQueueHydration(threadId: ThreadId): () => Promise<void> {
+  const connection = useWsConnectionState();
+  const applySnapshot = useNextTurnQueueStore((store) => store.applySnapshot);
+  const setHydrationError = useNextTurnQueueStore((store) => store.setHydrationError);
+  const load = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api?.nextTurnQueue) return;
+    try {
+      applySnapshot(await api.nextTurnQueue.list({ threadId }));
+    } catch (error) {
+      setHydrationError(threadId, errorMessage(error));
+    }
+  }, [applySnapshot, setHydrationError, threadId]);
+
+  useEffect(() => {
+    if (connection.phase === "connected") void load();
+  }, [connection.connectedAt, connection.phase, load]);
+  return load;
+}
+
 export function NextTurnQueuePanel({
   threadId,
   provider,
@@ -79,7 +104,6 @@ export function NextTurnQueuePanel({
   readonly runtimeSlashCommands?: CompactRuntimeConfiguredActivityPayload["slashCommands"] | null;
   readonly projectSkills?: ReadonlyArray<ProjectSkill> | null | undefined;
 }) {
-  const connection = useWsConnectionState();
   // Steering eligibility only; message deltas leave these fields unchanged.
   const thread = useStore(
     useShallow((store) => {
@@ -99,7 +123,6 @@ export function NextTurnQueuePanel({
     (store) => store.byThreadId[threadId] ?? EMPTY_QUEUE_THREAD_STATE,
   );
   const applySnapshot = useNextTurnQueueStore((store) => store.applySnapshot);
-  const setHydrationError = useNextTurnQueueStore((store) => store.setHydrationError);
   const setPendingOrder = useNextTurnQueueStore((store) => store.setPendingOrder);
   const setItemBusy = useNextTurnQueueStore((store) => store.setItemBusy);
   const [collapsed, setCollapsed] = useState(false);
@@ -107,20 +130,7 @@ export function NextTurnQueuePanel({
   const previousSnapshotRef = useRef(state.snapshot);
   const watchdogRef = useRef<number | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  const load = useCallback(async () => {
-    const api = readNativeApi();
-    if (!api?.nextTurnQueue) return;
-    try {
-      applySnapshot(await api.nextTurnQueue.list({ threadId }));
-    } catch (error) {
-      setHydrationError(threadId, errorMessage(error));
-    }
-  }, [applySnapshot, setHydrationError, threadId]);
-
-  useEffect(() => {
-    if (connection.phase === "connected") void load();
-  }, [connection.connectedAt, connection.phase, load]);
+  const load = useNextTurnQueueHydration(threadId);
 
   useEffect(() => {
     const snapshot = state.snapshot;

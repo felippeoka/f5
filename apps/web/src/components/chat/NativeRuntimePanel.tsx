@@ -22,6 +22,7 @@ import {
   refusedFastModeReason,
 } from "@t3tools/shared/runtimeInfo";
 import { OpenLinkAnchor } from "../OpenLinkAnchor";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useEffect, useState } from "react";
 import type {
   NativeOperationRecord,
@@ -64,6 +65,8 @@ interface NativeRuntimePanelProps {
   requestedModel: string;
   runtime: CompactRuntimeConfiguredActivityPayload | null;
   outcome?: string | undefined;
+  /** An icon-only trigger for the chat header (compact chat layout). */
+  compact?: boolean | undefined;
 }
 
 /**
@@ -188,12 +191,44 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   return (
     <div
       data-slot="native-runtime-controls"
-      className="flex h-7 min-w-0 max-w-full items-center gap-2 px-2 text-xs text-muted-foreground"
+      className={
+        props.compact
+          ? "flex shrink-0 items-center"
+          : "flex h-7 min-w-0 max-w-full items-center gap-2 px-2 text-xs text-muted-foreground"
+      }
     >
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger render={<Button variant="ghost" size="xs" />}>
-          <SlidersHorizontalIcon /> Runtime details{pending ? " · pending" : ""}
-        </DialogTrigger>
+        {props.compact ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DialogTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="relative text-muted-foreground"
+                      aria-label={pending ? "Runtime details, pending" : "Runtime details"}
+                    />
+                  }
+                />
+              }
+            >
+              <SlidersHorizontalIcon />
+              {pending ? (
+                <span
+                  aria-hidden
+                  className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-info"
+                />
+              ) : null}
+            </TooltipTrigger>
+            <TooltipPopup>Runtime details{pending ? " · pending" : ""}</TooltipPopup>
+          </Tooltip>
+        ) : (
+          <DialogTrigger render={<Button variant="ghost" size="xs" />}>
+            <SlidersHorizontalIcon /> Runtime details{pending ? " · pending" : ""}
+          </DialogTrigger>
+        )}
         <DialogPopup className="max-h-[min(80dvh,48rem)] max-w-2xl">
           <DialogHeader>
             <DialogTitle>Runtime details</DialogTitle>

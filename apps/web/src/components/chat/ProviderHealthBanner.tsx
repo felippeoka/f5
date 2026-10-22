@@ -5,6 +5,16 @@ import { memo } from "react";
 import { presentProviderStatus } from "../onboarding/providerStatusIcon";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 
+export function providerHealthLabel(
+  status: Pick<ServerProvider, "displayName" | "driver">,
+): string {
+  return (
+    status.displayName ??
+    (PROVIDER_DISPLAY_NAMES as Partial<Record<string, string>>)[status.driver] ??
+    status.driver
+  );
+}
+
 export const ProviderHealthBanner = memo(function ProviderHealthBanner({
   status,
   onDismiss,
@@ -16,10 +26,7 @@ export const ProviderHealthBanner = memo(function ProviderHealthBanner({
     return null;
   }
 
-  const providerLabel =
-    status.displayName ??
-    (PROVIDER_DISPLAY_NAMES as Partial<Record<string, string>>)[status.driver] ??
-    status.driver;
+  const providerLabel = providerHealthLabel(status);
   const defaultMessage =
     status.status === "error"
       ? `${providerLabel} provider is unavailable.`

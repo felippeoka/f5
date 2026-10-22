@@ -66,6 +66,13 @@ const CONVERSATION_CONTROL_DESCRIPTORS = (
       ["activity", "filter", "tools"],
     ],
     [
+      "compact-layout",
+      "Compact chat layout",
+      "Show tasks, queued turns and notices as chips above the composer.",
+      "Compact chat layout",
+      ["horizontal", "chips", "tray", "density", "space"],
+    ],
+    [
       "workflow-expand",
       "Auto-expand workflows in sidebar",
       "Show workflow subthreads without opening them first.",

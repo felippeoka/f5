@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "~/lib/utils";
 import { readNativeApi } from "../../nativeApi";
@@ -48,8 +49,10 @@ import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { COMPOSER_TRAY_PANEL_CLASS_NAME } from "./composer/ComposerTray";
+import { StatusChip, useComposerStatusStripHost } from "./composer/ComposerStatusStrip";
 import {
   describeBackgroundTask,
+  describeBackgroundWorkChip,
   formatByteSize,
   isNativeOperationInFlight,
   nativeOperationLabel,
@@ -99,6 +102,11 @@ interface NativeRuntimeTrayProps {
   prompt: string;
   latestMessageAt?: string | undefined;
   onSuggestion: (text: string) => void;
+  /**
+   * `chip` moves background tasks out of the tray into a status-strip chip
+   * (portalled into the strip's slot); without a mounted strip they stay rows.
+   */
+  backgroundTasksPresentation?: "row" | "chip" | undefined;
 }
 
 export function NativeRuntimeTray(props: NativeRuntimeTrayProps) {
@@ -120,6 +128,9 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   const [inspection, setInspection] = useState<TaskInspection | null>(null);
   const [reading, setReading] = useState(false);
   const [tasksExpanded, setTasksExpanded] = useState(false);
+  const [tasksChipOpen, setTasksChipOpen] = useState(false);
+  const statusStripHost = useComposerStatusStripHost();
+  const tasksAsChip = props.backgroundTasksPresentation === "chip" && statusStripHost !== null;
   // Elapsed times advance with the poll rather than a separate timer.
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [mountedAt] = useState(() => new Date().toISOString());
@@ -159,6 +170,8 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   useEffect(() => {
     // A group that shrinks to one row starts collapsed if it grows again.
     if (shownTaskCount < 2) setTasksExpanded(false);
+    // A chip that disappears with its last task must not reopen with the next one.
+    if (shownTaskCount === 0) setTasksChipOpen(false);
   }, [shownTaskCount]);
   const shownSuggestionBefore = useRef(shownSuggestionId);
   const promptBefore = useRef(prompt);
@@ -309,6 +322,8 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   };
   const inspect = async (nativeId: string, task: BackgroundTaskDescription, cursor?: string) => {
     if (!capabilities) return;
+    // The output dialog replaces the chip's popover rather than stacking on it.
+    setTasksChipOpen(false);
     const api = readNativeApi()?.nativeOperations;
     if (!api?.inspect) {
       showError("Task output unavailable", "Native output API is unavailable.");
@@ -582,6 +597,48 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
             );
           case "tasks": {
             const { tasks: shownTasks } = row;
+            if (tasksAsChip) {
+              const descriptions = shownTasks.map((task) => describeBackgroundTask(task, nowMs));
+              const chip = describeBackgroundWorkChip(descriptions);
+              const chipLabel = [chip.counts, chip.elapsed].filter(Boolean).join(" · ");
+              return createPortal(
+                <StatusChip
+                  chipId="background-work"
+                  icon={TerminalIcon}
+                  ariaLabel={`Background work: ${chipLabel}`}
+                  popupLabel="Background work"
+                  label={<span className="tabular-nums">{chipLabel}</span>}
+                  open={tasksChipOpen}
+                  onOpenChange={setTasksChipOpen}
+                >
+                  <div className="flex items-center gap-2 px-3 pt-2.5 text-xs">
+                    <span className="font-medium text-foreground">Background work</span>
+                    <span className="min-w-0 flex-1 text-muted-foreground">
+                      {shownTasks.length} running
+                    </span>
+                    {shownTasks.length > 1 && canStopTasks ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        disabled={stopBlocked}
+                        onClick={() => void stopTasks(shownTasks)}
+                      >
+                        Stop all
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Background tasks"
+                    className="divide-y divide-border"
+                  >
+                    {shownTasks.map((task) => renderTaskRow(task, false))}
+                  </div>
+                </StatusChip>,
+                statusStripHost,
+                "tasks",
+              );
+            }
             if (shownTasks.length === 1) return renderTaskRow(shownTasks[0]!, false);
             const newest = describeBackgroundTask(shownTasks.at(-1)!, nowMs);
             const ToggleIcon = tasksExpanded ? ChevronDownIcon : ChevronRightIcon;
