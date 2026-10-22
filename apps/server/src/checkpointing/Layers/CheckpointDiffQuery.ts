@@ -10,7 +10,8 @@ import { ProjectionCheckpointRepository } from "../../persistence/Services/Proje
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { CheckpointInvariantError, CheckpointUnavailableError } from "../Errors.ts";
-import { checkpointRefForThreadTurn, resolveThreadWorkspaceCwd } from "../Utils.ts";
+import { checkpointRefForThreadTurn } from "../Utils.ts";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
   CheckpointDiffQuery,

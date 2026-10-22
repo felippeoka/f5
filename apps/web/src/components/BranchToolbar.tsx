@@ -4,6 +4,7 @@ import { setupProjectScript } from "../projectScripts";
 import { switchConversationWorkspace } from "../lib/workspaceTransitions";
 import { toastManager } from "./ui/toast";
 import type { ThreadId } from "@t3tools/contracts";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { FolderIcon, GitForkIcon } from "lucide-react";
 import { useCallback } from "react";
 
@@ -77,7 +78,7 @@ export default function BranchToolbar({
   const activeThreadId = serverThread?.id ?? (draftThread ? threadId : undefined);
   const activeThreadBranch = serverThread?.branch ?? draftThread?.branch ?? null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const branchCwd = activeWorktreePath ?? activeProject?.cwd ?? null;
+  const branchCwd = threadWorkspaceCwd(serverThread ?? draftThread, activeProject) ?? null;
   const hasServerThread = serverThread !== undefined;
   const creatingWorktree = hasServerThread && !activeWorktreePath && preparingWorktree;
   const effectiveEnvMode = resolveEffectiveEnvMode({

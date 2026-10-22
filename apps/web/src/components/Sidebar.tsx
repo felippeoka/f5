@@ -110,6 +110,7 @@ import {
 } from "./sidebar/sidebarLists";
 import { useDesktopUpdate } from "./sidebar/useDesktopUpdate";
 import { useSidebarThreadActions } from "./sidebar/useSidebarThreadActions";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 
@@ -249,8 +250,8 @@ export default function Sidebar() {
   const desktopUpdate = useDesktopUpdate();
 
   const persistedThreadIds = useMemo(() => new Set(threads.map((thread) => thread.id)), [threads]);
-  const projectCwdById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
+  const projectById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project] as const)),
     [projects],
   );
   const threadGitTargets = useMemo(
@@ -258,9 +259,9 @@ export default function Sidebar() {
       threads.map((thread) => ({
         threadId: thread.id,
         branch: thread.branch,
-        cwd: thread.worktreePath ?? projectCwdById.get(thread.projectId) ?? null,
+        cwd: threadWorkspaceCwd(thread, projectById.get(thread.projectId)) ?? null,
       })),
-    [projectCwdById, threads],
+    [projectById, threads],
   );
   const threadGitStatusCwds = useMemo(
     () => [

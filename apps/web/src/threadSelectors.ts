@@ -57,6 +57,7 @@ const LIST_ITEM_KEYS = [
   "lastVisitedAt",
   "branch",
   "worktreePath",
+  "scratchPath",
   "threadReferences",
   "error",
 ] as const satisfies ReadonlyArray<Exclude<keyof ThreadListItem, "lastInteractionAt">>;

@@ -126,6 +126,7 @@ import { toastManager } from "./ui/toast";
 import { useNextTurnQueueStore } from "../nextTurnQueueStore";
 import { HighlightedText } from "./HighlightedText";
 import { ProjectIcon } from "./ProjectIcon";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const BROWSE_STALE_TIME_MS = 30_000;
@@ -392,10 +393,10 @@ function OpenCommandPaletteDialog(props: {
   const searchTargetThreadId =
     activeThreadInSearchProject?.id ?? (activeDraftThreadInSearchProject ? routeThreadId : null);
   const searchWorkspaceCwd =
-    activeThreadInSearchProject?.worktreePath ??
-    activeDraftThreadInSearchProject?.worktreePath ??
-    searchProject?.cwd ??
-    null;
+    threadWorkspaceCwd(
+      activeThreadInSearchProject ?? activeDraftThreadInSearchProject,
+      searchProject,
+    ) ?? null;
   const relativePathNeedsActiveProject =
     isExplicitRelativeProjectPath(query.trim()) && currentProjectCwd === null;
   const trimmedQuery = effectiveQuery.trim();

@@ -43,6 +43,7 @@ import { Textarea } from "./ui/textarea";
 import { DIFF_PANEL_UNSAFE_CSS } from "./DiffPanel";
 import { insertFileMentionIntoComposer } from "./composerFileMentionInsertion";
 import { showFileEntryContextMenu } from "./fileEntryActions";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 
 interface FileViewPanelProps {
   mode: DiffPanelMode;
@@ -120,8 +121,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
   const activeProject = useStore((store) =>
     activeProjectId ? store.projects.find((project) => project.id === activeProjectId) : undefined,
   );
-  const workspaceRoot =
-    activeThread?.worktreePath ?? draftThread?.worktreePath ?? activeProject?.cwd;
+  const workspaceRoot = threadWorkspaceCwd(activeThread ?? draftThread, activeProject);
   const filePath = surface?.relativePath ?? fileSearch.fileViewPath;
   const fileLine = surface?.line ?? fileSearch.fileLine;
   const fileEndLine = surface?.endLine ?? fileSearch.fileEndLine;

@@ -57,6 +57,7 @@ import {
 } from "./chat/changedFilesPresentation";
 import { compareFilePaths } from "../lib/filePathCollator";
 import { changedLineCount } from "../lib/turnDiffTree";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 
 type DiffThemeType = "light" | "dark";
 
@@ -109,7 +110,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const activeProject = useStore((store) =>
     activeProjectId ? store.projects.find((project) => project.id === activeProjectId) : undefined,
   );
-  const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd;
+  const activeCwd = threadWorkspaceCwd(activeThread, activeProject);
   const gitAutoRefreshIntervalMs = settings.gitStatusAutoRefreshIntervalSeconds * 1000;
   const gitAutoRefreshEnabled = settings.gitStatusAutoRefreshIntervalSeconds > 0;
   const gitBranchesQuery = useQuery(

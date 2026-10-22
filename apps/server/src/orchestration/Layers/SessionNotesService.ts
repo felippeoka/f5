@@ -7,7 +7,7 @@ import {
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { Data, Effect, Layer, Schema, Stream } from "effect";
 
-import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { roughTokenEstimateFromCharacters } from "../../provider/providerContext.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { deriveActivePlan, deriveTaskLines } from "../compactionService.ts";

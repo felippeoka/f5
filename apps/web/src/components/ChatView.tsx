@@ -11,6 +11,7 @@ import { WorktreeMissingBanner } from "./chat/WorktreeMissingBanner";
 import { pickPreferredModel } from "../providerModels";
 import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
+import { resolveThreadWorkspaceCwd, threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
 import { NativeRuntimeTray } from "./chat/NativeRuntimeTray";
 import { McpSignInTray } from "./chat/McpSignInTray";
@@ -1201,7 +1202,7 @@ export default memo(function ChatView({
     project: activeProject,
     thread: activeThread,
   });
-  const workspaceRoot = activeThread?.worktreePath ?? activeProject?.cwd ?? undefined;
+  const workspaceRoot = threadWorkspaceCwd(activeThread, activeProject);
   const workflowThreadSlot = useMemo(() => {
     if (!activeThread || !activeWorkflow) {
       return null;
@@ -2608,7 +2609,7 @@ export default memo(function ChatView({
     latestTurnSettled,
     timelineEntries,
   ]);
-  const gitCwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
+  const gitCwd = threadWorkspaceCwd(activeThread, activeProject) ?? null;
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const isPathTrigger = composerTriggerKind === "path";
@@ -4790,7 +4791,7 @@ export default memo(function ChatView({
     setIsDragOverComposer(false);
 
     const api = readNativeApi();
-    const workspaceRoot = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
+    const workspaceRoot = threadWorkspaceCwd(activeThread, activeProject) ?? null;
     if (!payload || !api || !activeProject || !workspaceRoot) {
       toastManager.add({ type: "error", title: "Unable to add the dragged file to chat." });
       return;
@@ -5230,9 +5231,11 @@ export default memo(function ChatView({
     const mentionedPaths = collectComposerMentionPaths(promptForSend, mentionsForSend);
     if (mentionedPaths.length > 0) {
       try {
+        const mentionRoot = threadWorkspaceCwd(activeThread, activeProject);
+        if (!mentionRoot) throw new Error("This thread's folder is not ready yet.");
         await authorizeComposerMentionPaths({
           api,
-          workspaceRoot: activeThread.worktreePath ?? activeProject.cwd,
+          workspaceRoot: mentionRoot,
           relativePaths: mentionedPaths,
         });
       } catch (error) {
@@ -7099,8 +7102,7 @@ export default memo(function ChatView({
     threadSummaries.some(
       (other) =>
         other.id !== activeThread?.id &&
-        (other.worktreePath ?? projects.find((project) => project.id === other.projectId)?.cwd) ===
-          workspaceRoot,
+        resolveThreadWorkspaceCwd({ thread: other, projects }) === workspaceRoot,
     );
   const revertDisabledReason = !revertSupported
     ? `${activeProviderLabel} doesn't support revert`
@@ -7537,7 +7539,7 @@ export default memo(function ChatView({
               threadStatus={resolveThreadStatusPillForThread(activeThread)}
               onOpenWorkflow={activeWorkflow ? handleOpenActiveWorkflow : undefined}
               isGitRepo={isGitRepo}
-              openInCwd={activeThread.worktreePath ?? activeProject?.cwd ?? null}
+              openInCwd={threadWorkspaceCwd(activeThread, activeProject) ?? null}
               activeProjectScripts={activeProject?.scripts}
               preferredScriptId={
                 activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null

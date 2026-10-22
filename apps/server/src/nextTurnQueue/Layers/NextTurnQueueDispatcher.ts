@@ -28,6 +28,7 @@ import {
   EventId as importEventIdFactory,
 } from "@t3tools/contracts";
 import { GitCore } from "../../git/Services/GitCore.ts";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import {
   withWorktreeLifecycleLock,
   RepositoryBusyError,
@@ -667,13 +668,14 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
       const thread = Option.getOrNull(
         yield* threads.getById({ threadId }).pipe(Effect.mapError(storageError)),
       );
-      const lockPath =
-        thread?.worktreePath ??
-        (thread
-          ? ((yield* engine.getReadModel()).projects.find(
+      const lockPath = thread
+        ? (threadWorkspaceCwd(
+            thread,
+            (yield* engine.getReadModel()).projects.find(
               (project) => project.id === thread.projectId,
-            )?.workspaceRoot ?? null)
-          : null);
+            ),
+          ) ?? null)
+        : null;
       // Recreation may initialize submodules from the network; finish before taking the acceptance lock.
       const preparedRevision = (yield* store.listByThread(threadId)).state.revision;
       const preparedGate = yield* readGate(item, true);
@@ -683,9 +685,10 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
           yield* threads.getById({ threadId }).pipe(Effect.mapError(storageError)),
         );
         const effective =
-          current?.worktreePath ??
-          model.projects.find((entry) => entry.id === current?.projectId)?.workspaceRoot ??
-          null;
+          threadWorkspaceCwd(
+            current,
+            model.projects.find((entry) => entry.id === current?.projectId),
+          ) ?? null;
         if (effective !== lockPath) {
           yield* notify(threadId);
           return;

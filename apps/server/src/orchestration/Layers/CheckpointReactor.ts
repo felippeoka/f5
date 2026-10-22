@@ -20,10 +20,8 @@ import { Cause, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
-import {
-  checkpointRefForThreadTurn,
-  resolveThreadWorkspaceCwd,
-} from "../../checkpointing/Utils.ts";
+import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
+import { resolveThreadWorkspaceCwd, threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { clearWorkspaceIndexCache } from "../../workspaceEntries.ts";
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -322,7 +320,7 @@ const make = Effect.gen(function* () {
         for (const other of current.threads) {
           if (other.id === input.threadId || other.deletedAt !== null) continue;
           const owner = current.projects.find((project) => project.id === other.projectId);
-          const effective = other.worktreePath ?? owner?.workspaceRoot;
+          const effective = threadWorkspaceCwd(other, owner);
           if (!effective) return;
           const otherPath = yield* Effect.tryPromise(() => canonicalWorktreePath(effective));
           if (otherPath === canonical) return;

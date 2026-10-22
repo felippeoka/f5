@@ -7,6 +7,7 @@ import { recallComposerMentions } from "~/composerMentionHistoryStore";
 import { collapseExpandedComposerCursor } from "~/composer-logic";
 import { type AppSettings, useAppSettingsSelector } from "~/appSettings";
 import { useEffect, useRef, useId } from "react";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { isKeyboardEventComposing } from "~/lib/keyboardComposition";
 import { stepPromptHistory, type PromptHistoryPosition } from "./promptHistory";
 import type * as React from "react";
@@ -331,7 +332,7 @@ export function ChatComposer({
             <div className="rounded-t-[calc(var(--radius-xl)-1px)] border-b border-border bg-muted/40">
               <ComposerPendingUserInputPanel
                 pendingUserInputs={pendingUserInputs}
-                cwd={activeThread?.worktreePath ?? activeProject?.cwd}
+                cwd={threadWorkspaceCwd(activeThread, activeProject)}
                 respondingRequestIds={respondingRequestIds}
                 answers={pendingInteraction.activePendingDraftAnswers}
                 questionIndex={pendingInteraction.activePendingQuestionIndex}
@@ -483,7 +484,7 @@ export function ChatComposer({
                     {composerFilePaths.map((filePath) => {
                       const displayPath = relativePathForDisplay(
                         filePath,
-                        activeThread?.worktreePath ?? activeProject?.cwd,
+                        threadWorkspaceCwd(activeThread, activeProject),
                       );
                       return (
                         <FileChip

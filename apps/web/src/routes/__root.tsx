@@ -1,4 +1,5 @@
 import { HtmlPreviewHost } from "../components/HtmlPreviewHost";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { invalidateWorkflowQueries } from "../lib/workflowQueries";
 import { noteWsSynchronized, noteWsResynchronizing } from "../wsConnectionState";
 import { useComposerMentionHistoryStore } from "../composerMentionHistoryStore";
@@ -468,7 +469,7 @@ function EventRouter() {
       const { threads, projects } = useStore.getState();
       const thread = threads.find((entry) => entry.id === threadId);
       const project = thread ? projects.find((entry) => entry.id === thread.projectId) : undefined;
-      const cwd = thread?.worktreePath ?? project?.cwd;
+      const cwd = threadWorkspaceCwd(thread, project);
       return thread && cwd ? { cwd, projectId: thread.projectId } : null;
     };
     // Turn diffs and reverts refresh the affected workspace (file contents,

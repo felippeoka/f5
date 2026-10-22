@@ -1,3 +1,4 @@
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { WorkspaceTransitions } from "../persistence/Services/WorkspaceTransitions.ts";
 import { sameMoveSnapshot, isMoveCopySnapshot, type MoveSnapshot } from "../git/moveSnapshot.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -94,7 +95,7 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
   const transitionThreadIds: ThreadId[] = [];
   for (const thread of readModel.threads) {
     const project = readModel.projects.find((entry) => entry.id === thread.projectId);
-    const workspace = thread.worktreePath ?? project?.workspaceRoot;
+    const workspace = threadWorkspaceCwd(thread, project);
     if (!workspace) {
       unknown = true;
       continue;

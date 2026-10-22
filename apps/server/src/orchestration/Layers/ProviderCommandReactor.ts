@@ -62,7 +62,7 @@ import {
   normalizeProviderStartOptions,
 } from "@t3tools/shared/providerOptions";
 
-import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import {
   increment,

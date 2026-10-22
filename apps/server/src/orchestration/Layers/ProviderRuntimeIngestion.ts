@@ -92,7 +92,7 @@ import {
   ProviderTerminalEventRepository,
   type ProviderTerminalEventReceipt,
 } from "../../persistence/Services/ProviderTerminalEvents.ts";
-import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { isGitRepository } from "../../git/isRepo.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {

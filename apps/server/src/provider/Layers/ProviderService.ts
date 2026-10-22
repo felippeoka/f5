@@ -1,3 +1,4 @@
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { captureRestartTurnMarkers } from "../../nextTurnQueue/restartMarkerCapture.ts";
 import { resolveProjectProviderInstanceEnabled } from "@t3tools/shared/serverSettings";
 import { resolveOwnedMcpServerName } from "../mcpObservation.ts";
@@ -395,9 +396,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           );
         const rows = yield* workspaceSql.value<{
           worktreePath: string | null;
+          scratchPath: string | null;
           branch: string | null;
           projectCwd: string | null;
-        }>`SELECT t.worktree_path AS "worktreePath", t.branch AS "branch", p.workspace_root AS "projectCwd" FROM projection_threads t LEFT JOIN projection_projects p ON p.project_id = t.project_id WHERE t.thread_id = ${threadId}`;
+          projectKind: string | null;
+        }>`SELECT t.worktree_path AS "worktreePath", t.scratch_path AS "scratchPath", t.branch AS "branch", p.workspace_root AS "projectCwd", p.kind AS "projectKind" FROM projection_threads t LEFT JOIN projection_projects p ON p.project_id = t.project_id WHERE t.thread_id = ${threadId}`;
         const blocks = yield* workspaceSql.value<{
           token: string | null;
         }>`SELECT worktree_block_token AS token FROM next_turn_queue_state WHERE thread_id = ${threadId}`;
@@ -406,6 +409,26 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             new Error("Workspace preparation must finish before provider delivery."),
           );
         const row = rows[0];
+        // A thread without a project works only in its own folder, never the shared root.
+        if (row?.projectKind === "scratch") {
+          const scratchCwd = threadWorkspaceCwd(row, {
+            kind: "scratch",
+            cwd: row.projectCwd ?? "",
+          });
+          if (!scratchCwd)
+            return yield* Effect.fail(new Error("This thread's folder is not ready yet."));
+          if (
+            sessionCwd !== undefined &&
+            (yield* Effect.tryPromise(() => canonicalWorktreePath(sessionCwd))) !==
+              (yield* Effect.tryPromise(() => canonicalWorktreePath(scratchCwd)))
+          )
+            return yield* Effect.fail(
+              new Error(
+                "The provider session is attached to a different folder. Restart the session before sending.",
+              ),
+            );
+          return;
+        }
         if (!row?.worktreePath) return;
         if (!row.projectCwd || Option.isNone(workspaceGit))
           return yield* Effect.fail(new Error("Workspace identity cannot be verified."));

@@ -1,4 +1,5 @@
 import { type ThreadId } from "@t3tools/contracts";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -350,10 +351,7 @@ export function useThreadActionController(input: {
         return;
       }
       if (actionId === "copy-path") {
-        const workspacePath =
-          thread.worktreePath ??
-          projects.find((project) => project.id === thread.projectId)?.cwd ??
-          null;
+        const workspacePath = resolveThreadWorkspaceCwd({ thread, projects }) ?? null;
         if (!workspacePath) {
           toastManager.add({
             type: "error",

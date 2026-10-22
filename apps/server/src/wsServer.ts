@@ -28,6 +28,7 @@ import {
 import { inspectAttachableWorkspace } from "./project/workspaceAttachment.ts";
 import { prepareScratchRoot, scratchProjectIdFor } from "./project/scratchProject.ts";
 import { isScratchProject } from "@t3tools/shared/scratchProject";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { readWorktreeClaims } from "./project/worktreeClaims.ts";
 import { withRepositoryLifecycleLock } from "./project/Layers/WorktreeLifecycleCoordinator.ts";
 import {
@@ -3724,13 +3725,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             (entry) => entry.id === threadId && entry.deletedAt === null,
           );
           const project = model.projects.find((entry) => entry.id === thread?.projectId);
+          const workspace = threadWorkspaceCwd(thread, project);
           if (
             !thread ||
             !project ||
+            isScratchProject(project) ||
+            !workspace ||
             (yield* Effect.tryPromise(() => canonicalWorktreePath(input.cwd))) !==
-              (yield* Effect.tryPromise(() =>
-                canonicalWorktreePath(thread.worktreePath ?? project.workspaceRoot),
-              ))
+              (yield* Effect.tryPromise(() => canonicalWorktreePath(workspace)))
           )
             return yield* Effect.fail(
               new Error("The checkout does not match this conversation's workspace."),
@@ -4050,7 +4052,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           (entry) => entry.id === input.threadId && entry.deletedAt === null,
         );
         const project = snapshot.projects.find((entry) => entry.id === source?.projectId);
-        if (!source || !project || !providerService.nativeOperations?.executeWithApply)
+        // A fork gets its own Git worktree, which a thread without a project cannot have.
+        if (
+          !source ||
+          !project ||
+          isScratchProject(project) ||
+          !providerService.nativeOperations?.executeWithApply
+        )
           return yield* new RouteRequestError({ message: "This conversation cannot be forked." });
         if (!/^[0-9a-f-]{36}$/i.test(input.operationId))
           return yield* new RouteRequestError({ message: "Invalid fork identifier." });
@@ -4122,7 +4130,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                   .pipe(Effect.mapError(validation));
               }),
             createConfiguredWorktree({
-              cwd: source.worktreePath ?? project.workspaceRoot,
+              cwd: threadWorkspaceCwd(source, project) ?? project.workspaceRoot,
               branch: source.branch ?? "HEAD",
               baseRefName: source.branch ?? "HEAD",
               newBranch: branch,

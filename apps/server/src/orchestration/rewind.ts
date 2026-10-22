@@ -1,3 +1,4 @@
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { pruneCheckpointRefs } from "../checkpointing/pruneCheckpointRefs.ts";
 import { requireAttachmentOwner } from "../attachmentOwnership.ts";
 import { randomUUID } from "node:crypto";
@@ -138,9 +139,7 @@ export const makeConversationRewind = Effect.gen(function* () {
         return yield* fail(
           "This provider cannot reliably rewind and verify its conversation history.",
         );
-      const workspace =
-        thread.worktreePath ??
-        model.projects.find((project) => project.id === thread.projectId)?.workspaceRoot;
+      const workspace = resolveThreadWorkspaceCwd({ thread, projects: model.projects });
       const nativeFiles =
         request.restoreFiles &&
         thread.session?.providerName === "claudeAgent" &&
@@ -177,11 +176,7 @@ export const makeConversationRewind = Effect.gen(function* () {
         const cwd = yield* Effect.tryPromise(() => realpath(workspace!));
         const owners = model.threads
           .filter((other) => other.id !== thread.id && !other.deletedAt)
-          .map(
-            (other) =>
-              other.worktreePath ??
-              model.projects.find((project) => project.id === other.projectId)?.workspaceRoot,
-          );
+          .map((other) => resolveThreadWorkspaceCwd({ thread: other, projects: model.projects }));
         for (const session of yield* provider.listSessions())
           if (session.threadId !== thread.id && session.cwd) owners.push(session.cwd);
         for (const owner of owners) {

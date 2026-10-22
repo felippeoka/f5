@@ -3,7 +3,7 @@ import { CommandId, EventId, type OrchestrationEvent, ThreadId } from "@t3tools/
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { Cause, Effect, Layer, Stream } from "effect";
 
-import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { ProviderValidationError } from "../../provider/Errors.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { buildThreadCompactionTranscript } from "../compactionService.ts";

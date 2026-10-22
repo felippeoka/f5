@@ -200,6 +200,10 @@
       "types": "./src/scratchProject.ts",
       "import": "./src/scratchProject.ts"
     },
+    "./threadWorkspace": {
+      "types": "./src/threadWorkspace.ts",
+      "import": "./src/threadWorkspace.ts"
+    },
     "./appStatePaths": {
       "types": "./src/appStatePaths.ts",
       "import": "./src/appStatePaths.ts"

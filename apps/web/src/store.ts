@@ -242,6 +242,7 @@ function mapProjectsFromReadModel(
     const persistedCollapsed = persistedCollapsedProjectCwds.has(project.workspaceRoot);
     return {
       id: project.id,
+      kind: project.kind,
       name: project.title,
       defaultModel: project.defaultModel,
       defaultModelSelection: project.defaultModelSelection,
@@ -1154,6 +1155,7 @@ function buildThreadFromReadModel(
     existing.lastVisitedAt === lastVisitedAt &&
     existing.branch === thread.branch &&
     existing.worktreePath === thread.worktreePath &&
+    (existing.scratchPath ?? null) === (thread.scratchPath ?? null) &&
     existingCompaction === compaction &&
     existing.turnDiffSummaries === nextDetailFields.turnDiffSummaries &&
     existing.activities === activities &&
@@ -1209,6 +1211,7 @@ function buildThreadFromReadModel(
     lastVisitedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    scratchPath: thread.scratchPath ?? null,
     compaction,
     turnDiffSummaries: nextDetailFields.turnDiffSummaries,
     activities,

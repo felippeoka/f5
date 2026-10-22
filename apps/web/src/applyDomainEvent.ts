@@ -637,6 +637,7 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
       }
       const nextProject: Project = {
         id: event.payload.projectId,
+        kind: event.payload.kind,
         name: event.payload.title,
         cwd: event.payload.workspaceRoot,
         model: resolveProjectModel(
@@ -832,6 +833,7 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
         lastVisitedAt: event.payload.createdAt,
         branch: event.payload.branch,
         worktreePath: event.payload.worktreePath,
+        scratchPath: event.payload.scratchPath,
         compaction: null,
         turnDiffSummaries: [],
         activities: [],

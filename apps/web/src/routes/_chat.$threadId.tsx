@@ -19,6 +19,8 @@ import {
 } from "react";
 
 import { Schema } from "effect";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { getLocalStorageItem } from "../hooks/useLocalStorage";
 import { type AppSettings, updateAppSettings, useAppSettingsSelector } from "../appSettings";
 import ChatView from "../components/ChatView";
@@ -349,7 +351,6 @@ function ChatThreadRouteView() {
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
   );
   const effectiveProjectId = thread?.projectId ?? draftThread?.projectId ?? null;
-  const effectiveWorktreePath = thread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const activeProject = useStore((store) =>
     effectiveProjectId
       ? (store.projects.find((project) => project.id === effectiveProjectId) ?? null)
@@ -409,9 +410,13 @@ function ChatThreadRouteView() {
       threadTasks,
     ],
   );
-  const markdownCwd = effectiveWorktreePath ?? activeProject?.cwd ?? undefined;
-  const workspaceRoot = activeProject?.cwd ?? undefined;
-  const workspaceBrowserRoot = effectiveWorktreePath ?? activeProject?.cwd ?? null;
+  const markdownCwd = threadWorkspaceCwd(thread ?? draftThread, activeProject);
+  // A thread without a project treats its own folder as the root; the shared scratch root is
+  // never shown.
+  const workspaceRoot = isScratchProject(activeProject)
+    ? markdownCwd
+    : (activeProject?.cwd ?? undefined);
+  const workspaceBrowserRoot = markdownCwd ?? null;
   const workspaceBrowserName = activeProject?.name ?? "Workspace";
   const workspaceBrowserIdentity =
     effectiveProjectId && workspaceBrowserRoot
