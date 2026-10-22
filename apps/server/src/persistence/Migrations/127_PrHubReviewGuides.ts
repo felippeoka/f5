@@ -3,7 +3,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* sql`CREATE TABLE pr_hub_review_guides (
+  yield* sql`CREATE TABLE IF NOT EXISTS pr_hub_review_guides (
     account_id TEXT NOT NULL,
     pr_key TEXT NOT NULL,
     head_sha TEXT,
