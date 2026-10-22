@@ -1,11 +1,12 @@
-import Migration0134 from "./Migrations/134_ScratchProjects.ts";
-import Migration0133 from "./Migrations/133_RestartBackgroundWork.ts";
-import Migration0132 from "./Migrations/132_BackgroundWorkEffort.ts";
-import Migration0131 from "./Migrations/131_NativeHistoryRetiredTurns.ts";
-import Migration0130 from "./Migrations/130_McpApps.ts";
-import Migration0129 from "./Migrations/129_ThreadSettlement.ts";
-import Migration0128 from "./Migrations/128_ThreadPullRequestWatches.ts";
-import Migration0127 from "./Migrations/127_PrHubReviewGuides.ts";
+import Migration0135 from "./Migrations/135_ScratchProjects.ts";
+import Migration0134 from "./Migrations/134_RestartBackgroundWork.ts";
+import Migration0133 from "./Migrations/133_BackgroundWorkEffort.ts";
+import Migration0132 from "./Migrations/132_NativeHistoryRetiredTurns.ts";
+import Migration0131 from "./Migrations/131_McpApps.ts";
+import Migration0130 from "./Migrations/130_ThreadSettlement.ts";
+import Migration0129 from "./Migrations/129_ThreadPullRequestWatches.ts";
+import Migration0128 from "./Migrations/128_PrHubReviewGuides.ts";
+import Migration0127 from "./Migrations/127_ClearPlanningWorkflowLaneBranches.ts";
 import Migration0126 from "./Migrations/126_ProviderTerminalRecoveryIndexes.ts";
 import Migration0124 from "./Migrations/124_ProviderTerminalRetry.ts";
 import Migration0125 from "./Migrations/125_ProviderTerminalRetryIndexes.ts";
@@ -167,18 +168,19 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
-  // 124 to 126 shipped on main first; the October migrations follow them.
-  "134_ScratchProjects": Migration0134,
-  "133_RestartBackgroundWork": Migration0133,
-  "129_ThreadSettlement": Migration0129,
-  "130_McpApps": Migration0130,
-  "131_NativeHistoryRetiredTurns": Migration0131,
-  "132_BackgroundWorkEffort": Migration0132,
-  "128_ThreadPullRequestWatches": Migration0128,
-  "127_PrHubReviewGuides": Migration0127,
+  // 124 to 127 shipped on main first; the October migrations follow them.
+  "135_ScratchProjects": Migration0135,
+  "134_RestartBackgroundWork": Migration0134,
+  "130_ThreadSettlement": Migration0130,
+  "131_McpApps": Migration0131,
+  "132_NativeHistoryRetiredTurns": Migration0132,
+  "133_BackgroundWorkEffort": Migration0133,
+  "129_ThreadPullRequestWatches": Migration0129,
+  "128_PrHubReviewGuides": Migration0128,
   "124_ProviderTerminalRetry": Migration0124,
   "125_ProviderTerminalRetryIndexes": Migration0125,
   "126_ProviderTerminalRecoveryIndexes": Migration0126,
+  "127_ClearPlanningWorkflowLaneBranches": Migration0127,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,

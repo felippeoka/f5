@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { PullRequestKey, ThreadId, type ThreadPullRequestWatch } from "@t3tools/contracts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqliteClient from "../persistence/NodeSqliteClient.ts";
-import Migration125 from "../persistence/Migrations/128_ThreadPullRequestWatches.ts";
+import Migration125 from "../persistence/Migrations/129_ThreadPullRequestWatches.ts";
 import { makePullRequestWatchStore } from "./PullRequestWatchStore.ts";
 
 const threadId = ThreadId.makeUnsafe("watch-thread");
