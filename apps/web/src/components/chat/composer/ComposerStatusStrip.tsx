@@ -1,5 +1,12 @@
 import type { LucideIcon } from "lucide-react";
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 
 import { cn } from "~/lib/utils";
 import { Popover, PopoverPopup, PopoverTrigger } from "../../ui/popover";
@@ -73,6 +80,8 @@ export function StatusChip(props: {
   readonly open?: boolean | undefined;
   readonly onOpenChange?: ((open: boolean) => void) | undefined;
   readonly chipId?: string | undefined;
+  /** Where focus lands when the popover opens; defaults to Base UI's choice. */
+  readonly initialFocus?: ComponentProps<typeof PopoverPopup>["initialFocus"];
 }) {
   const Icon = props.icon;
   return (
@@ -97,6 +106,7 @@ export function StatusChip(props: {
         align="start"
         sideOffset={6}
         aria-label={props.popupLabel}
+        {...(props.initialFocus !== undefined ? { initialFocus: props.initialFocus } : {})}
         className="w-[min(28rem,calc(100vw-2rem))] [&>[data-slot=popover-viewport]]:max-h-[min(50dvh,26rem,var(--available-height))] [&>[data-slot=popover-viewport]]:p-0"
       >
         {props.children}

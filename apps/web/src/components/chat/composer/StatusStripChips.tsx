@@ -1,9 +1,8 @@
-import type { ThreadId, ThreadTaskTracking, WorktreeSetupSnapshot } from "@t3tools/contracts";
+import type { ThreadTaskTracking, WorktreeSetupSnapshot } from "@t3tools/contracts";
 import { GitBranchIcon, ListOrderedIcon, ListTodoIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { TaskItem } from "~/types";
-import { useNextTurnQueueHydration } from "../NextTurnQueuePanel";
 import type { ThreadNotice } from "../ThreadNoticeStack";
 import { StatusChip } from "./ComposerStatusStrip";
 import {
@@ -100,14 +99,10 @@ export function WorktreeStatusChip(props: {
 }
 
 export function QueueStatusChip(props: {
-  readonly threadId: ThreadId;
   readonly summary: QueueChipSummary;
   /** The queue panel the popover opens. */
   readonly children: ReactNode;
 }) {
-  // The panel only mounts while the popover is open, so the chip keeps the
-  // queue loaded across reconnects.
-  useNextTurnQueueHydration(props.threadId);
   const { count, preview, paused, warning } = props.summary;
   const countLabel = `${count} queued`;
   return (
@@ -119,6 +114,8 @@ export function QueueStatusChip(props: {
         .filter(Boolean)
         .join(", ")}
       popupLabel="Queued turns"
+      // Land on the panel, as "Focus queued turns" does when it is inline.
+      initialFocus={() => document.getElementById("next-turn-queue-panel") ?? true}
       label={
         <>
           <span className="tabular-nums">{countLabel}</span>

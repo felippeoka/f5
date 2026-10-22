@@ -223,7 +223,6 @@ describe("ComposerStatusStrip", () => {
       <Harness
         chips={
           <QueueStatusChip
-            threadId={threadId}
             summary={{ count: 2, preview: "great, now open the PR", paused: true, warning: true }}
           >
             <p>Queued turns panel</p>

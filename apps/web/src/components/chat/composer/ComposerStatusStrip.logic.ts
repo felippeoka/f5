@@ -34,7 +34,8 @@ export interface QueueChipSummary {
 /**
  * The queue as a status chip, or null when it must stay inline: nothing is
  * queued, or the queue needs the user (a delivery to recover, quarantined
- * turns, an error, a workspace switch in progress or a failed sync).
+ * turns, an error, a pause the user did not ask for, a workspace switch in
+ * progress or a failed sync).
  */
 export function summarizeQueueChip(input: {
   readonly snapshot: NextTurnQueueSnapshot | null;
@@ -50,7 +51,8 @@ export function summarizeQueueChip(input: {
     snapshot.reasonCode === "delivery_rejected" ||
     snapshot.reasonCode === "delivery_ambiguous" ||
     snapshot.quarantinedCount > 0 ||
-    snapshot.blockedKind === "error"
+    snapshot.blockedKind === "error" ||
+    (snapshot.paused && snapshot.reasonCode !== "manual_pause")
   ) {
     return null;
   }

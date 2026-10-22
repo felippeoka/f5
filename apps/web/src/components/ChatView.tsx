@@ -252,7 +252,7 @@ import { setSearchParamsForSurface } from "../rightPanelNavigation";
 import { canStartImplementation, workflowContainsThread } from "./workflow/workflowUtils";
 import { codeReviewWorkflowContainsThread } from "./workflow/codeReviewWorkflowUtils";
 import { investigationWorkflowContainsThread } from "./workflow/investigationWorkflowUtils";
-import { HardDriveIcon, MessagesSquareIcon, TriangleAlertIcon } from "lucide-react";
+import { HardDriveIcon, MessagesSquareIcon } from "lucide-react";
 import { Button } from "./ui/button";
 
 import { randomUUID } from "~/lib/utils";
@@ -357,7 +357,7 @@ import type { RewindDraft } from "@t3tools/contracts";
 import { UserInputAttachments } from "./chat/UserInputAttachments";
 import { AsyncUserInputPanel } from "./chat/AsyncUserInputPanel";
 import { ElicitationPanel } from "./chat/ElicitationPanel";
-import { NextTurnQueuePanel } from "./chat/NextTurnQueuePanel";
+import { NextTurnQueuePanel, NextTurnQueueSync } from "./chat/NextTurnQueuePanel";
 import { shouldShowWorktreeSetupCard, WorktreeSetupCard } from "./chat/WorktreeSetupCard";
 import { useWorktreeSetup } from "../hooks/useWorktreeSetup";
 import { runFanOut, toggleFanOutModel, type FanOutAttempt, type FanOutModel } from "./chat/fanOut";
@@ -375,7 +375,7 @@ import {
 } from "./chat/composerProviderState";
 import { supportsClaudeTraitsControls } from "./chat/ClaudeTraitsPicker";
 
-import { ProviderHealthBanner, providerHealthLabel } from "./chat/ProviderHealthBanner";
+import { ProviderHealthBanner, providerHealthChip } from "./chat/ProviderHealthBanner";
 import { fullestLowDiskVolume, LowDiskSpaceBanner } from "./chat/LowDiskSpaceBanner";
 import { useDiskSpaceStatus } from "../hooks/useDiskSpaceStatus";
 import {
@@ -7059,21 +7059,10 @@ export default function ChatView({
     !isProviderStatusDismissed &&
     activeProviderStatus.status !== "ready"
   ) {
-    const providerLabel = providerHealthLabel(activeProviderStatus);
-    const providerHealthState = activeProviderStatus.status === "disabled" ? "disabled" : "limited";
+    const providerChip = providerHealthChip(activeProviderStatus);
     threadNotices.push({
       id: "provider-health",
-      // An unavailable provider stays inline; limited availability can fold into a chip.
-      ...(activeProviderStatus.status !== "error"
-        ? {
-            chip: {
-              icon: TriangleAlertIcon,
-              tone: "warning" as const,
-              label: `${providerLabel} ${providerHealthState}`,
-              ariaLabel: `${providerLabel} status: ${providerHealthState}`,
-            },
-          }
-        : {}),
+      ...(providerChip ? { chip: providerChip } : {}),
       content: (
         <ProviderHealthBanner
           status={activeProviderStatus}
@@ -7141,6 +7130,7 @@ export default function ChatView({
   const nextTurnQueuePanel = (
     <NextTurnQueuePanel
       variant="tray"
+      synced
       turnSteering={isSessionActionSupported(
         activeThread.session?.capabilities,
         "steer",
@@ -7547,6 +7537,9 @@ export default function ChatView({
                   className={isGitRepo ? "pb-0.5" : "pb-3 sm:pb-4"}
                 >
                   <ComposerStatusStripHostProvider>
+                    {/* The panel unmounts inside a closed chip popover, so the
+                      queue's loading and announcements live here. */}
+                    {isServerThread ? <NextTurnQueueSync threadId={activeThread.id} /> : null}
                     {compactChatLayout ? (
                       <ComposerStatusStrip>
                         {tasksPanelVisible ? (
@@ -7566,7 +7559,7 @@ export default function ChatView({
                         ) : null}
                         <ComposerStatusStripSlot />
                         {queueChip ? (
-                          <QueueStatusChip threadId={activeThread.id} summary={queueChip}>
+                          <QueueStatusChip summary={queueChip}>
                             {nextTurnQueuePanel}
                           </QueueStatusChip>
                         ) : null}

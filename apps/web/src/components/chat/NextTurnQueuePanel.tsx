@@ -62,11 +62,10 @@ function rebuildEditedText(item: NextTurnQueueItem, visibleText: string): string
 }
 
 /**
- * Lists the thread's queue on every (re)connect; pushed updates keep it
- * current in between. Whatever shows the queue (the panel, or its status chip
- * while the panel sits in a closed popover) keeps this mounted.
+ * Lists the thread's queue on every (re)connect while `auto` is set; pushed
+ * updates keep it current in between. Returns the loader for manual retries.
  */
-export function useNextTurnQueueHydration(threadId: ThreadId): () => Promise<void> {
+function useNextTurnQueueHydration(threadId: ThreadId, auto: boolean): () => Promise<void> {
   const connection = useWsConnectionState();
   const applySnapshot = useNextTurnQueueStore((store) => store.applySnapshot);
   const setHydrationError = useNextTurnQueueStore((store) => store.setHydrationError);
@@ -81,9 +80,44 @@ export function useNextTurnQueueHydration(threadId: ThreadId): () => Promise<voi
   }, [applySnapshot, setHydrationError, threadId]);
 
   useEffect(() => {
-    if (connection.phase === "connected") void load();
-  }, [connection.connectedAt, connection.phase, load]);
+    if (auto && connection.phase === "connected") void load();
+  }, [auto, connection.connectedAt, connection.phase, load]);
   return load;
+}
+
+/** The polite announcement for the latest queue change, such as a turn sent or a pause. */
+function useQueueAnnouncement(threadId: ThreadId, enabled: boolean): string {
+  const snapshot = useNextTurnQueueStore((store) => store.byThreadId[threadId]?.snapshot ?? null);
+  const [announcement, setAnnouncement] = useState("");
+  const previousSnapshotRef = useRef(snapshot);
+
+  useEffect(() => {
+    if (!enabled || !snapshot) return;
+    const next = deriveQueueAnnouncement(previousSnapshotRef.current, snapshot);
+    previousSnapshotRef.current = snapshot;
+    if (!next) return;
+    const timeout = window.setTimeout(() => setAnnouncement(next), 400);
+    return () => window.clearTimeout(timeout);
+  }, [enabled, snapshot]);
+  return announcement;
+}
+
+function QueueAnnouncer({ announcement }: { readonly announcement: string }) {
+  return (
+    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {announcement}
+    </span>
+  );
+}
+
+/**
+ * Keeps a thread's queue loaded and announced while its panel may be
+ * unmounted, as it is inside a closed status-chip popover. Panels rendered
+ * alongside it pass `synced`.
+ */
+export function NextTurnQueueSync({ threadId }: { readonly threadId: ThreadId }) {
+  useNextTurnQueueHydration(threadId, true);
+  return <QueueAnnouncer announcement={useQueueAnnouncement(threadId, true)} />;
 }
 
 export function NextTurnQueuePanel({
@@ -94,8 +128,11 @@ export function NextTurnQueuePanel({
   turnSteering = false,
   variant = "standalone",
   foldedItemId = null,
+  synced = false,
 }: {
   readonly variant?: ComposerPanelVariant;
+  /** A mounted `NextTurnQueueSync` already loads and announces this queue. */
+  readonly synced?: boolean;
   readonly threadId: ThreadId;
   /** The pending continue the usage-limit card shows instead of this list. */
   readonly foldedItemId?: CommandId | null;
@@ -126,21 +163,10 @@ export function NextTurnQueuePanel({
   const setPendingOrder = useNextTurnQueueStore((store) => store.setPendingOrder);
   const setItemBusy = useNextTurnQueueStore((store) => store.setItemBusy);
   const [collapsed, setCollapsed] = useState(false);
-  const [announcement, setAnnouncement] = useState("");
-  const previousSnapshotRef = useRef(state.snapshot);
+  const announcement = useQueueAnnouncement(threadId, !synced);
   const watchdogRef = useRef<number | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const load = useNextTurnQueueHydration(threadId);
-
-  useEffect(() => {
-    const snapshot = state.snapshot;
-    if (!snapshot) return;
-    const next = deriveQueueAnnouncement(previousSnapshotRef.current, snapshot);
-    previousSnapshotRef.current = snapshot;
-    if (!next) return;
-    const timeout = window.setTimeout(() => setAnnouncement(next), 400);
-    return () => window.clearTimeout(timeout);
-  }, [state.snapshot]);
+  const load = useNextTurnQueueHydration(threadId, !synced);
 
   useEffect(() => {
     if (state.snapshot?.paused || state.snapshot?.blockedKind === "error") setCollapsed(false);
@@ -148,9 +174,14 @@ export function NextTurnQueuePanel({
 
   useEffect(
     () => () => {
-      if (watchdogRef.current !== null) window.clearTimeout(watchdogRef.current);
+      if (watchdogRef.current === null) return;
+      window.clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+      // The watchdog was the only thing left to drop an order the server has
+      // not matched; a stale one would hide items that arrive later.
+      setPendingOrder(threadId, null);
     },
-    [],
+    [setPendingOrder, threadId],
   );
 
   const runItemMutation = useCallback(
@@ -197,6 +228,7 @@ export function NextTurnQueuePanel({
       setPendingOrder(threadId, orderedItemIds);
       if (watchdogRef.current !== null) window.clearTimeout(watchdogRef.current);
       watchdogRef.current = window.setTimeout(() => {
+        watchdogRef.current = null;
         setPendingOrder(threadId, null);
         void load();
       }, 5_000);
@@ -312,9 +344,7 @@ export function NextTurnQueuePanel({
       }
       aria-label="Queued turns"
     >
-      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {announcement}
-      </span>
+      {synced ? null : <QueueAnnouncer announcement={announcement} />}
       <span id="next-turn-queue-reorder-help" className="sr-only">
         Press Alt+Up or Alt+Down to reorder this queued turn.
       </span>

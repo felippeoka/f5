@@ -95,6 +95,14 @@ describe("summarizeQueueChip", () => {
     expect(summarize(queueSnapshot(), { syncError: "offline" })).toBeNull();
   });
 
+  it("leaves a queue the server paused inline", () => {
+    for (const reasonCode of ["turn_interrupted", "thread_reverted", "thread_compacted"] as const) {
+      expect(
+        summarize(queueSnapshot({ paused: true, blockedKind: "paused", reasonCode })),
+      ).toBeNull();
+    }
+  });
+
   it("skips the continue the usage-limit card already shows", () => {
     const folded = queueItem("folded", "continue", { scheduleReason: "usage_limit_reset" });
     expect(

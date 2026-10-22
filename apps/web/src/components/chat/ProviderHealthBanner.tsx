@@ -1,18 +1,34 @@
 import { PROVIDER_DISPLAY_NAMES, type ServerProvider } from "@t3tools/contracts";
-import { XIcon } from "lucide-react";
+import { TriangleAlertIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
 import { presentProviderStatus } from "../onboarding/providerStatusIcon";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
+import type { ThreadNoticeChip } from "./ThreadNoticeStack";
 
-export function providerHealthLabel(
-  status: Pick<ServerProvider, "displayName" | "driver">,
-): string {
+function providerHealthLabel(status: Pick<ServerProvider, "displayName" | "driver">): string {
   return (
     status.displayName ??
     (PROVIDER_DISPLAY_NAMES as Partial<Record<string, string>>)[status.driver] ??
     status.driver
   );
+}
+
+/**
+ * Limited availability can fold into a status chip. A disabled or unavailable
+ * provider blocks sends, so it stays inline.
+ */
+export function providerHealthChip(
+  status: Pick<ServerProvider, "displayName" | "driver" | "status">,
+): ThreadNoticeChip | null {
+  if (status.status !== "warning") return null;
+  const providerLabel = providerHealthLabel(status);
+  return {
+    icon: TriangleAlertIcon,
+    tone: "warning",
+    label: `${providerLabel} limited`,
+    ariaLabel: `${providerLabel} status: limited`,
+  };
 }
 
 export const ProviderHealthBanner = memo(function ProviderHealthBanner({

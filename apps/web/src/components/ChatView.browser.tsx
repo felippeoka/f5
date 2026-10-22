@@ -4505,6 +4505,91 @@ describe("ChatView timeline (full app)", () => {
     }
   });
 
+  it("opens the queue chip and focuses its panel from the command palette", async () => {
+    persistAppSettings({ compactChatLayout: true });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-queue-palette" as MessageId,
+        targetText: "queue palette target",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.resolveWsRequest = (body) =>
+          body._tag === WS_METHODS.nextTurnQueueList
+            ? {
+                type: "result",
+                result: {
+                  threadId: THREAD_ID,
+                  revision: 1,
+                  paused: false,
+                  blockedKind: null,
+                  reasonCode: null,
+                  reasonDetail: null,
+                  maxItems: 20,
+                  quarantinedCount: 0,
+                  items: [
+                    {
+                      itemId: "queue-palette-item",
+                      threadId: THREAD_ID,
+                      submissionId: "queue-palette-submission",
+                      position: 0,
+                      status: "queued",
+                      command: {
+                        type: "thread.turn.start",
+                        commandId: "queue-palette-command",
+                        threadId: THREAD_ID,
+                        message: {
+                          messageId: "queue-palette-message",
+                          role: "user",
+                          text: "Queued from the palette test",
+                          attachments: [],
+                        },
+                        runtimeMode: "full-access",
+                        interactionMode: "default",
+                        createdAt: NOW_ISO,
+                      },
+                      attemptCount: 0,
+                      notBefore: null,
+                      dispatchStartedAt: null,
+                      lastErrorCode: null,
+                      lastErrorDetail: null,
+                      createdAt: NOW_ISO,
+                      updatedAt: NOW_ISO,
+                    },
+                  ],
+                },
+              }
+            : null;
+      },
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-status-chip="queue"]')).not.toBeNull();
+          expect(document.getElementById("next-turn-queue-panel")).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      useCommandPaletteStore.getState().setOpen(true);
+      await page.getByTestId("command-palette").getByText("Focus queued turns").click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-testid="command-palette"]')).toBeNull();
+          expect(document.activeElement?.id).toBe("next-turn-queue-panel");
+        },
+        { timeout: 4_000, interval: 16 },
+      );
+      await expect
+        .element(page.getByText("Queued from the palette test", { exact: true }))
+        .toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("focuses the composer when Home hands off a focus request for this thread", async () => {
     requestComposerFocus(THREAD_ID);
     const mounted = await mountChatView({
