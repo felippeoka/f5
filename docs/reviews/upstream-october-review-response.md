@@ -3197,3 +3197,54 @@ Validation:
   FileViewPanel, Settings, Home and new-project dialog browser suites.
 - The workspace guard and the shared resolver tests pass.
 - The slug test failed on accented names until combining marks were stripped.
+
+## 15n triage log: prompt links
+
+Both records in the ledger's range are closed as not applicable. They are
+React Compiler refactors of upstream's prompt link page and hosted landing
+([t3code#20559](https://github.com/pingdotgg/t3code/pull/20559),
+[t3code#20712](https://github.com/pingdotgg/t3code/pull/20712)). The feature
+they refactor is the approved 15n plan item, which F5 now implements in four
+commits:
+
+- Parsing and sanitizing, in `packages/shared/src/promptLinks.ts`. Prompts are
+  capped at 8,000 characters. Zero-width, bidi, tag and other invisible
+  characters are removed, and the user is warned about them. A prompt made
+  only of such characters is refused. `promptLinkAppPath` maps only `new` and
+  `thread/<id>` to app routes. It refuses dot segments and thread ids that name
+  one of the app's own screens, so a link cannot reach Settings.
+- The web side. `/new` puts the prompt in a new draft. With no repository it
+  uses a thread without a project. With a repository it uses the most recently
+  used project whose GitHub remote matches, found by the new
+  `projects.findByRepository`. When none matches, it offers Clone (showing the
+  full URL) or Use without a project. A pull request link opens the thread that
+  already tracks it, or checks it out in a new worktree after the user
+  confirms. `/<thread>?prompt=` fills that thread's composer and asks before
+  replacing a draft. The provider and model apply only when that provider is
+  set up. A link never sends a message. "Copy prompt link" is in the palette
+  and on user messages.
+- The desktop side. F5 registers `f5://`, and development builds register
+  `f5-dev://`. Packaged builds declare the scheme at install time. Links arrive
+  through `open-url` or the command line, wait in the main process until a
+  window takes them (so a cold start loses nothing), and open in the profile in
+  use. With more than one profile, F5 names the profile the link opened in.
+
+Also ported, from past the ledger's last interval: a new-thread link opened
+from a thread no longer lands in that thread
+([t3code#19326](https://github.com/pingdotgg/t3code/pull/19326)). During a
+pending navigation the router already reports `/new` while the thread is still
+mounted, so the thread route now handles a prompt only on its own path.
+
+Validation:
+
+- The shared, web, desktop, contracts and scripts typechecks pass.
+- The prompt link unit tests pass, as do the browser tests for the `/new`
+  view, the thread link hook and the desktop link controller. The desktop inbox
+  tests and the server `projects.findByRepository` test also pass.
+- The #19326 test failed before the fix: the leaving thread's composer received
+  the prompt.
+- `f5://thread/../settings` resolved to Settings until dot segments and reserved
+  routes were refused.
+- The desktop app was not launched. Dev Electron does not start in this
+  environment, so the OS handoff (`open-url`, second instance) is covered only
+  by unit tests.

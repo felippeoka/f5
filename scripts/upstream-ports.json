@@ -18016,10 +18016,9 @@
     {
       "upstreamSha": "74920122f6477cb32dec149742c2b06d0643482b",
       "subject": "perf(web): the prompt link page compiles with the React Compiler (#20559)",
-      "reason": "Planned: reconcile the approved 15n feature and its follow-ups. Upstream change: perf(web): the prompt link page compiles with the React Compiler (#20559).",
+      "reason": "Not applicable: React Compiler adoption for upstream's prompt link page (NewThreadLinkView.tsx), which the plan classifies as maintenance. F5 implements prompt links with its own NewThreadLinkView (commit 699075e678) and compiles only annotated components; there is no behavior to port. Upstream change: perf(web): the prompt link page compiles with the React Compiler (#20559)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15n"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "749baec353d5675f1acac81f22aa15da573e71c7",
@@ -27615,10 +27614,9 @@
     {
       "upstreamSha": "b84a591f706784ee70ef4c78670ed31a88c3c559",
       "subject": "perf(web): the hosted prompt link landing compiles without manual memoization (#20712)",
-      "reason": "Planned: reconcile the approved 15n feature and its follow-ups. Upstream change: perf(web): the hosted prompt link landing compiles without manual memoization (#20712).",
+      "reason": "Not applicable: removal of manual memoization from upstream's hosted prompt link landing, which the plan classifies as maintenance. F5 has no hosted landing page; its desktop app opens f5:// links directly (commit de28637a8f). Upstream change: perf(web): the hosted prompt link landing compiles without manual memoization (#20712)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15n"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b84f63bb13f13b1d0ee8537c4d244d6f1efdb987",

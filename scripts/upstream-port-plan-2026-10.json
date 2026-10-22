@@ -882,18 +882,9 @@
     },
     {
       "upstreamSha": "74920122f6477cb32dec149742c2b06d0643482b",
-      "classification": "planned:15n",
-      "reason": "Planned: reconcile the approved 15n feature and its follow-ups. Upstream change: perf(web): the prompt link page compiles with the React Compiler (#20559).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": [
-          "15n-pr-20559"
-        ],
-        "targetModules": [
-          "apps/desktop/src",
-          "apps/web/src/routes"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: React Compiler adoption for upstream's prompt link page (NewThreadLinkView.tsx), which the plan classifies as maintenance. F5 implements prompt links with its own NewThreadLinkView (commit 699075e678) and compiles only annotated components; there is no behavior to port. Upstream change: perf(web): the prompt link page compiles with the React Compiler (#20559)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1e42057c97bad2194a836f73ce8a9b71930fc5be",
@@ -2032,18 +2023,9 @@
     },
     {
       "upstreamSha": "b84a591f706784ee70ef4c78670ed31a88c3c559",
-      "classification": "planned:15n",
-      "reason": "Planned: reconcile the approved 15n feature and its follow-ups. Upstream change: perf(web): the hosted prompt link landing compiles without manual memoization (#20712).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": [
-          "15n-pr-20712"
-        ],
-        "targetModules": [
-          "apps/desktop/src",
-          "apps/web/src/routes"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not applicable: removal of manual memoization from upstream's hosted prompt link landing, which the plan classifies as maintenance. F5 has no hosted landing page; its desktop app opens f5:// links directly (commit de28637a8f). Upstream change: perf(web): the hosted prompt link landing compiles without manual memoization (#20712)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f43206d35f056ce0955382d761f1fdc4d2b8bcb1",
