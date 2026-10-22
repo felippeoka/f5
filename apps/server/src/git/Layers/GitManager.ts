@@ -1526,7 +1526,10 @@ export const makeGitManager = Effect.gen(function* () {
       }
 
       const preparationProject = yield* getProject(input.cwd);
-      const preparationScript = setupProjectScript(preparationProject?.scripts ?? []);
+      const preparationScript =
+        input.runSetupScript === false
+          ? null
+          : setupProjectScript(preparationProject?.scripts ?? []);
       const worktree = yield* gitCore.createWorktree({
         preparation: {
           owner: `pr:${localPullRequestBranch}`,

@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { useStartupReady } from "~/lib/startupReady";
 
 import { toastManager } from "../ui/toast";
+import { promptLinkDeliveryState } from "./promptLinkDelivery";
 
 /**
  * Opens the prompt links the OS handed the desktop app. Links wait in the main process until
@@ -24,7 +25,7 @@ export function DesktopPromptLinkController() {
           // Several links at once are opened as the user clicked them, so the last one wins.
           const path = links.map(promptLinkAppPath).findLast((candidate) => candidate !== null);
           if (!path) return;
-          void navigate({ href: path });
+          void navigate({ href: path, state: promptLinkDeliveryState() });
           if (profileName)
             toastManager.add({
               type: "info",

@@ -593,6 +593,52 @@ describe("GitManager unit", () => {
     expect(git.calls.createWorktree).toHaveLength(1);
   });
 
+  it("skips the project's setup script when the caller opts out", async () => {
+    const projectId = ProjectId.makeUnsafe("setup-project");
+    const prepare = (runSetupScript?: boolean) =>
+      makeManager({
+        projects: [
+          {
+            projectId,
+            title: "Setup project",
+            workspaceRoot: cwd,
+            defaultModel: null,
+            scripts: [
+              {
+                id: "setup",
+                name: "Setup",
+                command: "bun install",
+                icon: "play",
+                runOnWorktreeCreate: true,
+              },
+            ],
+            createdAt: "2026-09-29T00:00:00Z",
+            updatedAt: "2026-09-29T00:00:00Z",
+            deletedAt: null,
+          },
+        ],
+        gitCore: {
+          statusDetails: () => Effect.succeed(cleanStatus),
+          listBranches: () => Effect.succeed({ branches: [], isRepo: true, hasOriginRemote: true }),
+          createWorktree: () =>
+            Effect.succeed({ worktree: { path: "/tmp/f5-pr-worktree", branch: "feature/test" } }),
+        },
+      }).then(async ({ manager, git }) => {
+        await Effect.runPromise(
+          manager.preparePullRequestThread({
+            cwd,
+            reference: "42",
+            mode: "worktree",
+            ...(runSetupScript === undefined ? {} : { runSetupScript }),
+          }),
+        );
+        return (git.calls.createWorktree[0]?.[0] as { preparation?: unknown }).preparation;
+      });
+
+    expect(await prepare()).toMatchObject({ runSetupScript: true, setupIdentity: "bun install" });
+    expect(await prepare(false)).toMatchObject({ runSetupScript: false, setupIdentity: null });
+  });
+
   it("rejects a stale expected PR head before checkout or fetch", async () => {
     const { manager, github, git } = await makeManager();
 

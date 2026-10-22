@@ -40,7 +40,12 @@ it("opens the newest queued link once startup is ready and names the profile", a
 
   startup.ready = true;
   await screen.rerender(<DesktopPromptLinkController />);
-  await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ href: "/new?prompt=second" }));
+  await vi.waitFor(() =>
+    expect(navigate).toHaveBeenCalledWith({
+      href: "/new?prompt=second",
+      state: { promptLinkDelivery: expect.any(String) },
+    }),
+  );
   expect(navigate).toHaveBeenCalledTimes(1);
   expect(toast.add).toHaveBeenCalledWith(
     expect.objectContaining({ title: "Opened the link in your Work profile" }),
@@ -58,6 +63,10 @@ it("takes links again when its window gains focus", async () => {
   await vi.waitFor(() => expect(bridge.takePromptLinks).toHaveBeenCalledTimes(1));
 
   window.dispatchEvent(new Event("focus"));
-  await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ href: "/thread-1?prompt=Retry" }));
+  await vi.waitFor(() =>
+    expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ href: "/thread-1?prompt=Retry" }),
+    ),
+  );
   expect(toast.add).not.toHaveBeenCalled();
 });

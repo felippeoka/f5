@@ -23,7 +23,7 @@ import { useServerMutationsAvailable } from "~/wsConnectionState";
 import { openProjectCloneDialog } from "../ProjectCloneController";
 import { resolvePrF5ModelSelection } from "../prHub/prF5Thread";
 import { Button } from "../ui/button";
-import { applyLinkedModel, placeLinkedPrompt } from "./linkedPrompt";
+import { placeLinkedPrompt, resolveLinkedModel } from "./linkedPrompt";
 
 type NewLink = Extract<NewThreadLink, { kind: "new" }>;
 type PullRequestLink = Extract<NewThreadLink, { kind: "pull-request" }>;
@@ -43,6 +43,11 @@ type LinkState =
       readonly link: PullRequestLink;
       readonly project: LinkedProject;
     };
+
+interface Operation {
+  readonly current: () => boolean;
+  readonly setState: (state: LinkState) => void;
+}
 
 const linkRepository = (link: NewThreadLink) =>
   link.kind === "new" ? link.repository : link.pullRequest;
@@ -87,6 +92,8 @@ async function openPullRequestThread(
       cwd: project.workspaceRoot,
       reference: url,
       mode: "worktree",
+      // The pull request may come from a fork, and the user only agreed to a checkout.
+      runSetupScript: false,
     }),
     api.prHub.peek({ url }).catch(() => null),
     api.server.getConfig(),
@@ -131,7 +138,14 @@ async function openPullRequestThread(
  * the prompt in a new draft. Pull request links open the pull request's thread, or check it out
  * in a new worktree once the user confirms. A link never sends a message.
  */
-export function NewThreadLinkView({ search }: { readonly search: string }) {
+export function NewThreadLinkView({
+  search,
+  delivery = null,
+}: {
+  readonly search: string;
+  /** Marks one opening of the link, so opening the same link again is handled again. */
+  readonly delivery?: string | null;
+}) {
   const navigate = useNavigate();
   const createDraftThread = useCreateProjectBackedDraftThread();
   const startScratchThread = useStartScratchThread();
@@ -149,22 +163,57 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
     activity.current = activityInputs;
   });
 
+  // Each operation checks that it is still the latest one, and that the view is still mounted,
+  // before it navigates, changes a draft or updates the screen. Work for a link the user has
+  // since replaced, or left, ends quietly.
+  const generation = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const begin = useCallback((): Operation => {
+    const id = ++generation.current;
+    const current = () => mounted.current && generation.current === id;
+    return {
+      current,
+      setState: (next) => {
+        if (current()) setState(next);
+      },
+    };
+  }, []);
+
   const openDraft = useCallback(
-    async (link: NewLink, projectId: ProjectId | null) => {
+    async (operation: Operation, link: NewLink, projectId: ProjectId | null) => {
+      const providers =
+        link.provider === null
+          ? []
+          : await ensureNativeApi()
+              .server.getConfig()
+              .then((config) => config.providers)
+              .catch(() => []);
+      if (!operation.current()) return;
       const created =
         projectId === null ? await startScratchThread() : await createDraftThread(projectId);
       if (!created) {
-        setState({ kind: "failed", message: "F5 could not create a thread for this prompt." });
+        operation.setState({
+          kind: "failed",
+          message: "F5 could not create a thread for this prompt.",
+        });
         return;
       }
-      const note = applyLinkedModel(created.threadId, link);
-      placeLinkedPrompt(created.threadId, link.prompt, note ? [note] : []);
+      if (!operation.current()) return;
+      const { selection, note } = resolveLinkedModel(link, providers);
+      placeLinkedPrompt(created.threadId, link.prompt, { notes: note ? [note] : [], selection });
     },
     [createDraftThread, startScratchThread],
   );
 
   const showThread = useCallback(
-    async (threadId: ThreadId, link: PullRequestLink) => {
+    async (operation: Operation, threadId: ThreadId, link: PullRequestLink) => {
+      if (!operation.current()) return;
       await navigate({ to: "/$threadId", params: { threadId } });
       if (link.prompt) placeLinkedPrompt(threadId, link.prompt);
     },
@@ -172,27 +221,28 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
   );
 
   const openInProject = useCallback(
-    async (link: NewThreadLink, project: LinkedProject) => {
-      if (link.kind === "new") await openDraft(link, project.projectId);
-      else setState({ kind: "confirm-checkout", link, project });
+    async (operation: Operation, link: NewThreadLink, project: LinkedProject) => {
+      if (link.kind === "new") await openDraft(operation, link, project.projectId);
+      else operation.setState({ kind: "confirm-checkout", link, project });
     },
     [openDraft],
   );
 
   const resolveProject = useCallback(
-    async (link: NewThreadLink) => {
+    async (operation: Operation, link: NewThreadLink) => {
       const repository = linkRepository(link);
       if (repository === null) {
-        if (link.kind === "new") await openDraft(link, null);
+        if (link.kind === "new") await openDraft(operation, link, null);
         return;
       }
       const projects = await ensureNativeApi().projects.findByRepository({
         owner: repository.owner,
         name: repository.name,
       });
+      if (!operation.current()) return;
       const project = mostRecentlyUsed(projects, activity.current);
-      if (project) await openInProject(link, project);
-      else setState({ kind: "missing-repository", link });
+      if (project) await openInProject(operation, link, project);
+      else operation.setState({ kind: "missing-repository", link });
     },
     [openDraft, openInProject],
   );
@@ -205,16 +255,18 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
   const handled = useRef<string | null>(null);
   useEffect(() => {
     if (!ready) return;
-    // Refs survive StrictMode's repeated effects, so one link opens one thread.
-    if (handled.current === search) return;
-    handled.current = search;
+    // Refs survive StrictMode's repeated effects, so one opening of a link opens one thread.
+    const key = `${delivery ?? ""}\n${search}`;
+    if (handled.current === key) return;
+    handled.current = key;
+    const operation = begin();
     const parsed = parseNewThreadLink(search);
     if (!parsed.ok) {
-      setState({ kind: "failed", message: parsed.error });
+      operation.setState({ kind: "failed", message: parsed.error });
       return;
     }
     const link = parsed.value;
-    setState({ kind: "opening" });
+    operation.setState({ kind: "opening" });
     void (async () => {
       if (link.kind === "pull-request") {
         const key = formatSourceControlPullRequestKey({
@@ -226,18 +278,25 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
         const threads = await ensureNativeApi()
           .prHub.getThreadsForPr({ key })
           .catch(() => []);
-        if (threads.length === 1) return showThread(threads[0]!.threadId, link);
-        if (threads.length > 1) return setState({ kind: "choose-thread", link, threads });
+        if (threads.length === 1) return showThread(operation, threads[0]!.threadId, link);
+        if (threads.length > 1) return operation.setState({ kind: "choose-thread", link, threads });
       }
-      await resolveProject(link);
-    })().catch((error: unknown) => setState({ kind: "failed", message: errorMessage(error) }));
-  }, [ready, resolveProject, search, showThread]);
+      await resolveProject(operation, link);
+    })().catch((error: unknown) =>
+      operation.setState({ kind: "failed", message: errorMessage(error) }),
+    );
+  }, [begin, delivery, ready, resolveProject, search, showThread]);
 
-  const run = (task: () => Promise<unknown>) => {
+  const run = (task: (operation: Operation) => Promise<unknown>) => {
+    const operation = begin();
     setBusy(true);
-    void task()
-      .catch((error: unknown) => setState({ kind: "failed", message: errorMessage(error) }))
-      .finally(() => setBusy(false));
+    void task(operation)
+      .catch((error: unknown) =>
+        operation.setState({ kind: "failed", message: errorMessage(error) }),
+      )
+      .finally(() => {
+        if (mounted.current) setBusy(false);
+      });
   };
 
   return (
@@ -245,11 +304,13 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
       <LinkStateBody
         state={state}
         busy={busy}
-        onThread={(link, threadId) => run(() => showThread(threadId, link))}
+        onThread={(link, threadId) => run((operation) => showThread(operation, threadId, link))}
         onCheckout={(link, project) =>
-          run(async () => showThread(await openPullRequestThread(project, link.pullRequest), link))
+          run(async (operation) =>
+            showThread(operation, await openPullRequestThread(project, link.pullRequest), link),
+          )
         }
-        onWithoutProject={(link) => run(() => openDraft(link, null))}
+        onWithoutProject={(link) => run((operation) => openDraft(operation, link, null))}
       />
     </div>
   );
@@ -333,7 +394,8 @@ function LinkStateBody(props: {
           </h1>
           <p className="text-muted-foreground">
             F5 creates a new worktree of {project.title} for{" "}
-            {promptLinkPullRequestUrl(link.pullRequest)} and opens a thread there.
+            {promptLinkPullRequestUrl(link.pullRequest)} and opens a thread there. The project's
+            setup script does not run, since the pull request's code may come from anyone.
           </p>
           <div>
             <Button disabled={busy} onClick={() => props.onCheckout(link, project)}>

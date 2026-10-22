@@ -106,6 +106,98 @@ it("still places the prompt when the link names a malformed provider", async () 
   );
 });
 
+const codexWithModel = (slug: string) => ({
+  providers: [
+    {
+      instanceId: "codex",
+      driver: "codex",
+      models: [{ slug, name: slug, isCustom: false }],
+    },
+  ],
+});
+
+it("changes neither the draft nor its model when the user keeps an existing draft", async () => {
+  const threadId = ThreadId.makeUnsafe("existing-draft");
+  useComposerDraftStore.getState().setPrompt(threadId, "My own draft");
+  const before = useComposerDraftStore.getState().draftsByThreadId[threadId];
+  api.server.getConfig.mockResolvedValueOnce(codexWithModel("gpt-linked") as never);
+  startScratchThread.mockResolvedValueOnce({ threadId, projectId: "scratch" });
+  await render(
+    <NewThreadLinkView
+      search={search({ prompt: "Linked", provider: "codex", model: "gpt-linked" })}
+    />,
+  );
+
+  await vi.waitFor(() =>
+    expect(toast.add).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Linked prompt ready" }),
+    ),
+  );
+  // Dismissing the question leaves the user's draft as it was, model included.
+  expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toEqual(before);
+
+  const replace = (
+    toast.add.mock.calls as unknown as Array<[{ actionProps?: { onClick: () => void } }]>
+  ).find(([options]) => options.actionProps)![0].actionProps!;
+  replace.onClick();
+  const after = useComposerDraftStore.getState().draftsByThreadId[threadId];
+  expect(after).toMatchObject({ prompt: "Linked", provider: "codex", model: "gpt-linked" });
+});
+
+it("uses the provider's default model when the link names one it does not offer", async () => {
+  const threadId = ThreadId.makeUnsafe("unknown-model-draft");
+  api.server.getConfig.mockResolvedValueOnce(codexWithModel("gpt-offered") as never);
+  startScratchThread.mockResolvedValueOnce({ threadId, projectId: "scratch" });
+  await render(
+    <NewThreadLinkView
+      search={search({ prompt: "Fix it", provider: "codex", model: "anything-the-link-says" })}
+    />,
+  );
+
+  await vi.waitFor(() => expect(draftPrompt(threadId)).toBe("Fix it"));
+  const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
+  expect(draft?.provider).toBe("codex");
+  expect(draft?.model).not.toBe("anything-the-link-says");
+  expect(toast.add).toHaveBeenCalledWith(
+    expect.objectContaining({ description: expect.stringContaining("does not offer here") }),
+  );
+});
+
+it("drops a lookup that finishes after a newer link arrived", async () => {
+  let finishLookup: (projects: (typeof project)[]) => void = () => {};
+  api.projects.findByRepository.mockReturnValueOnce(
+    new Promise((resolve) => (finishLookup = resolve)),
+  );
+  const threadId = ThreadId.makeUnsafe("newer-link-draft");
+  startScratchThread.mockResolvedValueOnce({ threadId, projectId: "scratch" });
+  const screen = await render(
+    <NewThreadLinkView search={search({ prompt: "Old", repo: "lopes-felipe/f5" })} />,
+  );
+  await vi.waitFor(() => expect(api.projects.findByRepository).toHaveBeenCalled());
+
+  await screen.rerender(<NewThreadLinkView search={search({ prompt: "New" })} />);
+  await vi.waitFor(() => expect(draftPrompt(threadId)).toBe("New"));
+  finishLookup([project]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(createDraftThread).not.toHaveBeenCalled();
+});
+
+it("handles the same link again when it is opened again, for example after cloning", async () => {
+  const link = search({ prompt: "Add tests", repo: "octo/tools" });
+  api.projects.findByRepository.mockResolvedValueOnce([]);
+  const screen = await render(<NewThreadLinkView search={link} delivery="first" />);
+  await expect
+    .element(screen.getByRole("button", { name: "Clone https://github.com/octo/tools" }))
+    .toBeInTheDocument();
+
+  const threadId = ThreadId.makeUnsafe("after-clone-draft");
+  api.projects.findByRepository.mockResolvedValueOnce([project]);
+  createDraftThread.mockResolvedValueOnce({ threadId, projectId: project.projectId });
+  await screen.rerender(<NewThreadLinkView search={link} delivery="second" />);
+  await vi.waitFor(() => expect(draftPrompt(threadId)).toBe("Add tests"));
+  expect(createDraftThread).toHaveBeenCalledWith(project.projectId);
+});
+
 it("opens a link in the project whose remote matches its repository", async () => {
   const threadId = ThreadId.makeUnsafe("project-draft");
   api.projects.findByRepository.mockResolvedValueOnce([project]);
@@ -162,6 +254,7 @@ it("checks out a pull request in a new worktree only after the user confirms", a
     cwd: "/code/f5",
     reference: "https://github.com/lopes-felipe/f5/pull/42",
     mode: "worktree",
+    runSetupScript: false,
   });
   const command = api.orchestration.dispatchCommand.mock.calls[0]![0] as {
     type: string;
