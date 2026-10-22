@@ -1,4 +1,5 @@
 import { registerHtmlPreviewIpc } from "./htmlPreview";
+import { blocksEmbeddedFrameNavigation, installAppFramePermissionPolicy } from "./appFramePolicy";
 import { createDesktopCliInstaller } from "./cliCommand";
 import { offerApplicationsMove, createBootstrapGate } from "./startupInstallation";
 import { createUpdatePoller } from "./updatePoller";
@@ -3827,9 +3828,11 @@ function createWindow(
   runtime: BackendRuntime = defaultBackend,
 ): BrowserWindow {
   const partition = profilePartition(runtime.profile);
-  registerDesktopProtocol(
-    partition ? electronSession.fromPartition(partition) : electronSession.defaultSession,
-  );
+  const appSession = partition
+    ? electronSession.fromPartition(partition)
+    : electronSession.defaultSession;
+  registerDesktopProtocol(appSession);
+  installAppFramePermissionPolicy(appSession);
   const rendererUrl = rendererUrlForThread(mainRendererUrl(), initialThreadId);
   const window = new BrowserWindow({
     width: 1100,
@@ -3951,6 +3954,15 @@ function createWindow(
   });
   window.webContents.on("will-navigate", (_event, url) => {
     if (url === rendererUrl) rendererCrashRecovery.beginManualRetry();
+  });
+  window.webContents.on("will-frame-navigate", (event) => {
+    const blocked = blocksEmbeddedFrameNavigation({
+      isMainFrame: event.isMainFrame,
+      isSameDocument: event.isSameDocument,
+      frameUrl: event.frame?.url,
+      url: event.url,
+    });
+    if (blocked) event.preventDefault();
   });
 
   const applyWindowTitle = (pageTitle: string) =>

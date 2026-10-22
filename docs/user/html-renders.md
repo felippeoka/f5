@@ -14,7 +14,9 @@ in chat** is on in Conversation settings; it is off by default because any remot
 page makes can carry data out. `html_preview` screenshots never load remote content.
 
 Each page runs in a sandbox with an opaque origin. It cannot read the parent application,
-its cookies or Node.js. Pages share the generated attachment budget with tool screenshots:
+its cookies or Node.js. The desktop app also stops a page from navigating its frame away,
+for example with a script or a meta refresh, so a page cannot send its contents out that
+way. When F5 is open in a regular browser, that navigation cannot be blocked. Pages share the generated attachment budget with tool screenshots:
 200 attachments and 64 MiB per thread. Deleting the thread also reclaims its pages.
 
 Use `html_preview` when the agent needs a screenshot before publishing. A connected F5 desktop

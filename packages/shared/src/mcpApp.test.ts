@@ -7,6 +7,7 @@ import {
   injectMcpAppCsp,
   injectMcpAppThemeBootstrap,
   injectMcpAppCookieBootstrap,
+  mcpAppAllowAttribute,
   mcpAppContentSecurityPolicy,
   mcpAppToolCallableByApp,
   readMcpAppCsp,
@@ -248,5 +249,15 @@ describe("findMcpAppToolPolicy", () => {
         ?.readOnlyHint,
     ).toBe(false);
     expect(findMcpAppToolPolicy(Array(2001).fill(tool), "forecast")).toBeUndefined();
+  });
+});
+
+describe("mcpAppAllowAttribute", () => {
+  it("delegates clipboard writes but never camera, microphone or location", () => {
+    expect(
+      mcpAppAllowAttribute({ camera: {}, microphone: {}, geolocation: {}, clipboardWrite: {} }),
+    ).toBe("clipboard-write");
+    expect(mcpAppAllowAttribute({ microphone: {} })).toBe("");
+    expect(mcpAppAllowAttribute(undefined)).toBe("");
   });
 });

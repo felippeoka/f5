@@ -236,13 +236,12 @@ export function injectMcpAppCookieBootstrap(html: string): string {
   return `${prefix}${bootstrap}${html.slice(prefix.length)}`;
 }
 
+/**
+ * Camera, microphone and location are not delegated, even when the server declares them: F5 has
+ * no consent prompt that names the server yet, and the desktop would otherwise grant them silently.
+ */
 export function mcpAppAllowAttribute(permissions: McpAppPermissions | undefined): string {
-  const features: Array<string> = [];
-  if (permissions?.camera) features.push("camera");
-  if (permissions?.microphone) features.push("microphone");
-  if (permissions?.geolocation) features.push("geolocation");
-  if (permissions?.clipboardWrite) features.push("clipboard-write");
-  return features.join("; ");
+  return permissions?.clipboardWrite ? "clipboard-write" : "";
 }
 
 export function clampMcpAppHeight(height: number): number {
