@@ -1,3 +1,4 @@
+import { ServerShutdown } from "../shutdown.ts";
 import { normalizeSupportedSlashCommands } from "./supportedSlashCommands.ts";
 import { pathToFileURL } from "node:url";
 
@@ -156,6 +157,8 @@ export interface OpenCodeRuntimeShape {
     readonly baseUrl: string;
     readonly directory: string;
     readonly serverPassword?: string;
+    /** Cancels every SDK fetch when this owned server/session disappears. */
+    readonly signal?: AbortSignal;
   }) => OpencodeClient;
   readonly loadOpenCodeInventory: (
     client: OpencodeClient,
@@ -503,7 +506,17 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
       const killOpenCodeProcessGroup = (signal: NodeJS.Signals) =>
         process.platform === "win32"
-          ? child.kill({ killSignal: signal, forceKillAfter: "1 second" }).pipe(Effect.asVoid)
+          ? Effect.suspend(() =>
+              child
+                .kill({
+                  killSignal: signal,
+                  forceKillAfter: Math.max(
+                    1,
+                    Math.min(1_000, (shutdown?.deadline ?? Date.now() + 1_000) - Date.now() - 50),
+                  ),
+                })
+                .pipe(Effect.asVoid),
+            )
           : Effect.sync(() => {
               try {
                 process.kill(-Number(child.pid), signal);
@@ -513,8 +526,18 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
                 // any serve process left in that group.
               }
             });
+      const shutdown = Option.getOrUndefined(yield* Effect.serviceOption(ServerShutdown));
       const terminateChild = killOpenCodeProcessGroup("SIGTERM").pipe(
-        Effect.andThen(Effect.sleep("1 second")),
+        Effect.andThen(
+          Effect.suspend(() =>
+            Effect.sleep(
+              Math.min(
+                1_000,
+                Math.max(0, (shutdown?.deadline ?? Date.now() + 1_000) - Date.now() - 50),
+              ),
+            ),
+          ),
+        ),
         Effect.andThen(killOpenCodeProcessGroup("SIGKILL")),
         Effect.ignore,
       );
@@ -641,6 +664,22 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
     createOpencodeClient({
       baseUrl: input.baseUrl,
       directory: input.directory,
+      ...(input.signal
+        ? {
+            fetch: Object.assign(
+              (request: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+                const source =
+                  request instanceof Request
+                    ? new Request(request, init)
+                    : new Request(String(request), init);
+                return fetch(
+                  new Request(source, { signal: AbortSignal.any([source.signal, input.signal!]) }),
+                );
+              },
+              { preconnect: fetch.preconnect },
+            ),
+          }
+        : {}),
       ...(input.serverPassword
         ? {
             headers: {

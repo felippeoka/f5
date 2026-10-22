@@ -173,9 +173,9 @@ export async function serveAsset(
   name: string,
   options: ServeAssetOptions = {},
 ): Promise<void> {
+  let headers: Record<string, string>;
   try {
-    const { size } = await file.stat();
-    const headers: Record<string, string> = {
+    headers = {
       ...assetHeaders(name, options.htmlPrefix),
       "Accept-Ranges": "bytes",
       ...(options.cacheControl ? { "Cache-Control": options.cacheControl } : {}),
@@ -184,6 +184,22 @@ export async function serveAsset(
       headers["Content-Security-Policy"] = ACTIVE_PREVIEW_CSP;
       headers["Content-Disposition"] = "inline";
     }
+  } catch (error) {
+    await file.close();
+    throw error;
+  }
+  return streamFileHandle(req, res, file, headers);
+}
+
+export async function streamFileHandle(
+  req: IncomingMessage,
+  res: ServerResponse,
+  file: FileHandle,
+  headerPolicy: Readonly<Record<string, string>>,
+): Promise<void> {
+  try {
+    const { size } = await file.stat();
+    const headers = { ...headerPolicy, "Accept-Ranges": "bytes" };
     const range = parseAssetRange(req.headers.range, size);
     if (range === false) {
       res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}`, "Content-Length": "0" });

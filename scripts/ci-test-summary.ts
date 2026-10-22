@@ -20,6 +20,7 @@ export const inventories: Record<string, SuiteIdentity[]> = {
   "macos-suite": [...workspaces, ...server, suite("server-git-extended"), suite("server-unit")],
   "server-unit-1": [suite("server-unit-1")],
   "server-unit-2": [suite("server-unit-2")],
+  "server-unit-3": [suite("server-unit-3")],
   browser: [suite("web-browser")],
   "macos-profiles": [suite("macos-profiles")],
 };

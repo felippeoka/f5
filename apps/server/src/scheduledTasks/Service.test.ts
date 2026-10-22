@@ -3,12 +3,51 @@ import { scheduledContinuationFor, linkScheduledContinuation } from "./continuat
 import { it } from "@effect/vitest";
 import { expect } from "vitest";
 import { Deferred, Effect, Fiber } from "effect";
+import { ServerShutdown, ShutdownRegistry } from "../shutdown.ts";
 import { TestClock } from "effect/testing";
 import { ScheduledTaskRunId } from "@t3tools/contracts";
 import { scheduleError } from "./Store.ts";
 import { makeScheduledTaskService, userScheduleActor as actor } from "./Service.ts";
 import { setup, testLayer } from "./testing.ts";
 import { AgentBridgeHostError } from "../agentBridge/AgentBridgeHost.ts";
+
+it.effect("stops admitting scheduled work at shutdown and drains the admitted submission", () =>
+  Effect.gen(function* () {
+    const shutdown = new ShutdownRegistry();
+    const admissionStopped = yield* Deferred.make<void>();
+    shutdown.register({
+      name: "test-scheduler-admission",
+      phase: "flush",
+      run: () => Effect.runPromise(Deferred.succeed(admissionStopped, undefined)),
+    });
+    yield* Effect.gen(function* () {
+      const { create, store, service, host } = yield* setup;
+      const { task } = yield* create();
+      host.submissionGate = yield* Deferred.make<void>();
+      const run = yield* service.runNow(
+        {
+          taskId: task.id,
+          runId: ScheduledTaskRunId.makeUnsafe(crypto.randomUUID()),
+          requestedAt: new Date(0).toISOString(),
+        },
+        actor,
+      );
+      yield* service.dispatch;
+      // A claimed worker is waiting in the host, independently of source timers.
+      expect((yield* store.run(run.id))!.capacity).toBe(true);
+      const closing = shutdown.run();
+      yield* Deferred.await(admissionStopped);
+      yield* TestClock.adjust("5 minutes");
+      yield* service.start;
+      yield* service.dispatch;
+      expect(yield* store.history(task.id)).toHaveLength(1);
+      yield* Deferred.succeed(host.submissionGate, undefined);
+      const results = yield* Effect.promise(() => closing);
+      expect(results.find((step) => step.name === "scheduled-task-work")?.outcome).toBe("complete");
+      expect(host.submissions).toHaveLength(1);
+    }).pipe(Effect.provideService(ServerShutdown, shutdown));
+  }).pipe(Effect.provide(testLayer), Effect.scoped),
+);
 
 it.effect("coalesces missed occurrences and is idempotent across repeated evaluations", () =>
   Effect.gen(function* () {

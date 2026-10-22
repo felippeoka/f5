@@ -141,7 +141,13 @@ it("returns focus from a composer option menu on Escape", async () => {
     </PopupFocusContext>,
   );
   await screen.getByRole("button", { name: "Options" }).click();
-  await expect.element(screen.getByRole("menuitem", { name: "Option", exact: true })).toBeVisible();
+  const option = screen.getByRole("menuitem", { name: "Option", exact: true });
+  await expect.element(option).toBeVisible();
+  // Popup visibility precedes its asynchronous initial focus. Send Escape only
+  // after opening has finished, so that close and open focus effects cannot race.
+  await expect
+    .poll(() => screen.getByRole("menu").element().contains(document.activeElement))
+    .toBe(true);
   await userEvent.keyboard("{Escape}");
   await expect.element(screen.getByRole("textbox", { name: "Draft" })).toHaveFocus();
 });

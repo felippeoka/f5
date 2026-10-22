@@ -1,3 +1,4 @@
+import type { WorkerAdmissionError } from "@t3tools/shared/DrainableWorker";
 import {
   type OrchestrationSkipDocumentReaderPassInput,
   type OrchestrationSkipDocumentReaderPassResult,
@@ -26,7 +27,7 @@ export type CreateWorkflowInput = OrchestrationCreateWorkflowInput &
 
 export interface WorkflowServiceShape {
   readonly start: Effect.Effect<void, never, Scope.Scope>;
-  readonly drain: Effect.Effect<void>;
+  readonly drain: Effect.Effect<void, WorkerAdmissionError>;
   readonly createWorkflow: (input: CreateWorkflowInput) => Effect.Effect<PlanningWorkflowId, Error>;
   readonly archiveWorkflow: (workflowId: PlanningWorkflowId) => Effect.Effect<void, Error>;
   readonly unarchiveWorkflow: (workflowId: PlanningWorkflowId) => Effect.Effect<void, Error>;

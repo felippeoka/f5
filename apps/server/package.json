@@ -20,10 +20,10 @@
     "start": "node dist/index.mjs",
     "prepare": "node node_modules/@effect/language-service/cli.js patch",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
-    "test": "bun run test:unit && bun run test:non-unit",
-    "test:full": "bun run test && bun run test:git:extended",
+    "test": "node ../../scripts/run-test-stages.ts test:unit test:non-unit",
+    "test:full": "node ../../scripts/run-test-stages.ts test test:git:extended",
     "test:unit": "node node_modules/vitest/vitest.mjs run src",
-    "test:git": "bun run test:git:smoke && bun run test:git:extended",
+    "test:git": "node ../../scripts/run-test-stages.ts test:git:smoke test:git:extended",
     "test:git:smoke": "node node_modules/vitest/vitest.mjs run integration/git/smoke",
     "test:git:extended": "node node_modules/vitest/vitest.mjs run integration/git/extended --sequence.concurrent --maxConcurrency=4",
     "test:git-core": "node node_modules/vitest/vitest.mjs run integration/git/extended/GitCore.extended.test.ts --no-file-parallelism",
@@ -34,7 +34,7 @@
     "test:codex:compaction:live": "F5_CODEX_LIVE_TEST=1 bun scripts/certify-native-compaction.ts",
     "test:unit:shard": "node node_modules/vitest/vitest.mjs run src",
     "test:codex:live": "F5_CODEX_LIVE_TEST=1 bun scripts/certify-codex-rewind.ts && F5_CODEX_LIVE_TEST=1 node node_modules/vitest/vitest.mjs run integration/codexComputerMcp.live.test.ts --no-file-parallelism",
-    "test:non-unit": "bun run test:git:smoke && bun run test:integration"
+    "test:non-unit": "node ../../scripts/run-test-stages.ts test:git:smoke test:integration"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.295",

@@ -40,6 +40,8 @@ const directory: ProviderSessionDirectoryShape = {
   listThreadIds: () => Effect.succeed([threadId]),
   listBindings: () => Effect.succeed([]),
   updateMcpStateIfCurrent: () => Effect.succeed(true),
+  updateHistoryReconciliationIfCurrent: () => Effect.succeed(true),
+  updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
   listBindingsByProject: () => Effect.succeed([]),
 };
 

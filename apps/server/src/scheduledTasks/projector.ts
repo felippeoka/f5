@@ -120,6 +120,9 @@ export const makeScheduledRunProjector =
           break;
         }
         case "thread.user-input-resolved": {
+          // The engine links answer submissions in commitSideEffects, after this
+          // projector and inside the same transaction. Keep ownership until then.
+          if (event.payload.command) break;
           if (
             !current.turnId ||
             current.run.reason !== "user_input" ||

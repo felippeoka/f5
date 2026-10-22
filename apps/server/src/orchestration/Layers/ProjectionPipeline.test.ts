@@ -1,4 +1,5 @@
 import {
+  type OrchestrationEvent,
   CheckpointRef,
   CommandId,
   CorrelationId,
@@ -16,6 +17,8 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { vi } from "vitest";
+import { ProjectionThreadMessageRepository } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -50,7 +53,10 @@ const runWithProjectionPipelineLayer = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    OrchestrationProjectionPipeline | OrchestrationEventStore | SqlClient.SqlClient
+    | OrchestrationProjectionPipeline
+    | OrchestrationEventStore
+    | SqlClient.SqlClient
+    | ProjectionThreadMessageRepository
   >,
 ) =>
   Effect.acquireUseRelease(
@@ -62,6 +68,76 @@ const runWithProjectionPipelineLayer = <A, E>(
 const projectionLayer = it.layer(makeProjectionPipelineTestLayer(process.cwd()));
 
 projectionLayer("OrchestrationProjectionPipeline", (it) => {
+  it.effect(
+    "commits cursors once per command, including ignored projectors, and rolls the entire command back on cursor failure",
+    () =>
+      runWithProjectionPipelineLayer(
+        process.cwd(),
+        Effect.gen(function* () {
+          const pipeline = yield* OrchestrationProjectionPipeline;
+          const store = yield* OrchestrationEventStore;
+          const sql = yield* SqlClient.SqlClient;
+          const now = "2026-10-19T00:00:00.000Z";
+          const events: OrchestrationEvent[] = [];
+          for (let index = 0; index < 3; index++) {
+            const projectId = ProjectId.makeUnsafe(`cursor-batch-${index}`);
+            events.push(
+              yield* store.append({
+                eventId: EventId.makeUnsafe(`cursor-batch-${index}`),
+                type: "project.created",
+                aggregateKind: "project",
+                aggregateId: projectId,
+                occurredAt: now,
+                commandId: null,
+                causationEventId: null,
+                correlationId: null,
+                metadata: {},
+                payload: {
+                  projectId,
+                  title: "batch",
+                  workspaceRoot: `/tmp/cursor-batch-${index}`,
+                  defaultModel: null,
+                  scripts: [],
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              }),
+            );
+          }
+          yield* sql`CREATE TABLE cursor_writes (projector TEXT)`;
+          yield* sql`CREATE TRIGGER count_cursor_inserts AFTER INSERT ON projection_state BEGIN INSERT INTO cursor_writes VALUES (NEW.projector); END`;
+          yield* sql`CREATE TRIGGER count_cursor_updates AFTER UPDATE ON projection_state BEGIN INSERT INTO cursor_writes VALUES (NEW.projector); END`;
+          const applyCommand = sql.withTransaction(
+            Effect.gen(function* () {
+              for (const event of events)
+                yield* pipeline.projectEvent(event, { deferCursor: true });
+              yield* pipeline.commitCursors!(events.at(-1)!);
+            }),
+          );
+          yield* sql`CREATE TRIGGER fail_cursor BEFORE INSERT ON projection_state WHEN NEW.projector = 'projection.thread-messages' BEGIN SELECT RAISE(ABORT, 'cursor failure'); END`;
+          assert.equal((yield* Effect.result(applyCommand))._tag, "Failure");
+          assert.deepEqual(yield* sql`SELECT project_id FROM projection_projects`, []);
+          assert.deepEqual(yield* sql`SELECT projector FROM cursor_writes`, []);
+          yield* sql`DROP TRIGGER fail_cursor`;
+          yield* applyCommand;
+          const rows = yield* sql<{
+            projector: string;
+            sequence: number;
+            writes: number;
+          }>`SELECT p.projector, p.last_applied_sequence AS sequence, COUNT(*) AS writes FROM projection_state p JOIN cursor_writes w ON p.projector = w.projector GROUP BY p.projector`;
+          assert.equal(rows.length, Object.keys(ORCHESTRATION_PROJECTOR_NAMES).length);
+          for (const row of rows) {
+            assert.equal(row.sequence, events.at(-1)!.sequence);
+            assert.equal(row.writes, 1);
+          }
+          assert.equal((yield* sql`SELECT project_id FROM projection_projects`).length, 3);
+          // Bootstrap must skip this complete command without writing another cursor.
+          yield* pipeline.bootstrap;
+          assert.equal((yield* sql`SELECT projector FROM cursor_writes`).length, rows.length);
+        }),
+      ),
+  );
+
   it.effect("replays PR links with its own cursor without duplicating search documents", () =>
     runWithProjectionPipelineLayer(
       process.cwd(),
@@ -2793,179 +2869,210 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
   );
 
   it.effect(
-    "projects streaming deltas with one-row reads and never touches another thread's row",
+    "keeps full projection/cursor parity with append optimization and avoids reads for later deltas",
     () =>
       Effect.gen(function* () {
-        const projectionPipeline = yield* OrchestrationProjectionPipeline;
-        const eventStore = yield* OrchestrationEventStore;
-        const sql = yield* SqlClient.SqlClient;
-        const projectId = ProjectId.makeUnsafe("project-targeted-reads");
-        const threadA = ThreadId.makeUnsafe("thread-targeted-reads-a");
-        const threadB = ThreadId.makeUnsafe("thread-targeted-reads-b");
-        const sharedMessageId = MessageId.makeUnsafe("message-targeted-shared");
-        const assistantMessageId = MessageId.makeUnsafe("message-targeted-assistant");
-        const createdAt = "2026-10-01T10:00:00.000Z";
-        let sequence = 0;
-        const append = (
-          event: Omit<Parameters<typeof eventStore.append>[0], keyof typeof meta>,
-        ) => {
-          sequence += 1;
-          return eventStore
-            .append({
-              ...meta(sequence),
-              ...event,
-            } as Parameters<typeof eventStore.append>[0])
-            .pipe(Effect.flatMap((saved) => projectionPipeline.projectEvent(saved)));
-        };
-        const meta = (index: number) => ({
-          eventId: EventId.makeUnsafe(`evt-targeted-${index}`),
-          aggregateKind: "thread" as const,
-          occurredAt: createdAt,
-          commandId: CommandId.makeUnsafe(`cmd-targeted-${index}`),
-          causationEventId: null,
-          correlationId: CorrelationId.makeUnsafe(`cmd-targeted-${index}`),
-          metadata: {},
-        });
-        const message = (input: {
-          readonly threadId: ThreadId;
-          readonly messageId: MessageId;
-          readonly role: "user" | "assistant";
-          readonly text: string;
-          readonly streaming: boolean;
-          readonly updatedAt?: string;
-        }) =>
-          append({
-            type: "thread.message-sent",
-            aggregateId: input.threadId,
-            payload: {
-              threadId: input.threadId,
-              messageId: input.messageId,
-              role: input.role,
-              text: input.text,
-              turnId: null,
-              streaming: input.streaming,
-              createdAt,
-              updatedAt: input.updatedAt ?? createdAt,
-            },
-          } as never);
+        const snapshots: Array<Record<string, ReadonlyArray<unknown>>> = [];
+        for (const useFastAppend of [true, false])
+          snapshots.push(
+            yield* runWithProjectionPipelineLayer(
+              process.cwd(),
+              Effect.gen(function* () {
+                const repository = yield* ProjectionThreadMessageRepository;
+                const appendSpy = vi.spyOn(repository, "appendStreamingText");
+                if (!useFastAppend) appendSpy.mockReturnValue(Effect.succeed(0));
+                const projectionPipeline = yield* OrchestrationProjectionPipeline;
+                const eventStore = yield* OrchestrationEventStore;
+                const sql = yield* SqlClient.SqlClient;
+                const projectId = ProjectId.makeUnsafe("project-targeted-reads");
+                const threadA = ThreadId.makeUnsafe("thread-targeted-reads-a");
+                const threadB = ThreadId.makeUnsafe("thread-targeted-reads-b");
+                const sharedMessageId = MessageId.makeUnsafe("message-targeted-shared");
+                const assistantMessageId = MessageId.makeUnsafe("message-targeted-assistant");
+                const createdAt = "2026-10-01T10:00:00.000Z";
+                yield* sql`UPDATE projection_usage_metadata SET coverage_started_at = ${createdAt}, fact_cutover_at = ${createdAt}`;
+                let sequence = 0;
+                const append = (
+                  event: Omit<Parameters<typeof eventStore.append>[0], keyof typeof meta>,
+                ) => {
+                  sequence += 1;
+                  return eventStore
+                    .append({
+                      ...meta(sequence),
+                      ...event,
+                    } as Parameters<typeof eventStore.append>[0])
+                    .pipe(Effect.flatMap((saved) => projectionPipeline.projectEvent(saved)));
+                };
+                const meta = (index: number) => ({
+                  eventId: EventId.makeUnsafe(`evt-targeted-${index}`),
+                  aggregateKind: "thread" as const,
+                  occurredAt: createdAt,
+                  commandId: CommandId.makeUnsafe(`cmd-targeted-${index}`),
+                  causationEventId: null,
+                  correlationId: CorrelationId.makeUnsafe(`cmd-targeted-${index}`),
+                  metadata: {},
+                });
+                const message = (input: {
+                  readonly threadId: ThreadId;
+                  readonly messageId: MessageId;
+                  readonly role: "user" | "assistant";
+                  readonly text: string;
+                  readonly streaming: boolean;
+                  readonly updatedAt?: string;
+                  readonly extra?: { skillCall: { name: string }; attachments: [] };
+                }) =>
+                  append({
+                    type: "thread.message-sent",
+                    aggregateId: input.threadId,
+                    payload: {
+                      threadId: input.threadId,
+                      messageId: input.messageId,
+                      role: input.role,
+                      text: input.text,
+                      turnId: null,
+                      streaming: input.streaming,
+                      createdAt,
+                      updatedAt: input.updatedAt ?? createdAt,
+                      ...input.extra,
+                    },
+                  } as never);
 
-        for (const threadId of [threadA, threadB]) {
-          yield* append({
-            type: "thread.created",
-            aggregateId: threadId,
-            payload: {
-              threadId,
-              projectId,
-              title: threadId,
-              model: "gpt-5.4",
-              runtimeMode: "full-access",
-              branch: null,
-              worktreePath: null,
-              createdAt,
-              updatedAt: createdAt,
-            },
-          } as never);
-          yield* append({
-            type: "thread.session-set",
-            aggregateId: threadId,
-            payload: {
-              threadId,
-              session: {
-                threadId,
-                status: "running",
-                providerName: "codex",
-                runtimeMode: "full-access",
-                activeTurnId: null,
-                lastError: null,
-                updatedAt: createdAt,
-              },
-            },
-          } as never);
-        }
-        yield* message({
-          threadId: threadA,
-          messageId: sharedMessageId,
-          role: "user",
-          text: "thread A owns this row",
-          streaming: false,
-        });
-        // Null estimate: the recompute branch establishes the baseline (4 chars = 1 token).
-        yield* message({
-          threadId: threadB,
-          messageId: MessageId.makeUnsafe("message-targeted-user"),
-          role: "user",
-          text: "abcd",
-          streaming: false,
-        });
+                for (const threadId of [threadA, threadB]) {
+                  yield* append({
+                    type: "thread.created",
+                    aggregateId: threadId,
+                    payload: {
+                      threadId,
+                      projectId,
+                      title: threadId,
+                      model: "gpt-5.4",
+                      runtimeMode: "full-access",
+                      branch: null,
+                      worktreePath: null,
+                      createdAt,
+                      updatedAt: createdAt,
+                    },
+                  } as never);
+                  yield* append({
+                    type: "thread.session-set",
+                    aggregateId: threadId,
+                    payload: {
+                      threadId,
+                      session: {
+                        threadId,
+                        status: "running",
+                        providerName: "codex",
+                        runtimeMode: "full-access",
+                        activeTurnId: null,
+                        lastError: null,
+                        updatedAt: createdAt,
+                      },
+                    },
+                  } as never);
+                }
+                yield* message({
+                  threadId: threadA,
+                  messageId: sharedMessageId,
+                  role: "user",
+                  text: "thread A owns this row",
+                  streaming: false,
+                });
+                // Null estimate: the recompute branch establishes the baseline (4 chars = 1 token).
+                yield* message({
+                  threadId: threadB,
+                  messageId: MessageId.makeUnsafe("message-targeted-user"),
+                  role: "user",
+                  text: "abcd",
+                  streaming: false,
+                });
 
-        const fullThreadReads: Array<string> = [];
-        const probe = new DatabaseSync(":memory:");
-        const statementPrototype = Object.getPrototypeOf(
-          probe.prepare("SELECT 1"),
-        ) as StatementSync;
-        probe.close();
-        const originalAll = statementPrototype.all;
-        statementPrototype.all = function (this: StatementSync, ...params: unknown[]) {
-          if (
-            this.sourceSQL.includes("FROM projection_thread_messages") &&
-            this.sourceSQL.includes("ORDER BY created_at ASC, message_id ASC")
-          ) {
-            fullThreadReads.push(this.sourceSQL);
-          }
-          return Reflect.apply(originalAll, this, params);
-        } as typeof originalAll;
-        yield* Effect.gen(function* () {
-          for (const delta of ["1234", "5678", "9012"]) {
-            yield* message({
-              threadId: threadB,
-              messageId: assistantMessageId,
-              role: "assistant",
-              text: delta,
-              streaming: true,
-            });
-          }
-          yield* message({
-            threadId: threadB,
-            messageId: assistantMessageId,
-            role: "assistant",
-            text: "",
-            streaming: false,
-            updatedAt: "2026-10-01T10:00:05.000Z",
-          });
-          yield* message({
-            threadId: threadB,
-            messageId: sharedMessageId,
-            role: "assistant",
-            text: "thread B reuses the id",
-            streaming: false,
-          });
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              statementPrototype.all = originalAll;
-            }),
-          ),
-        );
+                const fullThreadReads: Array<string> = [];
+                let messageReads = 0;
+                const probe = new DatabaseSync(":memory:");
+                const statementPrototype = Object.getPrototypeOf(
+                  probe.prepare("SELECT 1"),
+                ) as StatementSync;
+                probe.close();
+                const originalAll = statementPrototype.all;
+                statementPrototype.all = function (this: StatementSync, ...params: unknown[]) {
+                  if (
+                    /^\s*SELECT\b/i.test(this.sourceSQL) &&
+                    this.sourceSQL.includes("FROM projection_thread_messages") &&
+                    this.sourceSQL.includes("WHERE message_id =")
+                  )
+                    messageReads++;
+                  if (
+                    this.sourceSQL.includes("FROM projection_thread_messages") &&
+                    this.sourceSQL.includes("ORDER BY created_at ASC, message_id ASC")
+                  ) {
+                    fullThreadReads.push(this.sourceSQL);
+                  }
+                  return Reflect.apply(originalAll, this, params);
+                } as typeof originalAll;
+                yield* Effect.gen(function* () {
+                  for (const [index, delta] of ["1234", "5678", "9012"].entries()) {
+                    const before = messageReads;
+                    yield* message({
+                      threadId: threadB,
+                      messageId: assistantMessageId,
+                      role: "assistant",
+                      text: delta,
+                      streaming: true,
+                    });
+                    assert.equal(messageReads - before, useFastAppend && index > 0 ? 0 : 3);
+                  }
+                  const appendsBeforeMetadata = appendSpy.mock.calls.length;
+                  yield* message({
+                    threadId: threadB,
+                    messageId: assistantMessageId,
+                    role: "assistant",
+                    text: "meta",
+                    streaming: true,
+                    extra: { skillCall: { name: "review" }, attachments: [] },
+                  });
+                  assert.equal(appendSpy.mock.calls.length, appendsBeforeMetadata);
+                  yield* message({
+                    threadId: threadB,
+                    messageId: assistantMessageId,
+                    role: "assistant",
+                    text: "",
+                    streaming: false,
+                    updatedAt: "2026-10-01T10:00:05.000Z",
+                  });
+                  yield* message({
+                    threadId: threadB,
+                    messageId: sharedMessageId,
+                    role: "assistant",
+                    text: "thread B reuses the id",
+                    streaming: false,
+                  });
+                }).pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      statementPrototype.all = originalAll;
+                    }),
+                  ),
+                );
 
-        assert.deepEqual(fullThreadReads, []);
-        const messageRows = yield* sql<{
-          readonly messageId: string;
-          readonly threadId: string;
-          readonly text: string;
-        }>`
+                assert.deepEqual(fullThreadReads, []);
+                const messageRows = yield* sql<{
+                  readonly messageId: string;
+                  readonly threadId: string;
+                  readonly text: string;
+                }>`
           SELECT message_id AS "messageId", thread_id AS "threadId", text
           FROM projection_thread_messages
           WHERE message_id IN (${sharedMessageId}, ${assistantMessageId})
           ORDER BY message_id ASC
         `;
-        assert.deepEqual(messageRows, [
-          { messageId: assistantMessageId, threadId: threadB, text: "123456789012" },
-          { messageId: sharedMessageId, threadId: threadA, text: "thread A owns this row" },
-        ]);
-        const estimates = yield* sql<{
-          readonly threadTokens: number;
-          readonly sessionTokens: number;
-        }>`
+                assert.deepEqual(messageRows, [
+                  { messageId: assistantMessageId, threadId: threadB, text: "123456789012meta" },
+                  { messageId: sharedMessageId, threadId: threadA, text: "thread A owns this row" },
+                ]);
+                const estimates = yield* sql<{
+                  readonly threadTokens: number;
+                  readonly sessionTokens: number;
+                }>`
           SELECT
             threads.estimated_context_tokens AS "threadTokens",
             sessions.estimated_context_tokens AS "sessionTokens"
@@ -2973,9 +3080,24 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
           JOIN projection_thread_sessions sessions ON sessions.thread_id = threads.thread_id
           WHERE threads.thread_id = ${threadB}
         `;
-        // 1 user token + 3 delta tokens; the completion adds nothing new, and
-        // the id owned by thread A is neither projected into B nor counted.
-        assert.deepEqual(estimates, [{ threadTokens: 4, sessionTokens: 4 }]);
+                // 1 user token + 3 delta tokens + 1 metadata-bearing delta token; completion adds nothing new, and
+                // the id owned by thread A is neither projected into B nor counted.
+                assert.deepEqual(estimates, [{ threadTokens: 5, sessionTokens: 5 }]);
+                const tables = yield* sql<{
+                  name: string;
+                }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'projection_%' ORDER BY name`;
+                const snapshot: Record<string, ReadonlyArray<unknown>> = {};
+                for (const { name } of tables)
+                  snapshot[name] = [
+                    ...(yield* sql.unsafe(`SELECT * FROM "${name.replaceAll('"', '""')}"`)),
+                  ].sort((left, right) =>
+                    JSON.stringify(left).localeCompare(JSON.stringify(right)),
+                  );
+                return snapshot;
+              }),
+            ),
+          );
+        assert.deepEqual(snapshots[0], snapshots[1]);
       }),
   );
 });

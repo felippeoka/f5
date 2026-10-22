@@ -1,3 +1,6 @@
+import type { WebSocket } from "ws";
+import { makeServerPushBus } from "../../src/wsServer/pushBus.ts";
+import { PerformanceStageProbe } from "../../src/observability/Metrics.ts";
 import { once } from "node:events";
 import { Writable } from "node:stream";
 import { makeBackupService } from "../../src/backupService.ts";
@@ -8,17 +11,19 @@ import { makeBackupService } from "../../src/backupService.ts";
  */
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { monitorEventLoopDelay } from "node:perf_hooks";
-import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Layer, ManagedRuntime, PubSub, Ref, Scope, Stream } from "effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { expect, vi } from "vitest";
 import { COALESCE_STREAMING_DELTAS_DRIVERS } from "../../src/orchestration/streamingAssistantDeltas.ts";
 import {
+  ORCHESTRATION_WS_CHANNELS,
+  type OrchestrationEvent,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
@@ -108,7 +113,12 @@ function makeProviderService() {
   };
 }
 
-function makeLayer(directory: string, database: string, provider: ProviderServiceShape) {
+function makeLayer(
+  directory: string,
+  database: string,
+  provider: ProviderServiceShape,
+  probe: ((stage: string, durationMs: number) => void) | null = null,
+) {
   const sessionDirectory = ProviderSessionDirectoryLive.pipe(
     Layer.provide(ProviderSessionRuntimeRepositoryLive),
   );
@@ -136,6 +146,7 @@ function makeLayer(directory: string, database: string, provider: ProviderServic
     Layer.provideMerge(Layer.succeed(ProviderService, provider)),
     Layer.provideMerge(ServerConfig.layerTest(directory, path.join(directory, "state"))),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provide(Layer.succeed(PerformanceStageProbe, probe)),
   );
 }
 
@@ -210,7 +221,8 @@ const percentile = (values: ReadonlyArray<number>, fraction: number) => {
 
 export async function measureAssistantStream(
   method: typeof fixture.method,
-): Promise<{ samples: Samples; observations: Observation[] }> {
+  providerKind: "codex" | "claudeAgent" = "codex",
+): Promise<{ samples: Samples; observations: Observation[]; diagnostics: Record<string, number> }> {
   const coalescingSpy =
     process.env.F5_PERF_STREAM_COALESCE === "0"
       ? vi.spyOn(COALESCE_STREAMING_DELTAS_DRIVERS, "has").mockReturnValue(false)
@@ -260,7 +272,17 @@ export async function measureAssistantStream(
     await seed(directory, database, threadIds, workload.seededMessages);
 
     const provider = makeProviderService();
-    const runtime = ManagedRuntime.make(makeLayer(directory, database, provider.service));
+    const stages = new Map<string, number[]>();
+    let recording = false;
+    const probeStage = (stage: string, ms: number) => {
+      if (!recording) return;
+      const samples = stages.get(stage) ?? [];
+      samples.push(ms);
+      stages.set(stage, samples);
+    };
+    const runtime = ManagedRuntime.make(
+      makeLayer(directory, database, provider.service, probeStage),
+    );
     const scope = await Effect.runPromise(Scope.make("sequential"));
     try {
       const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
@@ -274,31 +296,62 @@ export async function measureAssistantStream(
 
       const committedLengths = new Map<string, number>();
       const waiters = new Map<string, Array<{ length: number; resolve: () => void }>>();
-      runtime.runFork(
-        Stream.runForEach(engine.streamDomainEvents, (event) =>
-          Effect.sync(() => {
-            counts.domainEvents++;
-            if (event.type !== "thread.message-sent") return;
-            const length =
-              (committedLengths.get(event.payload.messageId) ?? 0) + event.payload.text.length;
-            committedLengths.set(event.payload.messageId, length);
-            const pending = waiters.get(event.payload.messageId);
-            if (!pending) return;
-            const remaining = pending.filter((waiter) => {
-              if (length < waiter.length) return true;
-              waiter.resolve();
-              return false;
-            });
-            if (remaining.length) waiters.set(event.payload.messageId, remaining);
-            else waiters.delete(event.payload.messageId);
-          }),
-        ),
+      const onPushedEvent = (event: OrchestrationEvent) => {
+        counts.domainEvents++;
+        if (event.type !== "thread.message-sent") return;
+        const length =
+          (committedLengths.get(event.payload.messageId) ?? 0) + event.payload.text.length;
+        committedLengths.set(event.payload.messageId, length);
+        const pending = waiters.get(event.payload.messageId);
+        if (!pending) return;
+        const remaining = pending.filter((waiter) => {
+          if (length < waiter.length) return true;
+          waiter.resolve();
+          return false;
+        });
+        if (remaining.length) waiters.set(event.payload.messageId, remaining);
+        else waiters.delete(event.payload.messageId);
+      };
+      const pushBus = await runtime.runPromise(
+        makeServerPushBus({
+          clients: Effect.runSync(Ref.make(new Set([{} as WebSocket]))),
+          logOutgoingPush: () => {},
+          sendClient: (_client, frame) =>
+            Effect.sync(() => {
+              const decoded = JSON.parse(frame) as { data: OrchestrationEvent };
+              onPushedEvent(decoded.data);
+              return true;
+            }),
+        }).pipe(Scope.provide(scope)),
       );
+      runtime.runFork(
+        Stream.runForEach(engine.streamDomainEvents, (event) => {
+          const started = performance.now();
+          return pushBus
+            .publishAll(ORCHESTRATION_WS_CHANNELS.domainEvent, event)
+            .pipe(
+              Effect.ensuring(
+                Effect.sync(() => probeStage("push.admission", performance.now() - started)),
+              ),
+            );
+        }),
+      );
+      const queueDepths: number[] = [];
+      const queueBytes: number[] = [];
+      const emit = provider.emit;
+      provider.emit = (event) => {
+        if (recording) {
+          const queue = engine.inspectQueue?.();
+          queueDepths.push(queue?.entries ?? 0);
+          queueBytes.push(queue?.bytes ?? 0);
+        }
+        return emit(event);
+      };
       await Effect.runPromise(ingestion.start.pipe(Scope.provide(scope)));
       await new Promise((resolve) => setTimeout(resolve, 10));
       for (const threadId of threadIds) {
         provider.sessions.push({
-          provider: "codex",
+          provider: providerKind,
           status: "ready",
           runtimeMode: "full-access",
           threadId,
@@ -308,7 +361,7 @@ export async function measureAssistantStream(
         await runtime.runPromise(
           sessions.upsert({
             threadId,
-            provider: "codex",
+            provider: providerKind,
             status: "running",
             runtimeMode: "full-access",
             runtimePayload: { activeTurnId: null },
@@ -342,7 +395,7 @@ export async function measureAssistantStream(
         const threadId = streamThreadId(stream);
         const turnId = `perf-turn-${rep}`;
         const itemId = `perf-item-${stream}-${rep}`;
-        const base = { provider: "codex", threadId, turnId };
+        const base = { provider: providerKind, threadId, turnId, sessionGeneration: 0 };
         const createdAt = at(86_400_000 + rep * 1000);
         const id = (suffix: string) => `perf-${rep}-${stream}-${suffix}`;
         provider.emit({ ...base, type: "turn.started", eventId: id("turn-started"), createdAt });
@@ -498,10 +551,16 @@ export async function measureAssistantStream(
           await closed;
         }
       };
+      const pageProbe = new DatabaseSync(database, { readOnly: true });
+      const initialPages = Number(
+        (pageProbe.prepare("PRAGMA page_count").get() as { page_count: number }).page_count,
+      );
+      pageProbe.close();
       loopDelay.enable();
       const samples = await measure(
         async () => {
           const rep = repetition++;
+          recording = rep >= method.warmups;
           latencies[rep] = [];
           await withStorageContention(() =>
             Promise.all(threadIds.map((_, stream) => runStream(stream, rep))).then(() => {}),
@@ -519,6 +578,12 @@ export async function measureAssistantStream(
         },
       );
       loopDelay.disable();
+      recording = false;
+      const finalPageProbe = new DatabaseSync(database, { readOnly: true });
+      const finalPages = Number(
+        (finalPageProbe.prepare("PRAGMA page_count").get() as { page_count: number }).page_count,
+      );
+      finalPageProbe.close();
 
       // Correctness outside timing: every stream produced its complete text.
       const finalModel = await runtime.runPromise(engine.getReadModel());
@@ -543,27 +608,59 @@ export async function measureAssistantStream(
         Math.max(...measuredCounts.map((entry) => entry[key]));
       const bounded = (name: keyof typeof SERVER_COMPONENT_BOUNDS, actual: number) =>
         maximumObservation(name, actual, SERVER_COMPONENT_BOUNDS[name]);
+      const diagnostics: Record<string, number> = {
+        deltaToPushP95Ms: percentile(measured, 0.95),
+        commandQueueP95: percentile(queueDepths, 0.95),
+        commandQueueMax: Math.max(0, ...queueDepths),
+        commandQueueBytesMax: Math.max(0, ...queueBytes),
+        sqlitePageGrowth: finalPages - initialPages,
+        walBytes: (() => {
+          try {
+            return statSync(`${database}-wal`).size;
+          } catch {
+            return 0;
+          }
+        })(),
+        eventLoopDelayP50Ms: loopDelay.percentile(50) / 1e6,
+        eventLoopDelayP95Ms: loopDelay.percentile(95) / 1e6,
+        eventLoopDelayP99Ms: loopDelay.percentile(99) / 1e6,
+        sqlStatements: most("statements"),
+        projectionSqlStatements: most("projectionStatements"),
+      };
+      for (const [stage, values] of stages) {
+        diagnostics[`${stage}.p95Ms`] = percentile(values, 0.95);
+        diagnostics[`${stage}.count`] = values.length;
+        diagnostics[`${stage}.totalMs`] = values.reduce((sum, value) => sum + value, 0);
+      }
       return {
         samples,
-        observations: [
-          bounded("stream.deltaLatencyP50Ms", percentile(measured, 0.5)),
-          bounded("stream.deltaLatencyP95Ms", percentile(measured, 0.95)),
-          bounded("stream.eventRowsWritten", most("eventRows")),
-          bounded("stream.domainEvents", most("domainEvents")),
-          bounded("stream.sqlStatements", most("statements")),
-          bounded("stream.projectionSqlStatements", most("projectionStatements")),
-          bounded("stream.eventLoopDelayP99Ms", loopDelay.percentile(99) / 1e6),
-          ...(storageGate
+        diagnostics,
+        observations:
+          providerKind === "codex"
             ? [
-                maximumObservation("stream.storageGate.sqlExecutionMaxMs", most("sqlMaxMs"), 1000),
-                maximumObservation(
-                  "stream.storageGate.completedBackups",
-                  backupExports,
-                  method.warmups + method.repetitions,
-                ),
+                bounded("stream.deltaLatencyP50Ms", percentile(measured, 0.5)),
+                bounded("stream.deltaLatencyP95Ms", percentile(measured, 0.95)),
+                bounded("stream.eventRowsWritten", most("eventRows")),
+                bounded("stream.domainEvents", most("domainEvents")),
+                bounded("stream.sqlStatements", most("statements")),
+                bounded("stream.projectionSqlStatements", most("projectionStatements")),
+                bounded("stream.eventLoopDelayP99Ms", loopDelay.percentile(99) / 1e6),
+                ...(storageGate
+                  ? [
+                      maximumObservation(
+                        "stream.storageGate.sqlExecutionMaxMs",
+                        most("sqlMaxMs"),
+                        1000,
+                      ),
+                      maximumObservation(
+                        "stream.storageGate.completedBackups",
+                        backupExports,
+                        method.warmups + method.repetitions,
+                      ),
+                    ]
+                  : []),
               ]
-            : []),
-        ],
+            : [],
       };
     } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -582,6 +679,7 @@ const readModelThreadId = (index: number) => ThreadId.makeUnsafe(`perf-read-mode
 const readModelDatabase = (directory: string) => path.join(directory, "read-model.sqlite");
 
 export interface EngineHydrationMemory {
+  readonly deletedMessages: number;
   readonly heapBytes: number;
   readonly rssBytes: number;
 }
@@ -606,8 +704,18 @@ export async function measureEngineHydration(directory: string): Promise<EngineH
     const model = await runtime.runPromise(engine.getReadModel());
     const hydrated = model.threads.filter((thread) => thread.id.startsWith("perf-read-model-"));
     expect(hydrated).toHaveLength(workload.readModelThreads);
-    expect(hydrated.every((t) => t.messages.length === workload.readModelMessages)).toBe(true);
+    const deletedPercent = Number(process.env.F5_PERF_READ_MODEL_DELETED_PERCENT ?? "0");
+    const deletedCount = Math.floor((workload.readModelThreads * deletedPercent) / 100);
+    expect(hydrated.filter((t) => t.deletedAt !== null)).toHaveLength(deletedCount);
+    expect(
+      hydrated
+        .filter((t) => t.deletedAt === null)
+        .every((t) => t.messages.length === workload.readModelMessages),
+    ).toBe(true);
     return {
+      deletedMessages: hydrated
+        .filter((t) => t.deletedAt !== null)
+        .reduce((count, thread) => count + thread.messages.length, 0),
       heapBytes: Math.max(0, after.heapUsed - before.heapUsed),
       rssBytes: Math.max(0, after.rss - before.rss),
     };
@@ -617,13 +725,30 @@ export async function measureEngineHydration(directory: string): Promise<EngineH
 }
 
 /** Seeds once here, then takes the median of several fresh-process hydrations. */
-export async function measureReadModelMemory(): Promise<Observation[]> {
+export async function measureReadModelMemory(
+  options: { deletedPercent?: number } = {},
+): Promise<Observation[]> {
+  const deletedPercent = options.deletedPercent ?? 0;
+  if (!Number.isFinite(deletedPercent) || deletedPercent < 0 || deletedPercent > 100)
+    throw new Error("Invalid deleted thread percentage");
   const directory = mkdtempSync(path.join(tmpdir(), "f5-performance-read-model-"));
   try {
     const threadIds = Array.from({ length: workload.readModelThreads }, (_, i) =>
       readModelThreadId(i),
     );
     await seed(directory, readModelDatabase(directory), threadIds, workload.readModelMessages);
+    if (deletedPercent > 0) {
+      const db = new DatabaseSync(readModelDatabase(directory));
+      try {
+        const remove = db.prepare(
+          "UPDATE projection_threads SET deleted_at = ? WHERE thread_id = ?",
+        );
+        for (const id of threadIds.slice(0, Math.floor((threadIds.length * deletedPercent) / 100)))
+          remove.run(at(1), id);
+      } finally {
+        db.close();
+      }
+    }
     const serverRoot = fileURLToPath(new URL("../..", import.meta.url));
     // A nested vitest must not inherit this worker's pool identity.
     const env = Object.fromEntries(
@@ -631,6 +756,7 @@ export async function measureReadModelMemory(): Promise<Observation[]> {
     );
     const heap: number[] = [];
     const rss: number[] = [];
+    const deletedMessages: number[] = [];
     for (let run = 0; run < READ_MODEL_MEMORY_RUNS; run++) {
       const output = path.join(directory, `hydration-${run}.json`);
       const child = spawnSync(
@@ -648,6 +774,7 @@ export async function measureReadModelMemory(): Promise<Observation[]> {
             ...env,
             F5_PERF_READ_MODEL: "1",
             F5_PERF_READ_MODEL_DIR: directory,
+            F5_PERF_READ_MODEL_DELETED_PERCENT: String(deletedPercent),
             F5_PERF_READ_MODEL_OUTPUT: output,
           },
         },
@@ -657,10 +784,14 @@ export async function measureReadModelMemory(): Promise<Observation[]> {
           `Read-model hydration process failed (${child.status ?? child.signal}): ${child.stderr.slice(-4096) || child.stdout.slice(-4096)}`,
         );
       const result = JSON.parse(readFileSync(output, "utf8")) as EngineHydrationMemory;
+      deletedMessages.push(result.deletedMessages);
       heap.push(result.heapBytes);
       rss.push(result.rssBytes);
     }
     return [
+      ...(deletedPercent > 0
+        ? [maximumObservation("readModel.deletedMessages", percentile(deletedMessages, 0.5), 0)]
+        : []),
       maximumObservation(
         "readModel.heapBytes",
         percentile(heap, 0.5),

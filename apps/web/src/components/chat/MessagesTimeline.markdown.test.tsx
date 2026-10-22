@@ -1,3 +1,4 @@
+import { MessagesTimeline, toolWorkEntryHeading } from "./MessagesTimeline";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -80,7 +81,6 @@ vi.mock("./VscodeEntryIcon", () => ({
 
 describe("MessagesTimeline markdown streaming", () => {
   it("keeps earlier assistant markdown formatted while an open fence stays cheap", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
     const assistantMessage = {
       id: MessageId.makeUnsafe("assistant-message-1"),
       role: "assistant" as const,
@@ -138,7 +138,6 @@ describe("MessagesTimeline markdown streaming", () => {
 });
 
 it("uses computer headings only with the authenticated provenance marker", async () => {
-  const { toolWorkEntryHeading } = await import("./MessagesTimeline");
   const entry = {
     itemType: "mcp_tool_call",
     mcpServerName: "f5_computer",

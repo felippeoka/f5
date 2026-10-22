@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { LATEST_MIGRATION_ID, MIGRATIONS, runMigrations } from "./Migrations.ts";
 import * as SqliteClient from "./NodeSqliteClient.ts";
+import scheduledMigration from "./Migrations/127_ScheduledTasks.ts";
 
 describe("MIGRATIONS", () => {
   // The migrator only runs IDs above the highest one a database has applied,
@@ -18,6 +19,51 @@ describe("MIGRATIONS", () => {
     expect(ids).toEqual(Array.from({ length: LATEST_MIGRATION_ID }, (_, index) => index + 1));
   });
 });
+
+for (const legacySchedules of [false, true]) {
+  effectIt.effect(
+    `upgrades ${legacySchedules ? "the original schedules 124" : "main 126"} without losing durable evidence`,
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const preceding = Object.fromEntries(
+          Object.entries(MIGRATIONS).filter(
+            ([key]) => Number.parseInt(key, 10) <= (legacySchedules ? 123 : 126),
+          ),
+        );
+        if (legacySchedules) preceding["124_ScheduledTasks"] = scheduledMigration;
+        yield* Migrator.make({})({ loader: Migrator.fromRecord(preceding) });
+        yield* sql`INSERT INTO provider_terminal_events(event_id,thread_id,turn_id,event_type,event_json,received_at,attempt) VALUES('receipt','thread','turn','turn.completed','{}','2026-10-01',2)`;
+        if (legacySchedules) {
+          yield* sql`INSERT INTO scheduled_tasks(id,project_id,definition_json,request_hash,requested_at,version,enabled,updated_at) VALUES('task','project','{}','hash','2026-10-01',1,1,'2026-10-01')`;
+          yield* sql`INSERT INTO scheduled_task_runs(id,task_id,scheduled_for,trigger,status,state_json,snapshot_json,thread_id,owns_execution,capacity,created_at) VALUES('run','task','2026-10-01','manual','pending','{}','{}','thread',1,1,'2026-10-01')`;
+          yield* sql`INSERT INTO scheduled_run_submissions(submission_id,run_id,thread_id,message_id,kind) VALUES('submission','run','thread','message','initial')`;
+        }
+        yield* runMigrations;
+        yield* runMigrations;
+        expect(
+          yield* sql`SELECT migration_id,name FROM effect_sql_migrations WHERE migration_id>=124 ORDER BY migration_id`,
+        ).toEqual([
+          { migration_id: 124, name: "ProviderTerminalRetry" },
+          { migration_id: 125, name: "ProviderTerminalRetryIndexes" },
+          { migration_id: 126, name: "ProviderTerminalRecoveryIndexes" },
+          { migration_id: 127, name: "ScheduledTasks" },
+        ]);
+        expect(
+          yield* sql`SELECT event_id,attempt,origin_session_generation,next_due_at IS NOT NULL AS retry FROM provider_terminal_events`,
+        ).toEqual([{ event_id: "receipt", attempt: 2, origin_session_generation: null, retry: 1 }]);
+        const indexes = yield* sql<{ name: string }>`PRAGMA index_list(provider_terminal_events)`;
+        expect(indexes.some((index) => index.name === "provider_terminal_events_retry_age")).toBe(
+          true,
+        );
+        expect(
+          yield* sql`SELECT s.submission_id,owns_execution,capacity FROM scheduled_run_submissions s JOIN scheduled_task_runs r ON s.run_id=r.id`,
+        ).toEqual(
+          legacySchedules ? [{ submission_id: "submission", owns_execution: 1, capacity: 1 }] : [],
+        );
+      }).pipe(Effect.provide(SqliteClient.layerMemory()), Effect.scoped),
+  );
+}
 
 effectIt.layer(SqliteClient.layerMemory())("migration upgrades", (it) => {
   it.effect("adds session capabilities after database compaction has already run", () =>

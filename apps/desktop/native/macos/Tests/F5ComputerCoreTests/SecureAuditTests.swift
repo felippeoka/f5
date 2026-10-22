@@ -1,6 +1,7 @@
 import ApplicationServices
 import CoreGraphics
 import XCTest
+
 @testable import F5ComputerCore
 
 final class SecureAuditTests: XCTestCase {
@@ -31,6 +32,85 @@ final class SecureAuditTests: XCTestCase {
     ]
   }
 
+  func testMissingAndConservativeModeWalkButFastAcceptsOmittedFields() {
+    XCTAssertEqual(ComputerPasswordMasking.requested(nil), .conservative)
+    XCTAssertEqual(ComputerPasswordMasking.requested("unknown"), .conservative)
+    let tree = escapingTree()
+    var searchCalls = 0
+    let omittedPassword: (Int) -> [Int]? = { _ in
+      searchCalls += 1
+      return []
+    }
+    for value in [nil, "conservative", "fast"] {
+      let mode = ComputerPasswordMasking.requested(value)
+      let result = computerSecureAudit(
+        root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 20000,
+        expired: { false }, search: mode.usesWebAreaSearch ? omittedPassword : nil)
+      XCTAssertEqual(
+        result,
+        ComputerSecureAudit(rects: mode == .fast ? [] : [tree[3]!.frame!], complete: true))
+    }
+    // Successful search may miss a real field. This explicitly records fast mode's limitation.
+    XCTAssertEqual(searchCalls, 1)
+  }
+  func testNativeChromeDrainsBeforeHugeWebSubtree() {
+    var tree = escapingTree()
+    tree[0]?.children.append(10)
+    for id in 10...20 { tree[id] = Node(role: "AXGroup", frame: rect(0, 0), children: [id + 1]) }
+    tree[21] = Node(role: "AXSecureTextField", frame: rect(0, 0))
+    let reads = Reads()
+    let result = audit(tree, maxNodes: 16, reads: reads)
+    XCTAssertNotNil(result)
+    XCTAssertTrue(reads.ids.contains(21))
+    XCTAssertEqual(result?.complete, false)
+    XCTAssertTrue(result?.rects.contains(web) ?? false)
+  }
+  func testSearchMasksOnlySecureResultsWithoutReadingWebChildren() {
+    var tree = escapingTree()
+    tree[4] = Node(role: "AXTextField", frame: rect(200, 100))
+    var childrenRead: [Int] = []
+    let result = computerSecureAudit(
+      root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 100,
+      expired: { false }, search: { _ in [3, 4] },
+      children: { id in
+        childrenRead.append(id)
+        return tree[id]?.children
+      })
+    XCTAssertEqual(result, ComputerSecureAudit(rects: [tree[3]!.frame!], complete: true))
+    XCTAssertFalse(childrenRead.contains(1))
+    XCTAssertEqual(
+      computerSecureAudit(
+        root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 100,
+        expired: { false }, search: { _ in nil }), result)
+  }
+  func testBadSearchResultsAndSearchBudgetsMaskWebArea() {
+    for results in [[99], [3], Array(repeating: 3, count: 5000)] {
+      var tree = escapingTree()
+      tree[3]?.frame = nil
+      let result = computerSecureAudit(
+        root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 100,
+        expired: { false }, search: { _ in results })
+      XCTAssertEqual(result, ComputerSecureAudit(rects: [web], complete: false))
+    }
+    let tree = escapingTree()
+    let result = computerSecureAudit(
+      root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 4,
+      expired: { false }, search: { _ in [3, 3] })
+    XCTAssertEqual(result?.complete, false)
+    XCTAssertTrue(result?.rects.contains(web) ?? false)
+  }
+  func testSearchDeadlineMasksWebAreaEvenWithNoResults() {
+    let tree = escapingTree()
+    var timedOut = false
+    let result = computerSecureAudit(
+      root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 20000,
+      expired: { timedOut },
+      search: { _ in
+        timedOut = true
+        return []
+      })
+    XCTAssertEqual(result, ComputerSecureAudit(rects: [web], complete: false))
+  }
   func testCompleteTreeMasksOnlyThePasswordField() {
     let password = rect(100, 100)
     let tree: [Int: Node] = [
@@ -70,10 +150,12 @@ final class SecureAuditTests: XCTestCase {
 
   func testExpiredDeadlineMasksLikeBudget() {
     var checks = 0
-    let result = audit(escapingTree(), expired: {
-      checks += 1
-      return checks > 3
-    })
+    let result = audit(
+      escapingTree(),
+      expired: {
+        checks += 1
+        return checks > 3
+      })
     XCTAssertEqual(result, ComputerSecureAudit(rects: [web], complete: false))
   }
 
@@ -86,7 +168,9 @@ final class SecureAuditTests: XCTestCase {
       2: Node(role: "AXSecureTextField", frame: password),
       3: Node(role: "AXScrollArea", frame: list, children: [4]),
     ]
-    for depth in 4...40 { tree[depth] = Node(role: "AXGroup", frame: rect(600, 200), children: [depth + 1]) }
+    for depth in 4...40 {
+      tree[depth] = Node(role: "AXGroup", frame: rect(600, 200), children: [depth + 1])
+    }
     let result = audit(tree, maxNodes: 8)
     XCTAssertEqual(result, ComputerSecureAudit(rects: [password, list], complete: false))
   }
@@ -121,7 +205,8 @@ final class SecureAuditTests: XCTestCase {
   }
 
   func testSecureFieldWithoutUsableFrameIsIncomplete() {
-    let invalid = Node(role: "AXSecureTextField", frame: CGRect(x: 0, y: 0, width: Double.infinity, height: 10))
+    let invalid = Node(
+      role: "AXSecureTextField", frame: CGRect(x: 0, y: 0, width: Double.infinity, height: 10))
     var tree = escapingTree()
     tree[3] = invalid
     XCTAssertEqual(audit(tree), ComputerSecureAudit(rects: [web], complete: false))
@@ -155,25 +240,35 @@ final class SecureAuditTests: XCTestCase {
     var size = CGSize(width: 30, height: 40)
     let position = AXValueCreate(.cgPoint, &point)!
     let dimensions = AXValueCreate(.cgSize, &size)!
-    let failed = try XCTUnwrap(computerSecureAuditNode(
-      ["AXGroup" as NSString, error(.noValue), position, dimensions, error(.cannotComplete)]))
+    let failed = try XCTUnwrap(
+      computerSecureAuditNode(
+        ["AXGroup" as NSString, error(.noValue), position, dimensions, error(.cannotComplete)]))
     XCTAssertEqual(failed.role, "AXGroup")
     XCTAssertNil(failed.subrole)
     XCTAssertEqual(failed.frame, CGRect(x: 10, y: 20, width: 30, height: 40))
     XCTAssertFalse(failed.childrenReadable)
     XCTAssertTrue(failed.children.isEmpty)
-    let leaf = try XCTUnwrap(computerSecureAuditNode(
-      [error(.cannotComplete), "AXSecureTextField" as NSString, error(.noValue), dimensions,
-        error(.attributeUnsupported)]))
+    let leaf = try XCTUnwrap(
+      computerSecureAuditNode(
+        [
+          error(.cannotComplete), "AXSecureTextField" as NSString, error(.noValue), dimensions,
+          error(.attributeUnsupported),
+        ]))
     XCTAssertNil(leaf.role)
     XCTAssertEqual(leaf.subrole, "AXSecureTextField")
     XCTAssertNil(leaf.frame)
     XCTAssertTrue(leaf.childrenReadable)
-    let parent = try XCTUnwrap(computerSecureAuditNode(
-      ["AXGroup" as NSString, error(.noValue), position, dimensions,
-        [AXUIElementCreateApplication(getpid())] as NSArray]))
+    let parent = try XCTUnwrap(
+      computerSecureAuditNode(
+        [
+          "AXGroup" as NSString, error(.noValue), position, dimensions,
+          [AXUIElementCreateApplication(getpid())] as NSArray,
+        ]))
     XCTAssertEqual(parent.children.count, 1)
     XCTAssertTrue(parent.childrenReadable)
+    XCTAssertNil(
+      computerSecureAuditNode(
+        ["AXTextField" as NSString, error(.cannotComplete), position, dimensions, [] as NSArray]))
     XCTAssertNil(computerSecureAuditNode(["AXGroup" as NSString]))
   }
 }

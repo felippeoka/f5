@@ -39,6 +39,12 @@ export type ProviderSessionDirectoryWriteError =
   | ProviderSessionDirectoryPersistenceError;
 
 export interface ProviderSessionDirectoryShape {
+  readonly updateHistoryReconciliationIfCurrent: (
+    input: import("../../persistence/Services/ProviderSessionRuntime.ts").ProviderHistoryReconciliationUpdate,
+  ) => Effect.Effect<boolean, ProviderSessionDirectoryWriteError>;
+  readonly updateTerminalLifecycleIfCurrent: (
+    input: import("../../persistence/Services/ProviderSessionRuntime.ts").ProviderTerminalLifecycleUpdate,
+  ) => Effect.Effect<boolean, ProviderSessionDirectoryWriteError>;
   readonly updateMcpStateIfCurrent: (
     input: import("../../persistence/Services/ProviderSessionRuntime.ts").ProviderMcpStateUpdate,
   ) => Effect.Effect<boolean, ProviderSessionDirectoryWriteError>;

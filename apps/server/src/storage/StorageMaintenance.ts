@@ -1383,7 +1383,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
           if (entry.isMain || entry.bare || seen.has(entry.canonicalPath)) continue;
           seen.add(entry.canonicalPath);
           registrations.push({
-            entry,
+            // Git uses forward slashes on Windows. Storage targets and review
+            // keys use native paths; preserve GitCore's transport representation.
+            entry: { ...entry, path: Path.normalize(entry.path) },
             projectRoot: project.workspaceRoot,
             projectName: project.title,
           });
@@ -1665,6 +1667,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
       ]);
       const attachmentFiles: EnumeratedFile[] = [];
       const scannedProviderFiles: EnumeratedFile[] = [];
+      const persistenceBytes = { file: 0, directory: 0 };
       let visited = 0,
         lastProgressAt = 0;
       const measured = yield* Effect.tryPromise(() =>
@@ -1681,6 +1684,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
             ...listedWorktrees.paths,
           ],
           onEntry: ({ path, stat, bytes, checkpoints }) => {
+            if (path === Path.join(config.stateDir, "storage-usage.json"))
+              persistenceBytes.file = bytes;
+            if (path === config.stateDir) persistenceBytes.directory = bytes;
             visited++;
             if (Date.now() - lastProgressAt >= 500) {
               lastProgressAt = Date.now();
@@ -2314,6 +2320,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
       });
       return {
         usage,
+        persistenceBytes,
         review: {
           identities,
           worktrees: worktreeReviews,
@@ -2326,11 +2333,11 @@ const makeStorageMaintenance = Effect.gen(function* () {
     stateDir: config.stateDir,
     scan: (signal, progress) =>
       scanUsage(signal, progress).pipe(
-        Effect.map(({ usage, review }) => {
+        Effect.map(({ usage, review, persistenceBytes }) => {
           const scanId = Crypto.randomUUID();
           scanReviews.set(scanId, review);
           while (scanReviews.size > 2) scanReviews.delete(scanReviews.keys().next().value!);
-          return { ...usage, scanId };
+          return { report: { ...usage, scanId }, persistenceBytes };
         }),
         Effect.mapError(toStorageMaintenanceError("StorageMaintenance.scan")),
       ),
@@ -2373,7 +2380,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
         }
       }
     }),
-  ).pipe(Effect.forkIn(scope));
+  ).pipe(Effect.forkIn(scope, { startImmediately: true }));
   const getStatus: StorageMaintenanceShape["getStatus"] = Effect.gen(function* () {
     const state = yield* coordinator.snapshot;
     return {

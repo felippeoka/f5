@@ -14,6 +14,7 @@ import {
 import {
   hasClaudeParentChain,
   readClaudeTranscript,
+  readClaudeTranscriptLines,
   selectClaudeResumePoint,
   isClaudeMissingResumeMessageError,
 } from "../provider/claudeTranscript.ts";
@@ -191,6 +192,24 @@ describe("Claude transcript recovery", () => {
     await writeFile(input.file, '{invalid}\n{"uuid":"new","parentUuid":null}\n');
     await expect(readClaudeTranscript(input.file)).rejects.toThrow("malformed record");
   });
+  it("never reconstructs an assistant from an unterminated crashed log record", async () => {
+    const input = await fixture();
+    const log = path.join(input.providerLogsDir, "thread.log");
+    await writeFile(log, logged("target", [{ type: "text", text: "not committed" }]).trimEnd());
+    await repairClaudeResumePoint(input);
+    // The existing explicit repair may synthesize a transparent placeholder,
+    // but it must never claim the uncommitted assistant text was recovered.
+    expect(await readFile(input.file, "utf8")).not.toContain("not committed");
+    const complete = await fixture();
+    await writeFile(
+      path.join(complete.providerLogsDir, "thread.log"),
+      logged("target", [{ type: "text", text: "committed text" }]),
+    );
+    const result = await repairClaudeResumePoint(complete);
+    expect(result.status).toBe("repaired");
+    expect(hasClaudeParentChain(await readClaudeTranscript(complete.file), "target")).toBe(true);
+    expect(await readFile(complete.file, "utf8")).toContain("committed text");
+  });
   it("quarantines malformed middle records, retaining original bytes and line numbers in the backup receipt", async () => {
     const input = await fixture();
     await appendFile(
@@ -213,6 +232,79 @@ describe("Claude transcript recovery", () => {
         await readFile(path.join(input.providerLogsDir, `${result.backupId}.receipt`), "utf8"),
       ).quarantinedLines,
     ).toEqual([2]);
+  });
+  it("numbers transcript lines exactly like split on newline", async () => {
+    const input = await fixture();
+    const text = [
+      `{"a":"${String.fromCharCode(0x2028)}${String.fromCharCode(0x2029)}"}`,
+      "",
+      "lone\rcarriage-return",
+      "{truncated",
+      '{"b":1}',
+    ].join("\n");
+    await writeFile(input.file, text);
+    const lines: string[] = [];
+    for await (const line of readClaudeTranscriptLines(input.file)) lines.push(line);
+    expect(lines).toEqual(text.split("\n"));
+  });
+  it("reads records containing U+2028/U+2029 as valid and keeps them eligible", async () => {
+    const input = await fixture([
+      {
+        ...envelope,
+        uuid: "target",
+        parentUuid: null,
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: `a${String.fromCharCode(0x2028)}b${String.fromCharCode(0x2029)}c`,
+            },
+          ],
+        },
+      },
+      { uuid: "next", parentUuid: "target", type: "user" },
+    ]);
+    const entries = await readClaudeTranscript(input.file);
+    expect([...entries.keys()]).toEqual(["target", "next"]);
+    expect(await inspectClaudeResumePoint(input.file, "target")).toEqual({ reason: "eligible" });
+  });
+  it("quarantines only the truncated line next to a U+2028 record and keeps that record byte-exact", async () => {
+    const separated = JSON.stringify({
+      ...envelope,
+      uuid: "root",
+      parentUuid: null,
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: `a${String.fromCharCode(0x2028)}b` }],
+      },
+    });
+    const target = JSON.stringify({ uuid: "target", parentUuid: "root", type: "user" });
+    const trailing = JSON.stringify({ uuid: "after", parentUuid: "target", type: "system" });
+    const input = await fixture();
+    await writeFile(input.file, `${separated}\n{truncated\n${target}\n${trailing}\n`);
+    const result = await repairClaudeResumePoint(input);
+    if (result.status !== "repaired") throw new Error("Expected repair");
+    expect(await readFile(input.file, "utf8")).toBe(`${separated}\n${target}\n${trailing}\n`);
+    expect(hasClaudeParentChain(await readClaudeTranscript(input.file), "target")).toBe(true);
+    expect(
+      JSON.parse(
+        await readFile(path.join(input.providerLogsDir, `${result.backupId}.receipt`), "utf8"),
+      ).quarantinedLines,
+    ).toEqual([2]);
+  });
+  it("rebuilds a missing target in a transcript that starts with a BOM", async () => {
+    const input = await fixture();
+    await writeFile(input.file, String.fromCharCode(0xfeff) + (await readFile(input.file, "utf8")));
+    await writeFile(
+      path.join(input.providerLogsDir, "thread.log"),
+      logged("target", [{ type: "text", text: "recovered" }]),
+    );
+    const result = await repairClaudeResumePoint(input);
+    expect(result.status).toBe("repaired");
+    expect(hasClaudeParentChain(await readClaudeTranscript(input.file), "target")).toBe(true);
   });
   it("revalidates an intact target without requiring an assistant envelope or rewriting bytes", async () => {
     const input = await fixture([{ uuid: "target", parentUuid: null, type: "user" }]);

@@ -717,6 +717,8 @@ async function connectAndAwaitWelcome(
   const ws = await connectWs(port, token, 5, headers);
   try {
     const welcome = await waitForPush(ws, WS_CHANNELS.serverWelcome);
+    expect(welcome.data.backendIncarnation).toEqual(expect.any(String));
+    expect(welcome.data.backendIncarnation!.length).toBeGreaterThan(0);
     return [ws, welcome];
   } catch (cause) {
     // Callers only register successful connections for teardown. A failed
@@ -1719,6 +1721,54 @@ describe("WebSocket Server", () => {
     expect(refreshed.status).toBe(200);
     expect(refreshed.headers.get("cache-control")).toBe("no-cache");
     expect(await refreshed.text()).toContain("updated app");
+  });
+
+  it("streams app bundles with HEAD and immutable caching while missing bundles return 404", async () => {
+    const stateDir = makeTempDir("f5-streamed-state-"),
+      staticDir = makeTempDir("f5-streamed-app-");
+    fs.mkdirSync(path.join(staticDir, "assets"));
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>Application shell</h1>");
+    fs.writeFileSync(
+      path.join(staticDir, "assets", "main-abcdef12.js"),
+      "globalThis.bundleLoaded = true;",
+    );
+    server = await createTestServer({ cwd: "/test/project", stateDir, staticDir });
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const bundle = await fetch(`http://127.0.0.1:${port}/assets/main-abcdef12.js`);
+    expect(await bundle.text()).toBe("globalThis.bundleLoaded = true;");
+    expect(bundle.headers.get("cache-control")).toContain("immutable");
+    expect(bundle.headers.get("content-security-policy")).toBeNull();
+    fs.writeFileSync(path.join(staticDir, "assets", "code-highlight-worker.js"), "// worker");
+    const worker = await fetch(`http://127.0.0.1:${port}/assets/code-highlight-worker.js`);
+    expect(worker.headers.get("cache-control")).toBe("no-cache");
+    expect(await worker.text()).toBe("// worker");
+    const head = await fetch(`http://127.0.0.1:${port}/assets/main-abcdef12.js`, {
+      method: "HEAD",
+    });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-length")).toBe(
+      String(Buffer.byteLength("globalThis.bundleLoaded = true;")),
+    );
+    expect(await head.text()).toBe("");
+    for (const file of ["missing.js", "missing.css"]) {
+      const missing = await fetch(`http://127.0.0.1:${port}/assets/${file}`, {
+        headers: { Accept: "text/html" },
+      });
+      expect(missing.status).toBe(404);
+      expect(await missing.text()).toBe("Not Found");
+    }
+    const navigation = await fetch(`http://127.0.0.1:${port}/thread/client-route`, {
+      headers: { Accept: "text/html" },
+    });
+    expect(navigation.status).toBe(200);
+    expect(await navigation.text()).toContain("Application shell");
+    expect(navigation.headers.get("cache-control")).toBe("no-cache");
+    const request = await fetch(`http://127.0.0.1:${port}/thread/client-route`, {
+      headers: { Accept: "application/json" },
+    });
+    expect(request.status).toBe(404);
+    await request.text();
   });
 
   it("rejects static path traversal attempts", async () => {

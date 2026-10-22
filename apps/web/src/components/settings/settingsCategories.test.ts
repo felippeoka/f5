@@ -1,3 +1,4 @@
+import { SETTINGS_CATEGORY_ICONS } from "./settingsCategoryIcons";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +9,6 @@ import {
   PROJECT_SETTINGS_CATEGORY_GROUPS,
   SETTINGS_CATEGORIES,
   SETTINGS_CATEGORY_GROUPS,
-  SETTINGS_CATEGORY_ICONS,
   SETTINGS_CATEGORY_LABELS,
   SETTINGS_ITEM_DESCRIPTORS,
   filterSettingsItems,

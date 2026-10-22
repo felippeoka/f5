@@ -14,6 +14,7 @@ describe("computer policy change detection", () => {
       computerPolicyChange(current, {
         enableAgentComputerUse: current.enableAgentComputerUse,
         computerUseExecutionMode: current.computerUseExecutionMode,
+        computerUsePasswordMasking: current.computerUsePasswordMasking,
       }),
     ).toBeNull();
     // An unrelated project override edit keeps running agents untouched.
@@ -24,6 +25,9 @@ describe("computer policy change detection", () => {
     ).toBeNull();
   });
   it("scopes project override changes to that project and global changes to everyone", () => {
+    expect(computerPolicyChange(current, { computerUsePasswordMasking: "conservative" })).toEqual({
+      global: true,
+    });
     expect(
       computerPolicyChange(current, {
         projectSettingsOverrides: { one: null, two: { enableAgentBrowserAccess: false } },

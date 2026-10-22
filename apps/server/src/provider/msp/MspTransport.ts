@@ -1,3 +1,4 @@
+import { ServerShutdown } from "../../shutdown.ts";
 /**
  * MspTransport — the SDK's `DuplexTransport` over an Effect-spawned
  * `muse serve` child process.
@@ -11,7 +12,7 @@
  * @module provider/msp/MspTransport
  */
 import type { DuplexTransport } from "@muse-code/sdk";
-import { Cause, Effect, Exit, Fiber, Queue, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Queue, Scope, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveInvocationEffect } from "../../spawn/resolveCommand.ts";
@@ -22,6 +23,7 @@ export const MSP_STDERR_TAIL_BYTES = 64 * 1024;
 export const MSP_FLUSH_BUDGET_MS = 1_000;
 export const MSP_TERM_AFTER_MS = 3_000;
 export const MSP_KILL_AFTER_MS = 2_000;
+export const MSP_PIPE_CLOSE_GRACE_MS = 500;
 
 export interface MspProcessExit {
   readonly code: number | null;
@@ -46,6 +48,7 @@ export interface MspTransportOptions {
     readonly flushBudgetMs?: number;
     readonly termAfterMs?: number;
     readonly killAfterMs?: number;
+    readonly pipeCloseGraceMs?: number;
   };
 }
 
@@ -109,16 +112,30 @@ class ChunkChannel implements AsyncIterable<string> {
   }
 }
 
-const sleep = (ms: number) =>
-  new Promise<"timeout">((resolve) => {
-    const timer = setTimeout(() => resolve("timeout"), ms);
-    timer.unref?.();
-  });
+async function waitWithin<T>(promise: Promise<T>, ms: number): Promise<T | "timeout"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), Math.max(0, ms));
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export const makeMspTransport = Effect.fn("makeMspTransport")(function* (
   options: MspTransportOptions,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const shutdown = Option.getOrUndefined(yield* Effect.serviceOption(ServerShutdown));
+  const remaining = (budget: number) =>
+    shutdown?.deadline === undefined
+      ? budget
+      : Math.min(budget, Math.max(0, shutdown.deadline - Date.now()));
   const scope = yield* Scope.Scope;
   const invocation = yield* resolveInvocationEffect(
     options.binaryPath,
@@ -135,20 +152,24 @@ export const makeMspTransport = Effect.fn("makeMspTransport")(function* (
   );
 
   const incoming = new ChunkChannel();
+  let processExited = false;
+  const stdoutClosed = Promise.withResolvers<void>();
   let stderrTail = "";
   let resolveExited!: (exit: MspProcessExit) => void;
   const exited = new Promise<MspProcessExit>((resolve) => {
     resolveExited = resolve;
   });
 
-  yield* handle.stdout.pipe(
+  const stdoutReader = yield* handle.stdout.pipe(
     Stream.decodeText(),
     Stream.runForEach((chunk) => Effect.sync(() => incoming.push(chunk))),
     Effect.exit,
     Effect.flatMap((exit) =>
-      Effect.sync(() =>
-        Exit.isSuccess(exit) ? incoming.end() : incoming.end(Cause.squash(exit.cause)),
-      ),
+      Effect.sync(() => {
+        if (Exit.isSuccess(exit)) incoming.end();
+        else incoming.end(Cause.squash(exit.cause));
+        stdoutClosed.resolve();
+      }),
     ),
     Effect.forkIn(scope),
   );
@@ -163,11 +184,31 @@ export const makeMspTransport = Effect.fn("makeMspTransport")(function* (
     Effect.ignore,
     Effect.forkIn(scope),
   );
+  const finishIncoming = async () => {
+    if (
+      (await waitWithin(
+        stdoutClosed.promise,
+        remaining(options.timings?.pipeCloseGraceMs ?? MSP_PIPE_CLOSE_GRACE_MS),
+      )) === "timeout"
+    ) {
+      // A descendant can retain stdout after the host dies. Only this bounded
+      // fallback may end incoming before EOF; normal exit still drains frames.
+      incoming.end(new MspTransportClosedError());
+      void Effect.runPromise(Fiber.interrupt(stdoutReader));
+    }
+  };
   yield* handle.exitCode.pipe(
     Effect.match({
-      onFailure: () => resolveExited({ code: null }),
-      onSuccess: (code) => resolveExited({ code }),
+      onFailure: () => {
+        processExited = true;
+        resolveExited({ code: null });
+      },
+      onSuccess: (code) => {
+        processExited = true;
+        resolveExited({ code });
+      },
     }),
+    Effect.andThen(Effect.promise(finishIncoming)),
     Effect.forkIn(scope),
   );
 
@@ -193,21 +234,25 @@ export const makeMspTransport = Effect.fn("makeMspTransport")(function* (
   const transport: DuplexTransport = {
     incoming,
     write: async (chunk) => {
-      if (closing) throw new MspTransportClosedError();
+      if (closing || processExited) throw new MspTransportClosedError();
       const accepted = await Effect.runPromise(Queue.offer(outbound, chunk));
       if (!accepted) throw new MspTransportClosedError();
     },
     close: (flushed) => {
       closing ??= (async () => {
-        if (flushed) await Promise.race([flushed.catch(() => undefined), sleep(flushBudgetMs)]);
+        if (flushed)
+          await waitWithin(
+            flushed.catch(() => undefined),
+            remaining(flushBudgetMs),
+          );
         await Effect.runPromise(Queue.end(outbound));
-        await Promise.race([Effect.runPromise(Fiber.await(writer)), sleep(flushBudgetMs)]);
-        if ((await Promise.race([exited, sleep(termAfterMs)])) !== "timeout") return;
+        await waitWithin(Effect.runPromise(Fiber.await(writer)), remaining(flushBudgetMs));
+        if ((await waitWithin(exited, remaining(termAfterMs))) !== "timeout") return;
         kill("SIGTERM");
-        if ((await Promise.race([exited, sleep(killAfterMs)])) !== "timeout") return;
+        if ((await waitWithin(exited, remaining(killAfterMs))) !== "timeout") return;
         kill("SIGKILL");
-        await Promise.race([exited, sleep(killAfterMs)]);
-      })();
+        await waitWithin(exited, remaining(killAfterMs));
+      })().finally(finishIncoming);
       return closing;
     },
   };

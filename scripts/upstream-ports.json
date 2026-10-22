@@ -1898,7 +1898,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/orchestration/projectSkills.ts:499",
-        "apps/web/src/components/ChatView.logic.ts:80"
+        "packages/shared/src/slashCommands.ts:70"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -10352,7 +10352,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/orchestration/projectSkills.ts:499",
-        "apps/web/src/components/ChatView.logic.ts:257"
+        "packages/shared/src/slashCommands.ts:245"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -11174,7 +11174,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/web/src/components/ChatView.logic.ts:80",
+        "packages/shared/src/slashCommands.ts:70",
         "apps/server/src/provider/supportedSlashCommands.ts:14"
       ],
       "f5Shas": [
@@ -12725,7 +12725,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/web/src/components/ChatView.logic.ts:80",
+        "packages/shared/src/slashCommands.ts:70",
         "apps/web/src/components/ChatView.tsx:2275"
       ],
       "f5Shas": [
@@ -14914,7 +14914,7 @@
       "reason": "Only valid, host-compatible, non-reserved skill names become slash completions.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
-      "evidence": ["apps/web/src/components/ChatView.logic.ts:80"],
+      "evidence": ["packages/shared/src/slashCommands.ts:70"],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
         "9c562a4c2868e31caad697b11c56a6fba633a6ff",
@@ -15007,7 +15007,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/orchestration/projectSkills.ts:499",
-        "apps/web/src/components/ChatView.logic.ts:257"
+        "packages/shared/src/slashCommands.ts:245"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -16550,7 +16550,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/provider/Layers/OpenCodeAdapter.ts:1411",
-        "apps/web/src/components/ChatView.logic.ts:80"
+        "packages/shared/src/slashCommands.ts:70"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -17351,8 +17351,8 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/web/src/components/ChatView.logic.ts:904",
-        "apps/web/src/components/ChatView.logic.test.ts:1184"
+        "apps/web/src/components/ChatView.logic.ts:745",
+        "apps/web/src/components/ChatView.logic.test.ts:1327"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -18008,7 +18008,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1d",
       "evidence": [
-        "apps/web/src/routes/__root.tsx:510",
+        "apps/web/src/orchestration/syncController.ts:328",
         "apps/web/src/components/FileViewPanel.browser.tsx:1"
       ],
       "f5Shas": [
@@ -18540,7 +18540,7 @@
       "reason": "Combine native slash commands with discovered project and provider skills in the composer.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
-      "evidence": ["apps/web/src/components/ChatView.logic.ts:80"],
+      "evidence": ["packages/shared/src/slashCommands.ts:70"],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
         "9c562a4c2868e31caad697b11c56a6fba633a6ff",
@@ -18779,7 +18779,7 @@
       "reason": "Composer skill selections retain structured invocation metadata and explicit source paths when the provider has no matching native skill.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
-      "evidence": ["apps/web/src/components/ChatView.logic.ts:183"],
+      "evidence": ["packages/shared/src/slashCommands.ts:170"],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
         "9c562a4c2868e31caad697b11c56a6fba633a6ff",

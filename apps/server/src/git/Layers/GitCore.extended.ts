@@ -5,7 +5,17 @@ import { createServer } from "node:http";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, FileSystem, Layer, PlatformError, Scope } from "effect";
+import {
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Logger,
+  PlatformError,
+  Scope,
+  ServiceMap,
+} from "effect";
 import { describe, expect, vi } from "vitest";
 
 import { GitServiceLive } from "./GitService.ts";
@@ -33,7 +43,11 @@ function makeTmpDir(
 ): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem | Scope.Scope> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    return yield* fileSystem.makeTempDirectoryScoped({ prefix });
+    const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix });
+    const core = yield* Effect.serviceOption(GitCore);
+    if (core._tag === "Some" && core.value.drainUpstreamRefreshes)
+      yield* Effect.addFinalizer(() => core.value.drainUpstreamRefreshes!(directory));
+    return directory;
   });
 }
 
@@ -93,73 +107,14 @@ function runShellCommand(input: {
 }
 
 const makeIsolatedGitCore = (gitService: GitServiceShape) =>
-  Effect.promise(async () => {
-    const gitServiceLayer = Layer.succeed(GitService, gitService);
+  Effect.gen(function* () {
     const coreLayer = GitCoreLive.pipe(
       Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "f5-git-core-" })),
-      Layer.provide(gitServiceLayer),
+      Layer.provide(Layer.succeed(GitService, gitService)),
       Layer.provide(NodeServices.layer),
     );
-    const core = await Effect.runPromise(Effect.service(GitCore).pipe(Effect.provide(coreLayer)));
-
-    return {
-      readMoveSnapshot: (cwd) => core.readMoveSnapshot(cwd),
-      copyMoveUntracked: (source, target, files) => core.copyMoveUntracked(source, target, files),
-      stashCreate: (cwd) => core.stashCreate(cwd),
-      stashApplySha: (cwd, sha) => core.stashApplySha(cwd, sha),
-      stashPushAll: (cwd, message) => core.stashPushAll(cwd, message),
-      setMoveRef: (cwd, ref, sha) => core.setMoveRef(cwd, ref, sha),
-      deleteMoveRef: (cwd, ref, sha) => core.deleteMoveRef(cwd, ref, sha),
-      cleanMoveCopies: (cwd, snapshot) => core.cleanMoveCopies(cwd, snapshot),
-      listWorktrees: (cwd) => core.listWorktrees(cwd),
-      isDirty: (cwd) => core.isDirty(cwd),
-      inspectCheckoutIdentity: (path) => core.inspectCheckoutIdentity(path),
-      inspectCheckout: (path, options) => core.inspectCheckout(path, options),
-      clearMissingRegistration: (cwd, path) => core.clearMissingRegistration(cwd, path),
-      fastForwardTo: (cwd, sha) => core.fastForwardTo(cwd, sha),
-      initializeWorktreeSubmodules: (path, policy) =>
-        core.initializeWorktreeSubmodules(path, policy),
-      readWorktreePreparation: (path) => core.readWorktreePreparation(path),
-      allocateWorktreePath: (input) => core.allocateWorktreePath(input),
-      isValidBranchName: (name) => core.isValidBranchName(name),
-      resolveAvailableBranchName: (cwd, name) => core.resolveAvailableBranchName(cwd, name),
-      ensureWorktree: (input) => core.ensureWorktree(input),
-      branchExists: (cwd, branch) => core.branchExists(cwd, branch),
-      status: (input) => core.status(input),
-      statusDetails: (cwd) => core.statusDetails(cwd),
-      prepareCommitContext: (cwd, filePaths?) => core.prepareCommitContext(cwd, filePaths),
-      commit: (cwd, subject, body) => core.commit(cwd, subject, body),
-      pushCurrentBranch: (cwd, fallbackBranch) => core.pushCurrentBranch(cwd, fallbackBranch),
-      pullCurrentBranch: (cwd) => core.pullCurrentBranch(cwd),
-      readRangeContext: (cwd, baseBranch) => core.readRangeContext(cwd, baseBranch),
-      readDefaultBranch: (cwd) => core.readDefaultBranch(cwd),
-      readConfigValue: (cwd, key) => core.readConfigValue(cwd, key),
-      listRemotes: (cwd) => core.listRemotes(cwd),
-      listBranches: (input) => core.listBranches(input),
-      createWorktree: (input) => core.createWorktree(input),
-      hasRemote: (cwd) => core.hasRemote(cwd),
-      fetchRemoteBranchCommit: (input) => core.fetchRemoteBranchCommit(input),
-      fetchPullRequestBranch: (input) => core.fetchPullRequestBranch(input),
-      ensureRemote: (input) => core.ensureRemote(input),
-      fetchRemoteBranch: (input) => core.fetchRemoteBranch(input),
-      setBranchUpstream: (input) => core.setBranchUpstream(input),
-      removeWorktree: (input) => core.removeWorktree(input),
-      resolveCommonDir: (cwd) => core.resolveCommonDir(cwd),
-      pruneWorktrees: (cwd) => core.pruneWorktrees(cwd),
-      resolveCommit: (cwd, revision) => core.resolveCommit(cwd, revision),
-      readOperationInProgress: (cwd) => core.readOperationInProgress(cwd),
-      isAncestor: (cwd, ancestor, descendant) => core.isAncestor(cwd, ancestor, descendant),
-      deleteBranchIfAt: (input) => core.deleteBranchIfAt(input),
-      readFileAtRevision: (input) => core.readFileAtRevision(input),
-      listIgnoredEntries: (cwd) => core.listIgnoredEntries(cwd),
-      renameBranch: (input) => core.renameBranch(input),
-      createBranch: (input) => core.createBranch(input),
-      resolveCheckoutTarget: (input) => core.resolveCheckoutTarget(input),
-      checkoutBranch: (input, options = {}) => core.checkoutBranch(input, options),
-      initRepo: (input) => core.initRepo(input),
-      cloneRepository: (input) => core.cloneRepository(input),
-      listLocalBranchNames: (cwd) => core.listLocalBranchNames(cwd),
-    } satisfies GitCoreShape;
+    // Keep service-scoped refresh fibers alive until the surrounding test ends.
+    return ServiceMap.get(yield* Layer.build(Layer.fresh(coreLayer)), GitCore);
   });
 
 function listGitBranches(input: Parameters<GitCoreShape["listBranches"]>[0]) {
@@ -1055,6 +1010,181 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
+    it.effect("does not hold the repository lock while a status refresh waits on the network", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        yield* git(source, ["branch", "local-while-fetching"]);
+        const entered = yield* Deferred.make<void>(),
+          release = yield* Deferred.make<void>();
+        const realGitService = yield* GitService;
+        const core = yield* makeIsolatedGitCore({
+          execute: (input) =>
+            input.args[0] === "fetch"
+              ? Deferred.succeed(entered, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.as({ code: 128, stdout: "", stderr: "offline" }),
+                )
+              : realGitService.execute(input),
+        });
+        yield* core.statusDetails(source);
+        yield* Deferred.await(entered);
+        yield* core
+          .checkoutBranch({ cwd: source, branch: "local-while-fetching" })
+          .pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+        expect((yield* git(source, ["branch", "--show-current"])).trim()).toBe(
+          "local-while-fetching",
+        );
+      }),
+    );
+
+    it.effect("keeps user pull refs and FETCH_HEAD when a delayed status fetch finishes", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir(),
+          clone = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        yield* git(clone, ["clone", remote, "."]);
+        yield* git(clone, ["config", "user.email", "test@test.com"]);
+        yield* git(clone, ["config", "user.name", "Test"]);
+        yield* git(clone, ["checkout", branch]);
+        yield* writeTextFile(path.join(clone, "new.txt"), "first update");
+        yield* git(clone, ["add", "new.txt"]);
+        yield* git(clone, ["commit", "-m", "first update"]);
+        yield* git(clone, ["push", "origin", branch]);
+        const fetched = yield* Deferred.make<void>(),
+          release = yield* Deferred.make<void>();
+        const realGitService = yield* GitService;
+        const core = yield* makeIsolatedGitCore({
+          execute: (input) =>
+            realGitService
+              .execute(input)
+              .pipe(
+                Effect.tap(() =>
+                  input.args[0] === "fetch"
+                    ? Deferred.succeed(fetched, undefined).pipe(
+                        Effect.andThen(Deferred.await(release)),
+                      )
+                    : Effect.void,
+                ),
+              ),
+        });
+        yield* core.statusDetails(source);
+        yield* Deferred.await(fetched);
+        yield* Effect.gen(function* () {
+          yield* writeTextFile(path.join(clone, "new.txt"), "newer update");
+          yield* git(clone, ["add", "new.txt"]);
+          yield* git(clone, ["commit", "-m", "newer update"]);
+          yield* git(clone, ["push", "origin", branch]);
+          yield* git(source, ["pull", "--ff-only"]);
+        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+        yield* core.drainUpstreamRefreshes!(source);
+        const head = (yield* git(source, ["rev-parse", "HEAD"])).trim();
+        expect((yield* git(source, ["rev-parse", `refs/remotes/origin/${branch}`])).trim()).toBe(
+          head,
+        );
+        expect((yield* git(source, ["rev-parse", "FETCH_HEAD"])).trim()).toBe(head);
+        expect((yield* git(source, ["for-each-ref", "refs/f5/status"])).trim()).toBe("");
+      }),
+    );
+
+    it.effect("falls back on older Git, promotes tracking refs and warns once", () => {
+      const messages: string[] = [];
+      return Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir(),
+          other = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        yield* git(other, ["clone", source, "."]);
+        yield* writeTextFile(path.join(source, "legacy-refresh.txt"), "new upstream commit");
+        yield* git(source, ["add", "legacy-refresh.txt"]);
+        yield* git(source, ["commit", "-m", "legacy refresh update"]);
+        yield* git(source, ["push", "origin", branch]);
+        const expected = (yield* git(source, ["rev-parse", "HEAD"])).trim();
+        const realGitService = yield* GitService;
+        let fetches = 0,
+          legacyFetches = 0;
+        const core = yield* makeIsolatedGitCore({
+          execute: (input) =>
+            Effect.suspend(() => {
+              if (input.args[0] !== "fetch") return realGitService.execute(input);
+              fetches++;
+              if (input.args.includes("--no-write-fetch-head"))
+                return Effect.succeed({
+                  code: 129,
+                  stdout: "",
+                  stderr: "error: unknown option no-write-fetch-head",
+                });
+              legacyFetches++;
+              return realGitService.execute(input);
+            }),
+        });
+        for (const cwd of [source, other]) {
+          yield* core.statusDetails(cwd);
+          yield* core.drainUpstreamRefreshes!(cwd);
+        }
+        expect(fetches).toBe(3);
+        expect(legacyFetches).toBe(2);
+        expect((yield* git(other, ["rev-parse", `refs/remotes/origin/${branch}`])).trim()).toBe(
+          expected,
+        );
+        for (const cwd of [source, other])
+          expect((yield* git(cwd, ["for-each-ref", "refs/f5/status/"])).trim()).toBe("");
+        expect(
+          messages.filter((message) => message.includes("using compatibility mode")),
+        ).toHaveLength(1);
+      }).pipe(
+        Effect.provide(
+          Logger.layer(
+            [
+              Logger.make((entry) => {
+                messages.push(String(entry.message));
+              }),
+            ],
+            { mergeWithExisting: false },
+          ),
+        ),
+      );
+    });
+
+    it.effect("sweeps abandoned status refs without deleting another live profile's refs", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        const stale = `refs/f5/status/${Date.now() - 31 * 60_000}-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`;
+        const live = `refs/f5/status/${Date.now()}-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`;
+        const legacy = "refs/f5/status/cccccccc-cccc-cccc-cccc-cccccccccccc";
+        for (const ref of [stale, live, legacy]) yield* git(source, ["update-ref", ref, "HEAD"]);
+        const core = yield* makeIsolatedGitCore(yield* GitService);
+        yield* core.statusDetails(source);
+        yield* core.drainUpstreamRefreshes!(source);
+        const refs = (yield* git(source, [
+          "for-each-ref",
+          "--format=%(refname)",
+          "refs/f5/status/",
+        ])).split("\n");
+        expect(refs).toEqual([live, legacy].sort());
+      }),
+    );
+
     it.effect("keeps checkout successful when upstream refresh fails", () =>
       Effect.gen(function* () {
         const remote = yield* makeTmpDir();
@@ -1079,6 +1209,7 @@ it.layer(TestLayer)("git integration", (it) => {
 
         const realGitService = yield* GitService;
         let refreshFetchAttempts = 0;
+        const refreshAttempted = yield* Deferred.make<void>();
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
@@ -1090,17 +1221,16 @@ it.layer(TestLayer)("git integration", (it) => {
                   cwd: input.cwd,
                   detail: "simulated fetch timeout",
                 }),
-              );
+              ).pipe(Effect.ensuring(Deferred.succeed(refreshAttempted, undefined)));
             }
             return realGitService.execute(input);
           },
         });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
-        yield* Effect.promise(() =>
-          vi.waitFor(() => {
-            expect(refreshFetchAttempts).toBe(1);
-          }),
-        );
+        // Checkout intentionally forks refresh. Synchronize with that work
+        // rather than requiring a loaded CI host to admit it within one second.
+        yield* Deferred.await(refreshAttempted);
+        expect(refreshFetchAttempts).toBe(1);
         expect(yield* git(source, ["branch", "--show-current"])).toBe(featureBranch);
       }),
     );
@@ -1127,6 +1257,7 @@ it.layer(TestLayer)("git integration", (it) => {
 
         const realGitService = yield* GitService;
         let refreshFetchAttempts = 0;
+        const refreshAttempted = yield* Deferred.make<void>();
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
@@ -1138,13 +1269,14 @@ it.layer(TestLayer)("git integration", (it) => {
                   cwd: input.cwd,
                   detail: "simulated fetch timeout",
                 }),
-              );
+              ).pipe(Effect.ensuring(Deferred.succeed(refreshAttempted, undefined)));
             }
             return realGitService.execute(input);
           },
         });
 
         const first = yield* core.statusDetails(source);
+        yield* Deferred.await(refreshAttempted);
         const second = yield* core.statusDetails(source);
 
         expect(first.branch).toBe(featureBranch);
@@ -1176,29 +1308,31 @@ it.layer(TestLayer)("git integration", (it) => {
 
         const realGitService = yield* GitService;
         let fetchArgs: readonly string[] | null = null;
+        const fetchAdmitted = yield* Deferred.make<void>();
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
               fetchArgs = [...input.args];
-              return Effect.succeed({ code: 0, stdout: "", stderr: "" });
+              return Deferred.succeed(fetchAdmitted, undefined).pipe(
+                Effect.andThen(realGitService.execute(input)),
+              );
             }
             return realGitService.execute(input);
           },
         });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
-        yield* Effect.promise(() =>
-          vi.waitFor(() => {
-            expect(fetchArgs).not.toBeNull();
-          }),
-        );
+        yield* Deferred.await(fetchAdmitted);
 
         expect(yield* git(source, ["branch", "--show-current"])).toBe(featureBranch);
         expect(fetchArgs).toEqual([
           "fetch",
           "--quiet",
           "--no-tags",
+          "--no-write-fetch-head",
+          "--no-auto-maintenance",
+          "--refmap=",
           "origin",
-          `+refs/heads/${featureBranch}:refs/remotes/origin/${featureBranch}`,
+          expect.stringMatching(new RegExp(`^\\+refs/heads/${featureBranch}:refs/f5/status/`)),
         ]);
       }),
     );
@@ -1225,7 +1359,7 @@ it.layer(TestLayer)("git integration", (it) => {
         yield* git(source, ["checkout", defaultBranch]);
 
         const realGitService = yield* GitService;
-        let fetchStarted = false;
+        const fetchAdmitted = yield* Deferred.make<void>();
         let releaseFetch!: () => void;
         const waitForReleasePromise = new Promise<void>((resolve) => {
           releaseFetch = resolve;
@@ -1233,7 +1367,7 @@ it.layer(TestLayer)("git integration", (it) => {
         const core = yield* makeIsolatedGitCore({
           execute: (input) => {
             if (input.args[0] === "fetch") {
-              fetchStarted = true;
+              Effect.runSync(Deferred.succeed(fetchAdmitted, undefined));
               return Effect.promise(() =>
                 waitForReleasePromise.then(() => ({ code: 0, stdout: "", stderr: "" })),
               );
@@ -1242,14 +1376,69 @@ it.layer(TestLayer)("git integration", (it) => {
           },
         });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
-        yield* Effect.promise(() =>
-          vi.waitFor(() => {
-            expect(fetchStarted).toBe(true);
-          }),
-        );
+        yield* Deferred.await(fetchAdmitted);
         expect(yield* git(source, ["branch", "--show-current"])).toBe(featureBranch);
         releaseFetch();
       }),
+    );
+
+    it.effect(
+      "returns local status during a hanging refresh and invalidates only after real refresh",
+      () =>
+        Effect.gen(function* () {
+          const remote = yield* makeTmpDir();
+          const source = yield* makeTmpDir();
+          yield* git(remote, ["init", "--bare"]);
+
+          yield* initRepoWithCommit(source);
+          const defaultBranch = (yield* listGitBranches({ cwd: source })).branches.find(
+            (branch) => branch.current,
+          )!.name;
+          yield* git(source, ["remote", "add", "origin", remote]);
+          yield* git(source, ["push", "-u", "origin", defaultBranch]);
+
+          const featureBranch = "feature/background-refresh";
+          yield* git(source, ["checkout", "-b", featureBranch]);
+          yield* writeTextFile(path.join(source, "feature.txt"), "feature base\n");
+          yield* git(source, ["add", "feature.txt"]);
+          yield* git(source, ["commit", "-m", "feature base"]);
+          yield* git(source, ["push", "-u", "origin", featureBranch]);
+
+          const realGitService = yield* GitService;
+          const fetchAdmitted = yield* Deferred.make<void>();
+          let releaseFetch!: () => void;
+          const waitForReleasePromise = new Promise<void>((resolve) => {
+            releaseFetch = resolve;
+          });
+          const core = yield* makeIsolatedGitCore({
+            execute: (input) => {
+              if (input.args[0] === "fetch") {
+                Effect.runSync(Deferred.succeed(fetchAdmitted, undefined));
+                return Effect.promise(() => waitForReleasePromise).pipe(
+                  Effect.andThen(realGitService.execute(input)),
+                );
+              }
+              return realGitService.execute(input);
+            },
+          });
+          const invalidations: string[] = [];
+          const refreshed = yield* Deferred.make<void>();
+          yield* core.subscribeStatusRefresh!((cwd) => {
+            invalidations.push(cwd);
+            Effect.runSync(Deferred.succeed(refreshed, undefined));
+          });
+          const first = yield* core.statusDetails(source);
+          expect(first.branch).toBe(featureBranch);
+          yield* Deferred.await(fetchAdmitted);
+          const second = yield* core.statusDetails(source);
+          expect(second.branch).toBe(featureBranch);
+          expect(invalidations).toEqual([]);
+          releaseFetch();
+          yield* Deferred.await(refreshed);
+          yield* core.statusDetails(source);
+          yield* Effect.yieldNow;
+          expect(invalidations).toEqual([source]);
+        }),
     );
 
     it.effect("throws when branch does not exist", () =>
@@ -2459,43 +2648,40 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
-    it.effect(
-      "refreshes upstream before statusDetails so behind count reflects remote updates",
-      () =>
-        Effect.gen(function* () {
-          const remote = yield* makeTmpDir();
-          const source = yield* makeTmpDir();
-          const clone = yield* makeTmpDir();
-          yield* git(remote, ["init", "--bare"]);
+    it.effect("eventually refreshes upstream counts after returning local status", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir();
+        const source = yield* makeTmpDir();
+        const clone = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
 
-          yield* initRepoWithCommit(source);
-          const initialBranch = (yield* listGitBranches({ cwd: source })).branches.find(
-            (branch) => branch.current,
-          )!.name;
-          yield* git(source, ["remote", "add", "origin", remote]);
-          yield* git(source, ["push", "-u", "origin", initialBranch]);
+        yield* initRepoWithCommit(source);
+        const initialBranch = (yield* listGitBranches({ cwd: source })).branches.find(
+          (branch) => branch.current,
+        )!.name;
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", initialBranch]);
 
-          yield* git(clone, ["clone", remote, "."]);
-          yield* git(clone, ["config", "user.email", "test@test.com"]);
-          yield* git(clone, ["config", "user.name", "Test"]);
-          yield* git(clone, [
-            "checkout",
-            "-B",
-            initialBranch,
-            "--track",
-            `origin/${initialBranch}`,
-          ]);
-          yield* writeTextFile(path.join(clone, "CHANGELOG.md"), "remote change\n");
-          yield* git(clone, ["add", "CHANGELOG.md"]);
-          yield* git(clone, ["commit", "-m", "remote update"]);
-          yield* git(clone, ["push", "origin", initialBranch]);
+        yield* git(clone, ["clone", remote, "."]);
+        yield* git(clone, ["config", "user.email", "test@test.com"]);
+        yield* git(clone, ["config", "user.name", "Test"]);
+        yield* git(clone, ["checkout", "-B", initialBranch, "--track", `origin/${initialBranch}`]);
+        yield* writeTextFile(path.join(clone, "CHANGELOG.md"), "remote change\n");
+        yield* git(clone, ["add", "CHANGELOG.md"]);
+        yield* git(clone, ["commit", "-m", "remote update"]);
+        yield* git(clone, ["push", "origin", initialBranch]);
 
-          const core = yield* GitCore;
-          const details = yield* core.statusDetails(source);
-          expect(details.branch).toBe(initialBranch);
-          expect(details.aheadCount).toBe(0);
-          expect(details.behindCount).toBe(1);
-        }),
+        const core = yield* GitCore;
+        const refreshed = yield* Deferred.make<void>();
+        yield* core.subscribeStatusRefresh!(() => {
+          Effect.runSync(Deferred.succeed(refreshed, undefined));
+        });
+        const details = yield* core.statusDetails(source);
+        expect(details.branch).toBe(initialBranch);
+        expect(details.aheadCount).toBe(0);
+        yield* Deferred.await(refreshed);
+        expect((yield* core.statusDetails(source)).behindCount).toBe(1);
+      }),
     );
 
     it.effect("prepares commit context by auto-staging and creates commit", () =>

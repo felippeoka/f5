@@ -13,6 +13,24 @@ import {
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
+describe("ServerSettings.computerUsePasswordMasking", () => {
+  it("defaults new and legacy settings to fast and preserves conservative settings", () => {
+    expect(DEFAULT_SERVER_SETTINGS.computerUsePasswordMasking).toBe("fast");
+    expect(decodeServerSettings({}).computerUsePasswordMasking).toBe("fast");
+    expect(
+      decodeServerSettings({ computerUsePasswordMasking: "conservative" })
+        .computerUsePasswordMasking,
+    ).toBe("conservative");
+    expect(decodeServerSettingsPatch({ computerUsePasswordMasking: "conservative" })).toEqual({
+      computerUsePasswordMasking: "conservative",
+    });
+    for (const computerUsePasswordMasking of ["off", "", null, true]) {
+      expect(() => decodeServerSettings({ computerUsePasswordMasking })).toThrow();
+      expect(() => decodeServerSettingsPatch({ computerUsePasswordMasking })).toThrow();
+    }
+  });
+});
+
 describe("ServerSettings.sourceControlWriting", () => {
   it("decodes legacy settings with safe defaults", () => {
     expect(decodeServerSettings({}).sourceControlWriting).toEqual({

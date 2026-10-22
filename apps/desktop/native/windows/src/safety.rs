@@ -194,10 +194,21 @@ pub fn parse_chord(raw: &str) -> Result<Vec<u16>, &'static str> {
             "space" => 0x20,
             "backspace" => 0x8,
             "delete" => 0x2e,
-            "arrowleft" => 0x25,
-            "arrowright" => 0x27,
-            "arrowup" => 0x26,
-            "arrowdown" => 0x28,
+            "arrowleft" | "left" => 0x25,
+            "arrowright" | "right" => 0x27,
+            "arrowup" | "up" => 0x26,
+            "arrowdown" | "down" => 0x28,
+            "minus" | "-" => 0xbd,
+            "equal" | "=" | "plus" => 0xbb,
+            "bracketleft" | "[" => 0xdb,
+            "bracketright" | "]" => 0xdd,
+            "semicolon" | ";" => 0xba,
+            "quote" | "'" => 0xde,
+            "comma" | "," => 0xbc,
+            "period" | "." => 0xbe,
+            "slash" | "/" => 0xbf,
+            "backslash" | "\\" => 0xdc,
+            "backquote" | "`" => 0xc0,
             "home" => 0x24,
             "end" => 0x23,
             "pageup" => 0x21,
@@ -251,6 +262,38 @@ pub fn focused_element_block(
 #[cfg(test)]
 mod keyboard_tests {
     use super::*;
+    #[test]
+    fn punctuation_and_arrow_aliases() {
+        for (aliases, code) in [
+            ("up|arrowup", 0x26),
+            ("down|arrowdown", 0x28),
+            ("left|arrowleft", 0x25),
+            ("right|arrowright", 0x27),
+            ("minus|-", 0xbd),
+            ("equal|=|plus", 0xbb),
+            ("bracketleft|[", 0xdb),
+            ("bracketright|]", 0xdd),
+            ("semicolon|;", 0xba),
+            ("quote|'", 0xde),
+            ("comma|,", 0xbc),
+            ("period|.", 0xbe),
+            ("slash|/", 0xbf),
+            ("backslash|\\", 0xdc),
+            ("backquote|`", 0xc0),
+        ] {
+            for name in aliases.split('|') {
+                assert_eq!(parse_chord(&name.to_uppercase()), Ok(vec![code]));
+            }
+        }
+        assert_eq!(parse_chord("Ctrl+Minus"), Ok(vec![0x11, 0xbd]));
+        assert_eq!(parse_chord("Ctrl+="), Ok(vec![0x11, 0xbb]));
+        for number in 1..=12 {
+            assert_eq!(
+                parse_chord(&format!("F{number}")),
+                Ok(vec![0x70 + number - 1])
+            );
+        }
+    }
     #[test]
     fn protected_and_kill_chords_cannot_be_injected() {
         for chord in [

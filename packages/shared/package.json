@@ -357,6 +357,18 @@
     "./scheduledTasks": {
       "types": "./src/scheduledTasks.ts",
       "import": "./src/scheduledTasks.ts"
+    },
+    "./utf8Lines": {
+      "types": "./src/utf8Lines.ts",
+      "import": "./src/utf8Lines.ts"
+    },
+    "./abortSignal": {
+      "types": "./src/abortSignal.ts",
+      "import": "./src/abortSignal.ts"
+    },
+    "./turnStateTransitions": {
+      "types": "./src/turnStateTransitions.ts",
+      "import": "./src/turnStateTransitions.ts"
     }
   },
   "scripts": {

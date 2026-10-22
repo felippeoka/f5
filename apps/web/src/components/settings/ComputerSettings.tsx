@@ -50,6 +50,15 @@ export function computerExecutionModeDescription(
     return `${base} Background is selected but unavailable: ${unavailable} Agents get an error until you switch to foreground.`;
   return unavailable && mode === "foreground" ? `${base} ${unavailable}` : base;
 }
+export function computerPasswordMaskingDescription(
+  status: ComputerAutomationBackendStatus | undefined,
+): string {
+  const description =
+    "Fast mode improves screenshot performance. Password fields Chrome omits from accessibility search may appear in screenshots sent to your model.";
+  return status?.available && status.passwordMaskingSupported
+    ? description
+    : `${description} Selecting a masking mode requires an updated macOS helper. Existing captures use their platform's behavior; password masking is Legacy / unknown.`;
+}
 const configuredActivityCache = new WeakMap<
   Thread["activities"],
   { at: string; value: RuntimeAgentBrowserCapabilities } | null
@@ -276,6 +285,31 @@ export function ComputerSettings() {
           settings.enableAgentComputerUse
             ? "Computer use is on; each app still needs approval."
             : "Computer use is off."
+        }
+      />
+      <SettingsRow
+        title="Screenshot password masking"
+        description={computerPasswordMaskingDescription(status)}
+        control={
+          <Select
+            value={settings.computerUsePasswordMasking}
+            onValueChange={(value) => {
+              if (value === "fast" || value === "conservative")
+                updateSettings({ computerUsePasswordMasking: value });
+            }}
+          >
+            <SelectTrigger className="w-72" aria-label="Screenshot password masking">
+              <SelectValue>
+                {settings.computerUsePasswordMasking === "fast"
+                  ? "Fast — best effort"
+                  : "Conservative — inspect the full tree"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="fast">Fast — best effort</SelectItem>
+              <SelectItem value="conservative">Conservative — inspect the full tree</SelectItem>
+            </SelectPopup>
+          </Select>
         }
       />
       <SettingsRow

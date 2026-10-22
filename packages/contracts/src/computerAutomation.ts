@@ -61,11 +61,15 @@ export const ComputerBackgroundStatus = Schema.Struct({
   reason: Schema.optional(ComputerBackgroundUnavailableReason),
 });
 export type ComputerBackgroundStatus = typeof ComputerBackgroundStatus.Type;
+export const ComputerPasswordMasking = Schema.Literals(["fast", "conservative"]);
+export type ComputerPasswordMasking = typeof ComputerPasswordMasking.Type;
 export const ComputerAutomationBackendStatus = Schema.Union([
   Schema.Struct({
     available: Schema.Literal(true),
     displays: Schema.optional(Schema.Array(ComputerDisplay)),
     background: Schema.optional(ComputerBackgroundStatus),
+    /** Absent on legacy helpers and platforms without selectable password masking. */
+    passwordMaskingSupported: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     available: Schema.Literal(false),
@@ -141,6 +145,8 @@ const Envelope = {
   screenshot: Schema.optional(Schema.Boolean),
   /** Missing means foreground, the only delivery legacy peers understand. */
   delivery: Schema.optional(ComputerDelivery),
+  /** User policy injected by the broker; absent requests retain the legacy child walk. */
+  passwordMasking: Schema.optional(ComputerPasswordMasking),
 };
 const Coordinates = { displayId: Id, geometryGeneration: Id, x: NonNegative, y: NonNegative };
 export const ComputerAutomationRequest = Schema.Union([
@@ -168,7 +174,9 @@ export const ComputerAutomationRequest = Schema.Union([
     ...Envelope,
     op: Schema.Literal("inspect"),
     appId: Id,
-    maxNodes: Positive.check(Schema.isLessThanOrEqualTo(400)),
+    maxNodes: Positive.check(Schema.isLessThanOrEqualTo(800)),
+    snapshotId: Schema.optional(Id),
+    elementRef: Schema.optional(Id),
   }),
   Schema.Struct({
     ...Envelope,
@@ -220,6 +228,55 @@ export const ComputerAutomationRequest = Schema.Union([
 ]);
 export type ComputerAutomationRequest = typeof ComputerAutomationRequest.Type;
 export type ComputerAutomationOperation = ComputerAutomationRequest["op"];
+/** Content-free diagnostics from the macOS password audit; absent on older helpers. */
+const ComputerSecureAuditDiagnostics = Schema.Struct({
+  searchEnabled: Schema.Boolean,
+  elapsedMs: NonNegative,
+  windows: Schema.Array(
+    Schema.Struct({
+      windowIndex: NonNegative,
+      /** The audit finished; accessibility may still omit visually present fields. */
+      complete: Schema.Boolean,
+      elapsedMs: NonNegative,
+      visitedNodes: NonNegative,
+      nodeReadElapsedMs: NonNegative,
+      maxChildren: NonNegative,
+      textFieldQueries: NonNegative,
+      frameQueries: NonNegative,
+      searchResults: NonNegative,
+      searchElapsedMs: NonNegative,
+      searchFallbacks: NonNegative,
+      invalidSearchResults: NonNegative,
+      stopReasons: Schema.Array(
+        Schema.Literals([
+          "deadline",
+          "node-budget",
+          "depth-limit",
+          "unreadable-node",
+          "unreadable-children",
+          "secure-field-without-frame",
+          "search-limit",
+          "search-incomplete",
+          "window-match",
+        ]),
+      ),
+      axFailures: Schema.Array(
+        Schema.Struct({
+          operation: Schema.Literals([
+            "node-read",
+            "role",
+            "subrole",
+            "children",
+            "text-fields",
+            "frames",
+          ]),
+          error: Schema.Int,
+          count: Positive,
+        }),
+      ).check(Schema.isMaxLength(32)),
+    }),
+  ),
+});
 export const ComputerScreenshot = Schema.Struct({
   displayId: Id,
   geometryGeneration: Id,
@@ -227,6 +284,14 @@ export const ComputerScreenshot = Schema.Struct({
   mimeType: Schema.Literals(["image/png", "image/jpeg"]),
   data: Schema.String.check(Schema.isMaxLength(8 * 1024 * 1024)),
   hiddenContent: Schema.Boolean,
+  passwordMasking: Schema.optional(ComputerPasswordMasking),
+  masked: Schema.optional(Schema.Literals(["none", "fields", "web-area", "window"])),
+  maskReasons: Schema.optional(
+    Schema.Array(
+      Schema.Literals(["window-match", "audit-incomplete", "partial-audit", "windows-changed"]),
+    ),
+  ),
+  secureAudit: Schema.optional(ComputerSecureAuditDiagnostics),
 });
 export type ComputerScreenshot = typeof ComputerScreenshot.Type;
 export const ComputerAutomationScreenshot = ComputerScreenshot;
@@ -260,6 +325,7 @@ export const ComputerInspectResult = Schema.Struct({
   snapshotId: Id,
   appId: Id,
   accessible: Schema.Boolean,
+  truncated: Schema.optional(Schema.Boolean),
   nodes: Schema.Array(
     Schema.Struct({
       elementRef: Id,
@@ -272,7 +338,7 @@ export const ComputerInspectResult = Schema.Struct({
       enabled: Schema.Boolean,
       actions: Schema.Array(ComputerElementAction),
     }),
-  ).check(Schema.isMaxLength(400)),
+  ).check(Schema.isMaxLength(800)),
 });
 export type ComputerInspectResult = typeof ComputerInspectResult.Type;
 export const ComputerForegroundRequiredReason = Schema.Literals([
@@ -341,10 +407,15 @@ export const ComputerAutomationError = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.Literal("Execution"), message: Schema.String }),
   Schema.Struct({
+    _tag: Schema.Literal("StaleElement"),
+    reason: Schema.optional(
+      Schema.Literals(["snapshot-expired", "window-changed", "element-gone", "role-changed"]),
+    ),
+  }),
+  Schema.Struct({
     _tag: Schema.Literals([
       "OutcomeUnknown",
       "GeometryChanged",
-      "StaleElement",
       "UnsupportedAction",
       "ReplayRejected",
       "PayloadMismatch",

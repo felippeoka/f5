@@ -42,8 +42,10 @@ access; shell GUI automation must use F5's consent-mediated computer catalog.
 There is no unsandboxed fallback if the sandbox launcher fails.
 
 Every included window is audited for secure fields, including background apps and
-second windows. Missing, partial or timed-out accessibility scans hide the entire
-window. Consequently apps with unreadable accessibility trees can appear gray.
+second windows. Missing, partial or timed-out accessibility scans mask the nearest
+containing web/scroll area, or the window when no such region is known.
+The default fast mode uses best-effort browser accessibility search: visible password
+fields omitted by Chrome can remain in the image. Conservative mode walks the tree.
 
 ## Rule: tools installed, execution gated
 
@@ -350,11 +352,22 @@ cannot supervise an independent process that bypasses this tool interface.
 
 Native screenshots include granted apps only. macOS uses ScreenCaptureKit include-only
 application filters; Windows composes granted top-level windows with `PrintWindow` onto a
-neutral canvas and never reads desktop pixels. F5 and overlays are excluded; known secure
-fields in the focused window are masked before encoding. `hiddenContent` indicates that
+neutral canvas and never reads desktop pixels. F5 and overlays are excluded; detected secure
+fields in included windows are masked before encoding. `hiddenContent` indicates that
 on-screen windows were omitted or privacy masking hid content. Capture enables Chromium
-accessibility before reading password fields; a truncated or unreadable masking tree hides
-the focused window conservatively. AX calls have a process-wide 250 ms timeout.
+accessibility before reading password fields. On macOS, the profile-global
+`computerUsePasswordMasking` setting defaults to `fast`; `conservative` bypasses web-area
+search. Both modes retain a 20,000-node / 256-depth / 2-second capture audit budget
+and mask unaudited regions. AX calls have a process-wide 250 ms timeout.
+The broker injects the mode into the hashed internal envelope, including action captures,
+wait captures and zoom; agents cannot override it. The experimental environment switch
+no longer controls masking. Missing request mode retains the conservative legacy walk.
+Screenshots report the actual mode in `passwordMasking`; older helpers and Windows omit
+it and are labeled Legacy / unknown. The helper status advertises `passwordMaskingSupported`.
+An audit's `complete` flag means its calls finished, not that Chrome exposed every field.
+The 50,050-node Chrome fixture has demonstrated both delayed-frame and nested-frame
+password misses with successful search audits; settled captures that pass do not negate
+these known coverage limitations.
 An unreadable accessibility tree produces an empty,
 inaccessible inspect result; it does not expose secure values through inspect/setValue.
 

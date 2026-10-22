@@ -61,8 +61,17 @@ take screenshots or inspect apps either.
   already running.
 - A checked-in `f5.json` can never turn on external sites, Claude in Chrome or computer use.
 - After you restart F5, app approvals have to be granted again.
-- Windows containing secure fields, or whose accessibility can't be read, are grayed out in
-  captures.
+- **Screenshot password masking** defaults to **Fast — best effort**. It searches browser
+  accessibility for password fields and masks those it finds. Password fields Chrome omits from
+  accessibility search may appear in screenshots sent to your model.
+- Choose **Conservative — inspect the full tree** to use the full accessibility walk. Large pages
+  can hit audit limits and have their entire web area grayed out. The setting applies to every
+  project in the current profile and takes effect without restarting F5.
+- Both modes mask regions that cannot be audited and preserve app approvals, hidden-app filtering
+  and secure-input restrictions. A completed audit means the accessibility calls finished; it does
+  not prove every visually present password field was exposed.
+- Selectable masking requires an updated macOS helper. Older helpers and other platforms keep
+  their existing behavior; captures without mode metadata are labeled **Legacy / unknown**.
 - You'll be asked to confirm before closing a tab an agent opened.
 
 <details>

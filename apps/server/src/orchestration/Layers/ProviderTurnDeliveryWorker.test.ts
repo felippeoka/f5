@@ -1,3 +1,4 @@
+import { ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
 import { ProviderAdapterRequestError, ProviderTurnDeliveryError } from "../../provider/Errors.ts";
 import {
   CommandId,
@@ -10,7 +11,7 @@ import {
   type OrchestrationUsageLimit,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Metric, Option, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Metric, Option, Stream } from "effect";
 
 import {
   deliveryAmbiguousTotal,
@@ -54,6 +55,9 @@ let pendingBarrier = true;
 let reconciliationCount = 0;
 let acceptSend = false;
 let unavailableDispatchSnapshot = false;
+let supersededByStop = false;
+let pendingControl: Effect.Effect<void> | undefined;
+let beforePrepared: Effect.Effect<void> | undefined;
 let methodNotFound = false;
 let reconciliationFails = false;
 let extraReplayDelivery: ProviderTurnDelivery | null = null;
@@ -97,6 +101,9 @@ function resetDelivery() {
   reconciliationCount = 0;
   acceptSend = false;
   unavailableDispatchSnapshot = false;
+  supersededByStop = false;
+  pendingControl = undefined;
+  beforePrepared = undefined;
   methodNotFound = false;
   reconciliationFails = false;
   extraReplayDelivery = null;
@@ -255,6 +262,7 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
           Effect.andThen(
             Effect.gen(function* () {
               const context = yield* DeliveryAttemptContext;
+              if (beforePrepared) yield* beforePrepared;
               if (unavailableDispatchSnapshot && context) yield* context.prepared(null);
               return yield* Effect.suspend(deliverTurnStartOutcome);
             }),
@@ -294,6 +302,8 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
   Layer.provideMerge(
     Layer.succeed(OrchestrationEngineService, {
       streamDomainEvents: Stream.empty,
+      isTurnStartSuperseded: () => supersededByStop,
+      waitForControlProgress: () => pendingControl ?? Effect.void,
       getReadModel: () =>
         Effect.succeed({
           threads: [
@@ -371,6 +381,29 @@ it.effect("wakes a scheduled delivery after its capacity gate opens", () =>
     assert.equal(state.state, "accepted");
     assert.equal(state.attempt, 1);
   }).pipe(Effect.provide(testLayer.pipe(Layer.provideMerge(scheduledTestLayer)))),
+);
+
+it.effect(
+  "rechecks scheduled cancellation after asynchronous preparation before provider handoff",
+  () =>
+    Effect.gen(function* () {
+      const { store, run } = yield* setupScheduledDelivery;
+      yield* store.sql`UPDATE scheduled_control SET ready=1 WHERE id=1`;
+      acceptSend = true;
+      unavailableDispatchSnapshot = true;
+      beforePrepared = store.sql`UPDATE scheduled_task_runs SET canceled=1 WHERE id=${run.id}`.pipe(
+        Effect.asVoid,
+        Effect.orDie,
+      );
+      const worker = yield* ProviderTurnDeliveryWorker;
+      yield* worker.start;
+      yield* worker.drain;
+      assert.equal(state.attempt, 1);
+      assert.equal(state.state, "rejected");
+      assert.equal(state.certainty, "not_sent");
+      assert.equal(state.providerTurnId, null);
+      assert.deepStrictEqual(acceptedTurnIds, []);
+    }).pipe(Effect.provide(testLayer.pipe(Layer.provideMerge(scheduledTestLayer)))),
 );
 
 it.effect(
@@ -760,4 +793,88 @@ it.effect("retains the claimed baseline if the final dispatch read is unavailabl
     assert.equal(state.state, "ambiguous");
     assert.deepEqual(state.preSendTurnIds, [TurnId.makeUnsafe("existing-turn")]);
   }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a stop fences a claimed start before dispatch intent and never retries it", () =>
+  Effect.gen(function* () {
+    resetDelivery();
+    acceptSend = true;
+    unavailableDispatchSnapshot = true;
+    supersededByStop = true;
+    const worker = yield* ProviderTurnDeliveryWorker;
+    yield* worker.start;
+    yield* worker.drain;
+    assert.equal(state.state, "rejected");
+    assert.equal(state.certainty, "not_sent");
+    assert.equal(requeueCount, 0);
+    assert.include(state.errorDetail!, "stopped before");
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect.each(["finish", "stop"] as const)(
+  "waits for admitted controls before claiming a new turn (%s)",
+  (outcome) =>
+    Effect.gen(function* () {
+      resetDelivery();
+      const entered = yield* Deferred.make<void>(),
+        release = yield* Deferred.make<void>();
+      pendingControl = Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+      );
+      acceptSend = true;
+      const worker = yield* ProviderTurnDeliveryWorker;
+      yield* worker.start;
+      yield* Deferred.await(entered);
+      assert.equal(state.state, "pending");
+      assert.equal(state.attempt, 0);
+      assert.equal(activeAttemptsDuringDelivery, null);
+      if (outcome === "stop") state = { ...state, state: "rejected", certainty: "not_sent" };
+      yield* Deferred.succeed(release, undefined);
+      yield* worker.drain;
+      assert.equal(state.state, outcome === "stop" ? "rejected" : "accepted");
+      assert.equal(state.attempt, outcome === "stop" ? 0 : 1);
+    }).pipe(Effect.provide(testLayer)),
+);
+
+it.live(
+  "shutdown preserves unsent deliveries and fences an admitted preparation before native dispatch",
+  () =>
+    Effect.gen(function* () {
+      resetDelivery();
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const admissionStopped = yield* Deferred.make<void>();
+      beforePrepared = Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+      );
+      unavailableDispatchSnapshot = true;
+      acceptSend = true;
+      const shutdown = new ShutdownRegistry();
+      shutdown.register({
+        name: "test-admission-barrier",
+        phase: "flush",
+        run: () => Effect.runPromise(Deferred.succeed(admissionStopped, undefined)),
+      });
+      yield* Effect.gen(function* () {
+        const worker = yield* ProviderTurnDeliveryWorker;
+        yield* worker.start;
+        yield* Deferred.await(entered);
+        const closing = shutdown.run();
+        yield* Deferred.await(admissionStopped);
+        yield* Deferred.succeed(release, undefined);
+        const results = yield* Effect.promise(() => closing);
+        assert.equal(
+          results.every((result) => result.outcome === "complete"),
+          true,
+        );
+        assert.equal(state.state, "pending");
+        assert.equal(state.providerTurnId, null);
+        assert.equal(requeueCount, 1);
+        yield* worker.start;
+        yield* worker.drain;
+        assert.equal(state.attempt, 1);
+      }).pipe(
+        Effect.provide(testLayer.pipe(Layer.provide(Layer.succeed(ServerShutdown, shutdown)))),
+      );
+    }).pipe(Effect.scoped),
 );

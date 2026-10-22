@@ -1,4 +1,7 @@
-import Migration0124 from "./Migrations/124_ScheduledTasks.ts";
+import Migration0126 from "./Migrations/126_ProviderTerminalRecoveryIndexes.ts";
+import Migration0124 from "./Migrations/124_ProviderTerminalRetry.ts";
+import Migration0125 from "./Migrations/125_ProviderTerminalRetryIndexes.ts";
+import Migration0127 from "./Migrations/127_ScheduledTasks.ts";
 import Migration0123 from "./Migrations/123_WorkspaceMoveRecoveryIndex.ts";
 import Migration0122 from "./Migrations/122_StorageActivity.ts";
 import Migration0121 from "./Migrations/121_AttachmentDeletionGuards.ts";
@@ -127,6 +130,7 @@ import Migration0074 from "./Migrations/074_ProviderTerminalEvents.ts";
 import Migration0075 from "./Migrations/075_SessionErrorRetryability.ts";
 import Migration0076 from "./Migrations/076_AuxiliaryTurnProjectionRepair.ts";
 import { Effect } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -157,7 +161,10 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
-  "124_ScheduledTasks": Migration0124,
+  "124_ProviderTerminalRetry": Migration0124,
+  "125_ProviderTerminalRetryIndexes": Migration0125,
+  "126_ProviderTerminalRecoveryIndexes": Migration0126,
+  "127_ScheduledTasks": Migration0127,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,
@@ -320,6 +327,22 @@ const run = Migrator.make({});
  */
 export const runMigrations = Effect.gen(function* () {
   yield* Effect.log("Running migrations...");
+  const sql = yield* SqlClient.SqlClient;
+  const tracking =
+    yield* sql`SELECT name FROM sqlite_master WHERE type='table' AND name='effect_sql_migrations'`;
+  if (tracking.length)
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        // Unreleased #193 builds used 124 for schedules. Repair that exact ledger
+        // identity before 125 builds indexes on the stability columns from main's 124.
+        const previous = yield* sql<{
+          name: string;
+        }>`SELECT name FROM effect_sql_migrations WHERE migration_id=124`;
+        if (previous[0]?.name !== "ScheduledTasks") return;
+        yield* Migration0124;
+        yield* sql`UPDATE effect_sql_migrations SET name='ProviderTerminalRetry' WHERE migration_id=124 AND name='ScheduledTasks'`;
+      }),
+    );
   yield* run({ loader });
   yield* Effect.log("Migrations ran successfully");
 });

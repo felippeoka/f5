@@ -28,3 +28,32 @@ public func computerSecureCaptureMasks(
   }
   return (masks, incomplete)
 }
+
+public enum ComputerCaptureMask: String, CaseIterable {
+  case none, fields
+  case webArea = "web-area"
+  case window
+}
+public enum ComputerCaptureMaskReason: String, Hashable {
+  case windowMatch = "window-match"
+  case auditIncomplete = "audit-incomplete"
+  case partialAudit = "partial-audit"
+  case windowsChanged = "windows-changed"
+}
+public struct ComputerCaptureMaskOutcome {
+  public var masked: ComputerCaptureMask
+  public var reasons: Set<ComputerCaptureMaskReason>
+  public init(_ masked: ComputerCaptureMask, reasons: Set<ComputerCaptureMaskReason> = []) {
+    self.masked = masked
+    self.reasons = reasons
+  }
+}
+/// Capture metadata is independent of rendering, with deterministic reason ordering.
+public func computerCaptureMaskSummary(_ outcomes: [ComputerCaptureMaskOutcome])
+  -> (masked: String, maskReasons: [String])
+{
+  let order = ComputerCaptureMask.allCases
+  let severity = outcomes.map { order.firstIndex(of: $0.masked)! }.max() ?? 0
+  let reasons = outcomes.reduce(into: Set<ComputerCaptureMaskReason>()) { $0.formUnion($1.reasons) }
+  return (order[severity].rawValue, reasons.map(\.rawValue).sorted())
+}

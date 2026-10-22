@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import readline from "node:readline";
+import { Utf8Lines } from "@t3tools/shared/utf8Lines";
 
 /** Read object-shaped JSON without accepting arrays as transcript envelopes. */
 export function transcriptRecord(value: unknown): Record<string, unknown> | undefined {
@@ -44,43 +44,51 @@ export async function readClaudeTranscript(
   options?: { skipMalformed?: boolean; onMalformed?: (line: number) => void; signal?: AbortSignal },
 ) {
   const entries = new Map<string, Record<string, unknown>>();
-  const input = createReadStream(file, {
-    encoding: "utf8",
-    ...(options?.signal ? { signal: options.signal } : {}),
-  });
-  const lines = readline.createInterface({
-    input,
-    crlfDelay: Infinity,
-  });
   let malformedTail = false;
   let lineNumber = 0;
-  try {
-    for await (const line of lines) {
-      lineNumber++;
-      if (!line.trim()) continue;
-      if (malformedTail)
-        throw new Error(
-          "Claude transcript contains a malformed record before its end. Use Repair transcript.",
-        );
-      let entry: Record<string, unknown> | undefined;
-      try {
-        entry = transcriptRecord(JSON.parse(line));
-      } catch {
-        options?.onMalformed?.(lineNumber);
-        malformedTail = !options?.skipMalformed;
-        continue;
-      }
-      if (typeof entry?.uuid === "string")
-        entries.set(
-          entry.uuid,
-          includePayload ? entry : { uuid: entry.uuid, parentUuid: entry.parentUuid },
-        );
+  for await (const line of readClaudeTranscriptLines(file, options?.signal)) {
+    lineNumber++;
+    if (!line.trim()) continue;
+    if (malformedTail)
+      throw new Error(
+        "Claude transcript contains a malformed record before its end. Use Repair transcript.",
+      );
+    let entry: Record<string, unknown> | undefined;
+    try {
+      entry = transcriptRecord(JSON.parse(line));
+    } catch {
+      options?.onMalformed?.(lineNumber);
+      malformedTail = !options?.skipMalformed;
+      continue;
     }
-  } finally {
-    lines.close();
-    input.destroy();
+    if (typeof entry?.uuid === "string")
+      entries.set(
+        entry.uuid,
+        includePayload ? entry : { uuid: entry.uuid, parentUuid: entry.parentUuid },
+      );
   }
   return entries;
+}
+
+/**
+ * Yield JSONL lines split on "\n" only, including an unterminated final line.
+ * node:readline also ends lines at U+2028, U+2029 and a lone "\r", which
+ * JSON.stringify leaves unescaped inside strings. Line N here is always line N
+ * of `text.split("\n")`, which repair relies on to quarantine by line number.
+ * Content can differ only by a leading BOM and a trailing "\r", both removed.
+ */
+export async function* readClaudeTranscriptLines(
+  file: string,
+  signal?: AbortSignal,
+): AsyncGenerator<string> {
+  const input = createReadStream(file, signal ? { signal } : {});
+  const lines = new Utf8Lines();
+  try {
+    for await (const chunk of input) yield* lines.push(chunk as Buffer);
+    yield* lines.finish();
+  } finally {
+    input.destroy();
+  }
 }
 
 /** Validate iteratively so long transcripts and cyclic chains cannot exhaust the stack. */

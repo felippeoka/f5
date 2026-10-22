@@ -1,3 +1,4 @@
+import { makeShutdownSourceScope, registerShutdown } from "../shutdown.ts";
 import { scheduledExecutionConfiguration } from "@t3tools/shared/scheduledTasks";
 import { scheduleAuthorityCurrent } from "./authority.ts";
 import { toTurnSubmissionError } from "../TurnSubmissionError.ts";
@@ -79,6 +80,7 @@ export const makeScheduledTaskService = (deps: {
       { sql } = store;
     const mutex = yield* Semaphore.make(1);
     const scope = yield* Effect.scope;
+    const sources = yield* makeShutdownSourceScope("scheduled-task-sources");
     let wake = yield* Deferred.make<void>();
     const signal = Effect.suspend(() => Deferred.succeed(wake, undefined)).pipe(Effect.asVoid);
     const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => new Date(ms).toISOString()));
@@ -936,7 +938,7 @@ export const makeScheduledTaskService = (deps: {
     );
     const dispatchCandidate = (candidate: StoredRun) =>
       Effect.gen(function* () {
-        if (inFlight.has(candidate.run.id)) return;
+        if (sources.stopped || inFlight.has(candidate.run.id)) return;
         if (
           candidate.started &&
           !candidate.capacity &&
@@ -962,93 +964,106 @@ export const makeScheduledTaskService = (deps: {
         }
         const claimed = yield* claim(candidate);
         if (!claimed) return;
-        if (inFlight.size === 0) dispatchesDone = yield* Deferred.make<void>();
-        inFlight.add(claimed.run.id);
-        yield* Effect.gen(function* () {
-          const at = yield* now;
-          const config = (yield* settings.getSettings).scheduledTasks;
-          if (!config.enabled) return;
-          const frozen = (yield* store.run(claimed.run.id))!;
-          if (
-            !(yield* scheduleAuthorityCurrent(
-              frozen.snapshot.authority,
-              frozen.snapshot.projectId,
-              yield* settings.getSettings,
-              sql,
-            ))
-          ) {
-            yield* revalidateAuthorities;
-            return;
-          }
-          const marked =
-            yield* sql`UPDATE scheduled_task_runs SET submission_started=1,state_json=json_set(state_json,'$.startedAt',${at}) WHERE id=${claimed.run.id} AND submission_started=0 AND owns_execution=1 AND canceled=0 AND capacity=1 RETURNING id`;
-          if (!marked.length) return;
-          return yield* host.submitTurnSubmission(
-            { submissionId: claimed.submissionId, intent: "auto", command: claimed.command },
-            { submissionSource: "automation" },
-          );
-        }).pipe(
-          Effect.flatMap((result) =>
-            Effect.gen(function* () {
-              return yield* result &&
-              (result.disposition === "rejected" ||
-                result.disposition === "canceled" ||
-                result.disposition === "cleared")
-                ? store.transition(claimed.run.id, "failed", "delivery_failed", yield* now)
-                : Effect.void;
-            }),
-          ),
-          Effect.catch((error) =>
-            Effect.gen(function* () {
-              const at = yield* now;
-              const failure =
-                error._tag === "AgentBridgeHostError"
-                  ? (error.submissionFailure ?? toTurnSubmissionError(error).kind)
-                  : "delivery_unknown";
-              const definitive = !["delivery_unknown", "idempotency_conflict"].includes(failure);
-              if (definitive) {
-                yield* store.transaction(
-                  Effect.gen(function* () {
-                    const safe = yield* fenceScheduledRun(claimed.run.id, at).pipe(
-                      Effect.provideService(SqlClient.SqlClient, sql),
+        yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            if (sources.stopped) return;
+            if (inFlight.size === 0) dispatchesDone = yield* Deferred.make<void>();
+            inFlight.add(claimed.run.id);
+            yield* restore(
+              Effect.gen(function* () {
+                const at = yield* now;
+                const config = (yield* settings.getSettings).scheduledTasks;
+                if (!config.enabled) return;
+                const frozen = (yield* store.run(claimed.run.id))!;
+                if (
+                  !(yield* scheduleAuthorityCurrent(
+                    frozen.snapshot.authority,
+                    frozen.snapshot.projectId,
+                    yield* settings.getSettings,
+                    sql,
+                  ))
+                ) {
+                  yield* revalidateAuthorities;
+                  return;
+                }
+                const marked =
+                  yield* sql`UPDATE scheduled_task_runs SET submission_started=1,state_json=json_set(state_json,'$.startedAt',${at}) WHERE id=${claimed.run.id} AND submission_started=0 AND owns_execution=1 AND canceled=0 AND capacity=1 RETURNING id`;
+                if (!marked.length) return;
+                return yield* host.submitTurnSubmission(
+                  { submissionId: claimed.submissionId, intent: "auto", command: claimed.command },
+                  { submissionSource: "automation" },
+                );
+              }),
+            ).pipe(
+              Effect.flatMap((result) =>
+                Effect.gen(function* () {
+                  return yield* result &&
+                  (result.disposition === "rejected" ||
+                    result.disposition === "canceled" ||
+                    result.disposition === "cleared")
+                    ? store.transition(claimed.run.id, "failed", "delivery_failed", yield* now)
+                    : Effect.void;
+                }),
+              ),
+              Effect.catch((error) =>
+                Effect.gen(function* () {
+                  const at = yield* now;
+                  const failure =
+                    error._tag === "AgentBridgeHostError"
+                      ? (error.submissionFailure ?? toTurnSubmissionError(error).kind)
+                      : "delivery_unknown";
+                  const definitive = !["delivery_unknown", "idempotency_conflict"].includes(
+                    failure,
+                  );
+                  if (definitive) {
+                    yield* store.transaction(
+                      Effect.gen(function* () {
+                        const safe = yield* fenceScheduledRun(claimed.run.id, at).pipe(
+                          Effect.provideService(SqlClient.SqlClient, sql),
+                        );
+                        yield* store.transition(
+                          claimed.run.id,
+                          safe ? "failed" : "needs_attention",
+                          safe
+                            ? failure === "worktree_unavailable"
+                              ? "setup_failed"
+                              : "delivery_failed"
+                            : "delivery_unknown",
+                          at,
+                          error.message,
+                        );
+                      }),
                     );
+                  } else
                     yield* store.transition(
                       claimed.run.id,
-                      safe ? "failed" : "needs_attention",
-                      safe
-                        ? failure === "worktree_unavailable"
-                          ? "setup_failed"
-                          : "delivery_failed"
-                        : "delivery_unknown",
+                      "needs_attention",
+                      "delivery_unknown",
                       at,
                       error.message,
                     );
-                  }),
-                );
-              } else
-                yield* store.transition(
-                  claimed.run.id,
-                  "needs_attention",
-                  "delivery_unknown",
-                  at,
-                  error.message,
-                );
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => inFlight.delete(claimed.run.id)).pipe(
-              Effect.andThen(
-                Effect.suspend(() =>
-                  inFlight.size === 0 ? Deferred.succeed(dispatchesDone, undefined) : Effect.void,
+                }),
+              ),
+              Effect.ensuring(
+                Effect.sync(() => inFlight.delete(claimed.run.id)).pipe(
+                  Effect.andThen(
+                    Effect.suspend(() =>
+                      inFlight.size === 0
+                        ? Deferred.succeed(dispatchesDone, undefined)
+                        : Effect.void,
+                    ),
+                  ),
+                  Effect.andThen(
+                    changed([claimed.run.taskId], [claimed.run.id]).pipe(Effect.ignore),
+                  ),
                 ),
               ),
-              Effect.andThen(changed([claimed.run.taskId], [claimed.run.id]).pipe(Effect.ignore)),
-            ),
-          ),
-          Effect.withSpan("scheduledTasks.dispatch", {
-            attributes: { taskId: claimed.run.taskId, runId: claimed.run.id },
+              Effect.withSpan("scheduledTasks.dispatch", {
+                attributes: { taskId: claimed.run.taskId, runId: claimed.run.id },
+              }),
+              Effect.forkIn(scope),
+            );
           }),
-          Effect.forkIn(scope),
         );
       });
     const dispatch = Effect.gen(function* () {
@@ -1252,7 +1267,9 @@ export const makeScheduledTaskService = (deps: {
         for (const id of input.ids)
           yield* sql`UPDATE scheduled_notifications SET acknowledged_at=${at} WHERE id=${id} AND owner=${input.owner}`;
       });
+    yield* registerShutdown("scheduled-task-work", "drain", () => drainDispatches);
     const start = Effect.gen(function* () {
+      if (sources.stopped) return;
       yield* retryScheduledOperation(
         revalidateAuthorities
           .pipe(Effect.andThen(reconcileFor(true)))
@@ -1274,7 +1291,7 @@ export const makeScheduledTaskService = (deps: {
           ),
         ),
         "scheduledTasks.domainEvents",
-      ).pipe(Effect.forkIn(scope));
+      ).pipe(Effect.forkIn(sources.scope));
       yield* retryScheduledOperation(
         host.queueChanges.pipe(
           Stream.runForEach((threadId) =>
@@ -1282,13 +1299,13 @@ export const makeScheduledTaskService = (deps: {
           ),
         ),
         "scheduledTasks.queueChanges",
-      ).pipe(Effect.forkIn(scope));
+      ).pipe(Effect.forkIn(sources.scope));
       yield* retryScheduledOperation(
         settings.streamChanges.pipe(
           Stream.runForEach(() => revalidateAuthorities.pipe(Effect.andThen(signal))),
         ),
         "scheduledTasks.settingsChanges",
-      ).pipe(Effect.forkIn(scope));
+      ).pipe(Effect.forkIn(sources.scope));
       const monotonic = deps.monotonic ?? (() => performance.now());
       let lastWall = yield* Clock.currentTimeMillis,
         lastMono = monotonic();
@@ -1311,7 +1328,7 @@ export const makeScheduledTaskService = (deps: {
       yield* Effect.gen(function* () {
         for (;;)
           yield* retryScheduledOperation(watchdogIteration, "scheduledTasks.watchdog.iteration");
-      }).pipe(Effect.forkIn(scope));
+      }).pipe(Effect.forkIn(sources.scope));
       const engineIteration = Effect.gen(function* () {
         wake = yield* Deferred.make<void>();
         yield* mutex.withPermits(1)(evaluate(false).pipe(Effect.andThen(dispatch)));
@@ -1331,7 +1348,7 @@ export const makeScheduledTaskService = (deps: {
       });
       yield* Effect.gen(function* () {
         for (;;) yield* retryScheduledOperation(engineIteration, "scheduledTasks.engine.iteration");
-      }).pipe(Effect.forkIn(scope));
+      }).pipe(Effect.forkIn(sources.scope));
     });
     return {
       create,

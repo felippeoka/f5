@@ -10,6 +10,20 @@ Croner 10.0.1 evaluates timezone-aware cron without autonomous timers; cronstrue
 
 Agent scheduling requires an explicit f5.schedules grant and supervised execution. Execution authority is independent of creator provenance and is checked before delivery. Notifications are durably leased and acknowledged; an OS presentation followed by a crash before acknowledgement may cause a duplicate.
 
+## Stability integration (#189)
+
+Scheduled execution uses main's command admission, commit side effects, filtered projection pipeline, delivery attempt receipts and coordinated shutdown. User-answer continuations are linked in `commitSideEffects.ts`, in the command/event transaction together with queue insertion and frozen execution settings. The lifecycle projector retains ownership until that insertion commits; rollback leaves both the input resolution and continuation uncommitted.
+
+The final delivery handoff rechecks scheduled authority, cancellation and capacity after asynchronous preparation, alongside the shutdown fence. Capacity wakeups query only pending deliveries in the affected thread. Scheduler subscriptions and timers stop during shutdown admission; already-admitted submission workers have a separate drain barrier. Durable reserved identities and the existing delivery recovery path remain authoritative after restart.
+
+Main's migrations 124–126 are unchanged; Scheduled Tasks is migration 127. Profiles from unreleased builds whose ledger identifies 124 specifically as `ScheduledTasks` receive main's missing 124 changes transactionally before 125–127 run. Existing scheduled rows, origin and projection cursors are retained, and interrupted upgrades remain retryable.
+
+Main's selective renderer persistence remains in place. Explicit read/unread actions separately persist their receipts, including bulk acknowledgement, without writing renderer state for every streamed event. Local acknowledgements also survive backend-incarnation rehydration.
+
+Integration verification: `bun fmt`, `bun lint`, workspace `bun typecheck`, frozen dependency installation and `bun run upstream-ports:check` pass. The ledger's evidence links follow the extracted helpers; coverage pins and port decisions are unchanged (the checker reports that authoritative remote provenance is unavailable locally). Focused server coverage passes 97 tests, real WebSocket restart coverage passes both project-root/worktree cases, renderer-store coverage passes 66 tests, and the sidebar passes all 51 browser tests.
+
+`bun run test:full` completed both stages. Its exhaustive real-Git matrix passes all 147 tests. The workspace stage has one intermittent 15-second timeout in the unchanged `worktreeClaims` disposable-path cleanup test; 5,100 other server unit tests pass, as do the other workspace suites and server integration/smoke stages. The timeout case passes in isolated retries on this branch and the preceding main/stability checkout. The full command therefore exits nonzero; it is not reported as a green run. Tests use Node 24 with the installed VS Code CLI directory on PATH to satisfy the editor-discovery fixtures.
+
 ## Review corrections
 
 The active change set is now in the requested worktree on `f5/scheduled-tasks`, rather than only in the external implementation checkout. Existing checkouts and user changes were preserved. The old `feat/scheduled-tasks` and detached baseline worktrees were not deleted: the repository policy prohibits deleting worktrees or branches. The former implementation checkout is a detached backup of the earlier draft; it is not the delivery location.
