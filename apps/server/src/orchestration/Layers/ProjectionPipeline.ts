@@ -515,6 +515,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         case "project.created":
           yield* projectionProjectRepository.upsert({
             projectId: event.payload.projectId,
+            kind: event.payload.kind,
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
             defaultModel: event.payload.defaultModel,
@@ -729,6 +730,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
+            scratchPath: event.payload.scratchPath,
             latestTurnId: null,
             tasks: [],
             tasksTurnId: null,

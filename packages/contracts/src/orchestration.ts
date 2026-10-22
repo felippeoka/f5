@@ -348,8 +348,16 @@ export const ProjectSkill = ProjectSkillDefinition.mapFields((fields) => ({
 }));
 export type ProjectSkill = typeof ProjectSkill.Type;
 
+/**
+ * `scratch` is the profile's reserved home for threads without a project. Only the server
+ * creates it (`project.scratch.create`), and each of its threads runs in its own folder.
+ */
+export const ProjectKind = Schema.Literals(["standard", "scratch"]);
+export type ProjectKind = typeof ProjectKind.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
+  kind: Schema.optional(ProjectKind).pipe(Schema.withDecodingDefault(() => "standard" as const)),
   title: TrimmedNonEmptyString,
   workspaceRoot: FilesystemPath,
   defaultModel: Schema.NullOr(TrimmedNonEmptyString),
@@ -968,6 +976,10 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(FilesystemPath),
+  /** A scratch thread's own folder. Set only for threads of the scratch project. */
+  scratchPath: Schema.optional(Schema.NullOr(FilesystemPath)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
@@ -1253,6 +1265,10 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(FilesystemPath),
+  /** Allocated by the engine for scratch threads; a client value is discarded. */
+  scratchPath: Schema.optional(Schema.NullOr(FilesystemPath)),
+  /** Text whose first words name a scratch thread's folder; defaults to the title. */
+  scratchFolderWords: Schema.optional(Schema.String.check(Schema.isMaxLength(8_000))),
   threadReferences: Schema.optional(Schema.Array(ThreadReference)),
   createdAt: IsoDateTime,
 });
@@ -1888,7 +1904,17 @@ const ProjectWorkflowUpsertCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Server-only: creates the profile's scratch project. Clients call `projects.ensureScratch`. */
+export const ProjectScratchCreateCommand = Schema.Struct({
+  type: Schema.Literal("project.scratch.create"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  workspaceRoot: FilesystemPath,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  ProjectScratchCreateCommand,
   Schema.Struct({
     type: Schema.Literals(["project.workflow.archive", "project.workflow.unarchive"]),
     commandId: CommandId,
@@ -2005,6 +2031,7 @@ export const OrchestrationActorKind = Schema.Literals(["client", "server", "prov
 
 export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
+  kind: Schema.optional(ProjectKind).pipe(Schema.withDecodingDefault(() => "standard" as const)),
   title: TrimmedNonEmptyString,
   workspaceRoot: FilesystemPath,
   defaultModel: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
@@ -2120,6 +2147,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(FilesystemPath),
+  scratchPath: Schema.optional(Schema.NullOr(FilesystemPath)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   threadReferences: Schema.optional(Schema.Array(ThreadReference)).pipe(
     Schema.withDecodingDefault(() => []),
   ),

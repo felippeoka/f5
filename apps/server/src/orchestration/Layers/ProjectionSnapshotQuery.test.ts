@@ -272,6 +272,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.deepEqual(snapshot.projects, [
         {
           id: asProjectId("project-1"),
+          kind: "standard",
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
           defaultModel: "gpt-5-codex",
@@ -326,6 +327,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
+          scratchPath: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",

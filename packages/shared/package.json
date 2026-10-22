@@ -196,6 +196,10 @@
       "types": "./src/path.ts",
       "import": "./src/path.ts"
     },
+    "./scratchProject": {
+      "types": "./src/scratchProject.ts",
+      "import": "./src/scratchProject.ts"
+    },
     "./appStatePaths": {
       "types": "./src/appStatePaths.ts",
       "import": "./src/appStatePaths.ts"

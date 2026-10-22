@@ -277,6 +277,12 @@ export const ProjectCloneCancelInput = Schema.Struct({
   operationId: ProjectCloneInput.fields.operationId,
 });
 export type ProjectCloneCancelInput = typeof ProjectCloneCancelInput.Type;
+
+/** The profile's home for threads without a project, created on first request. */
+export const ProjectEnsureScratchResult = Schema.Struct({
+  projectId: ProjectId,
+});
+export type ProjectEnsureScratchResult = typeof ProjectEnsureScratchResult.Type;
 export const ProjectCloneJob = Schema.Struct({
   ...ProjectCloneInput.fields,
   destination: Schema.String,

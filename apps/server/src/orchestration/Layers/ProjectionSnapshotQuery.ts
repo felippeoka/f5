@@ -147,6 +147,7 @@ const ProjectionThreadSummaryDbRowSchema = Schema.Struct({
   interactionMode: ProjectionThread.fields.interactionMode,
   branch: ProjectionThread.fields.branch,
   worktreePath: ProjectionThread.fields.worktreePath,
+  scratchPath: ProjectionThread.fields.scratchPath,
   archivedAt: ProjectionThread.fields.archivedAt,
   settledAt: ProjectionThread.fields.settledAt,
   settledBy: ProjectionThread.fields.settledBy,
@@ -444,6 +445,7 @@ function buildThreadSnapshot(params: {
     interactionMode: row.interactionMode,
     branch: row.branch,
     worktreePath: row.worktreePath,
+    scratchPath: row.scratchPath ?? null,
     latestTurn: params.latestTurnByThread.get(row.threadId) ?? null,
     archivedAt: row.archivedAt,
     settledAt: row.settledAt ?? null,
@@ -864,6 +866,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       sql`
         SELECT
           project_id AS "projectId",
+          kind,
           title,
           workspace_root AS "workspaceRoot",
           default_model AS "defaultModel",
@@ -892,6 +895,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          scratch_path AS "scratchPath",
           latest_turn_id AS "latestTurnId",
           tasks_json AS "tasks",
           tasks_turn_id AS "tasksTurnId",
@@ -937,6 +941,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          scratch_path AS "scratchPath",
           settled_at AS "settledAt",settled_by AS "settledBy",auto_settle_disabled AS "autoSettleDisabled",
           archived_at AS "archivedAt",
           pinned_at AS "pinnedAt",
@@ -2625,6 +2630,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       }));
       const unsortedProjects: Array<OrchestrationProject> = projectRows.map((row) => ({
         id: row.projectId,
+        kind: row.kind,
         title: row.title,
         workspaceRoot: row.workspaceRoot,
         defaultModel: row.defaultModel,

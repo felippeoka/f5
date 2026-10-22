@@ -26,6 +26,9 @@ import {
   Stream,
 } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as NodeFS from "node:fs/promises";
+import * as NodePath from "node:path";
+import { isScratchProject, scratchThreadFolderName } from "@t3tools/shared/scratchProject";
 
 import {
   metricAttributes,
@@ -70,6 +73,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
 } {
   switch (command.type) {
     case "project.create":
+    case "project.scratch.create":
     case "project.meta.update":
     case "project.delete":
     case "project.memory.save":
@@ -1071,8 +1075,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive) =>
     eventStore.readFromSequence(fromSequenceExclusive);
 
-  const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
+  // Every thread of the scratch project gets its own folder before it is created, whichever
+  // path creates it. The name depends only on the command, so a retried create reuses it.
+  const withScratchFolder = (command: OrchestrationCommand) =>
     Effect.gen(function* () {
+      if (command.type !== "thread.create") return command;
+      const project = readModel.projects.find(
+        (entry) => entry.id === command.projectId && entry.deletedAt === null,
+      );
+      if (!isScratchProject(project) || !project) return command;
+      const { scratchFolderWords, ...rest } = command;
+      const folder = NodePath.join(
+        project.workspaceRoot,
+        scratchThreadFolderName({
+          threadId: command.threadId,
+          createdAt: command.createdAt,
+          text: scratchFolderWords ?? command.title,
+        }),
+      );
+      yield* Effect.tryPromise({
+        try: () => NodeFS.mkdir(folder, { recursive: true }),
+        catch: () =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Failed to create the folder for this thread.",
+          }),
+      });
+      return { ...rest, scratchPath: folder };
+    });
+
+  const dispatch: OrchestrationEngineShape["dispatch"] = (incoming) =>
+    Effect.gen(function* () {
+      const command = yield* withScratchFolder(incoming);
       // Git I/O must not occupy the serialized projection worker. The worker
       // revalidates this metadata fingerprint before accepting the command.
       let workspace: CommandEnvelope["workspace"];

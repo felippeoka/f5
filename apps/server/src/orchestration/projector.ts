@@ -298,6 +298,7 @@ export function projectEvent(
           const existing = nextBase.projects.find((entry) => entry.id === payload.projectId);
           const nextProject = {
             id: payload.projectId,
+            kind: payload.kind,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             defaultModel: payload.defaultModel,
@@ -689,6 +690,7 @@ export function projectEvent(
             interactionMode: payload.interactionMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            scratchPath: payload.scratchPath,
             latestTurn: null,
             archivedAt: null,
             pinnedAt: null,

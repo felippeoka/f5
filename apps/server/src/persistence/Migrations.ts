@@ -1,3 +1,4 @@
+import Migration0131 from "./Migrations/131_ScratchProjects.ts";
 import Migration0130 from "./Migrations/130_RestartBackgroundWork.ts";
 import Migration0129 from "./Migrations/129_BackgroundWorkEffort.ts";
 import Migration0128 from "./Migrations/128_NativeHistoryRetiredTurns.ts";
@@ -163,6 +164,7 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
+  "131_ScratchProjects": Migration0131,
   "130_RestartBackgroundWork": Migration0130,
   "126_ThreadSettlement": Migration0126,
   "127_McpApps": Migration0127,

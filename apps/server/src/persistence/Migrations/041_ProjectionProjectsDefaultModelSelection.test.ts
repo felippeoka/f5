@@ -185,7 +185,7 @@ layer("041_ProjectionProjectsDefaultModelSelection", (it) => {
             deletedAt: null,
           },
         ],
-        ["default_env_mode", "icon_json"],
+        ["default_env_mode", "icon_json", "kind"],
       );
 
       const latestMigration = yield* sql<{ readonly migrationId: number; readonly name: string }>`

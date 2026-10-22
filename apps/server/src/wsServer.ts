@@ -26,6 +26,8 @@ import {
   type GitWorkspaceSwitchHandler,
 } from "./git/workspaceSwitch.ts";
 import { inspectAttachableWorkspace } from "./project/workspaceAttachment.ts";
+import { prepareScratchRoot, scratchProjectIdFor } from "./project/scratchProject.ts";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { readWorktreeClaims } from "./project/worktreeClaims.ts";
 import { withRepositoryLifecycleLock } from "./project/Layers/WorktreeLifecycleCoordinator.ts";
 import {
@@ -4724,6 +4726,56 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       }
       case WS_METHODS.projectsCloneList:
         return projectClones.list();
+      case WS_METHODS.projectsEnsureScratch: {
+        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+        const workspaceRoot = yield* Effect.tryPromise({
+          try: () => prepareScratchRoot(serverConfig.stateDir),
+          catch: (cause) =>
+            new RouteRequestError({
+              message:
+                cause instanceof Error
+                  ? cause.message
+                  : "Could not create the folder for threads without a project.",
+            }),
+        });
+        const findLive = orchestrationEngine
+          .getReadModel()
+          .pipe(
+            Effect.map((model) =>
+              model.projects.find((project) => isScratchProject(project) && !project.deletedAt),
+            ),
+          );
+        const existing = yield* findLive;
+        if (existing) return { projectId: existing.id };
+        // The id and command id depend only on the profile, so racing or retried creates
+        // converge on one project: a duplicate either replays the receipt or is refused.
+        const projectId = ProjectId.makeUnsafe(scratchProjectIdFor(activeProfile.id));
+        yield* orchestrationEngine
+          .dispatch({
+            type: "project.scratch.create",
+            commandId: CommandId.makeUnsafe(`scratch-project-create:${projectId}`),
+            projectId,
+            workspaceRoot,
+            createdAt: new Date().toISOString(),
+          })
+          .pipe(
+            Effect.catch((error) =>
+              findLive.pipe(
+                Effect.flatMap((raced) =>
+                  raced
+                    ? Effect.void
+                    : Effect.fail(new RouteRequestError({ message: String(error) })),
+                ),
+              ),
+            ),
+          );
+        const created = yield* findLive;
+        if (!created)
+          return yield* new RouteRequestError({
+            message: "Could not create the home for threads without a project.",
+          });
+        return { projectId: created.id };
+      }
       case WS_METHODS.projectsCloneCancel: {
         yield* projectClones.cancel(request.body.operationId);
         return undefined;

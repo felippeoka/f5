@@ -473,6 +473,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.projectsClone, ProjectCloneInput),
   tagRequestBody(WS_METHODS.projectsCloneCancel, ProjectCloneCancelInput),
   tagRequestBody(WS_METHODS.projectsCloneList, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.projectsEnsureScratch, Schema.Struct({})),
   tagRequestBody(WS_METHODS.projectsListDirectory, ProjectListDirectoryInput),
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),
   tagRequestBody(WS_METHODS.projectsSearchContents, ProjectSearchContentsInput),

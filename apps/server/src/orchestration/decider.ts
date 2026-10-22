@@ -23,6 +23,11 @@ import {
   defaultDocumentReaderSlot,
   isDocumentWorkflow,
 } from "@t3tools/shared/documentWorkflow";
+import {
+  SCRATCH_PROJECT_TITLE,
+  isScratchProject,
+  isScratchThreadFolder,
+} from "@t3tools/shared/scratchProject";
 
 import { OrchestrationCommandInvariantError, ThreadTurnAlreadyActiveError } from "./Errors.ts";
 import {
@@ -45,6 +50,25 @@ import {
 const nowIso = () => new Date().toISOString();
 const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
 export const GLOBAL_PIN_AGGREGATE_ID = ProjectId.makeUnsafe("f5-global-pins");
+
+/** The scratch project is server-owned: its folder, actions, memories and skills stay fixed. */
+function scratchProjectRefusal(commandType: string, what: string) {
+  return new OrchestrationCommandInvariantError({
+    commandType,
+    detail: `The home for threads without a project cannot change ${what}.`,
+  });
+}
+
+const requireNonScratchProject = Effect.fnUntraced(function* (
+  readModel: OrchestrationReadModel,
+  command: OrchestrationCommand,
+  projectId: ProjectId,
+  what: string,
+) {
+  const project = yield* requireProject({ readModel, command, projectId });
+  if (isScratchProject(project)) return yield* scratchProjectRefusal(command.type, what);
+  return project;
+});
 
 function unsupportedWorkflowBehaviorMessage(input: {
   readonly templateId: string;
@@ -114,6 +138,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
         type: "project.created",
         payload: {
           projectId: command.projectId,
+          kind: "standard",
           title: command.title,
           workspaceRoot: command.workspaceRoot,
           defaultModel: command.defaultModel ?? null,
@@ -126,12 +151,51 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
       };
     }
 
-    case "project.meta.update": {
-      yield* requireProject({
+    case "project.scratch.create": {
+      yield* requireProjectAbsent({
         readModel,
         command,
         projectId: command.projectId,
       });
+      if (readModel.projects.some((project) => isScratchProject(project) && !project.deletedAt))
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This profile already has a home for threads without a project.",
+        });
+      return {
+        ...withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "project.created",
+        payload: {
+          projectId: command.projectId,
+          kind: "scratch",
+          title: SCRATCH_PROJECT_TITLE,
+          workspaceRoot: command.workspaceRoot,
+          defaultModel: null,
+          defaultEnvMode: null,
+          icon: { type: "lucide", glyph: "folder", color: "gray" },
+          scripts: [],
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "project.meta.update": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (
+        isScratchProject(project) &&
+        (command.workspaceRoot !== undefined || command.scripts !== undefined)
+      )
+        return yield* scratchProjectRefusal(command.type, "its folder or actions");
       if (command.scripts !== undefined) {
         const oldIds = new Set(
           readModel.projects
@@ -175,11 +239,12 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
     }
 
     case "project.delete": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
       });
+      if (isScratchProject(project)) return yield* scratchProjectRefusal(command.type, "it");
       const activeChildThreadCount = listThreadsByProjectId(readModel, command.projectId).filter(
         (thread) => thread.deletedAt === null,
       ).length;
@@ -206,11 +271,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
     }
 
     case "project.memory.save": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
+      yield* requireNonScratchProject(readModel, command, command.projectId, "memories");
       const existing = readModel.projects
         .find((project) => project.id === command.projectId)
         ?.memories.find((memory) => memory.id === command.memoryId && memory.deletedAt === null);
@@ -247,11 +308,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
     }
 
     case "project.memory.update": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
+      yield* requireNonScratchProject(readModel, command, command.projectId, "memories");
       const existing = readModel.projects
         .find((project) => project.id === command.projectId)
         ?.memories.find((memory) => memory.id === command.memoryId && memory.deletedAt === null);
@@ -285,11 +342,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
     }
 
     case "project.memory.delete": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
+      yield* requireNonScratchProject(readModel, command, command.projectId, "memories");
       const existing = readModel.projects
         .find((project) => project.id === command.projectId)
         ?.memories.find((memory) => memory.id === command.memoryId && memory.deletedAt === null);
@@ -316,11 +369,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
     }
 
     case "project.skills.replace": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
+      yield* requireNonScratchProject(readModel, command, command.projectId, "skills");
       const mismatchedSkill = command.skills.find((skill) => skill.projectId !== command.projectId);
       if (mismatchedSkill) {
         return yield* new OrchestrationCommandInvariantError({
@@ -630,7 +679,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
           detail: "Restore the owning workflow before creating its thread.",
         });
       }
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
@@ -640,6 +689,26 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
         command,
         threadId: command.threadId,
       });
+      const scratchPath = command.scratchPath ?? null;
+      if (isScratchProject(project)) {
+        // The engine allocates the folder before dispatch; without one a scratch thread
+        // would have no workspace of its own, so creation fails closed.
+        if (
+          scratchPath === null ||
+          !isScratchThreadFolder(project.workspaceRoot, scratchPath) ||
+          command.worktreePath !== null ||
+          command.branch !== null
+        )
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "A thread without a project needs its own folder and no branch or worktree.",
+          });
+      } else if (scratchPath !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only threads without a project have a scratch folder.",
+        });
+      }
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -660,6 +729,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          scratchPath,
           threadReferences: command.threadReferences ?? [],
           ...(command.pullRequest ? { pullRequest: command.pullRequest } : {}),
           createdAt: command.createdAt,

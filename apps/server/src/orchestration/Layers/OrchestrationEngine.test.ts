@@ -1119,6 +1119,54 @@ describe("OrchestrationEngine", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }, 60_000);
 
+  it("gives each scratch thread its own folder and keeps it across a restart", async () => {
+    const tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "t3-scratch-engine-")));
+    const dbPath = path.join(tempDir, "state.sqlite");
+    const scratchRoot = path.join(tempDir, "scratch");
+    const createdAt = "2026-10-22T09:30:00.000Z";
+    const threadId = ThreadId.makeUnsafe("0f9e8d7c-1111-2222-3333-444455556666");
+    const system = await createPersistentOrchestrationSystem({ dbPath });
+    await system.run(
+      system.engine.dispatch({
+        type: "project.scratch.create",
+        commandId: CommandId.makeUnsafe("cmd-scratch-create"),
+        projectId: asProjectId("scratch"),
+        workspaceRoot: scratchRoot,
+        createdAt,
+      }),
+    );
+    const create = {
+      type: "thread.create",
+      commandId: CommandId.makeUnsafe("cmd-scratch-thread"),
+      threadId,
+      projectId: asProjectId("scratch"),
+      title: "New thread",
+      scratchFolderWords: "Fix the login page, please! Then more words",
+      model: "gpt-5-codex",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    } as const;
+    await system.run(system.engine.dispatch(create));
+    // A retried create replays its receipt and allocates nothing new.
+    await system.run(system.engine.dispatch(create));
+    const folder = path.join(scratchRoot, "2026-10-22-fix-the-login-page-please-0f9e8d7c");
+    const model = await system.run(system.engine.getReadModel());
+    expect(model.threads.find((thread) => thread.id === threadId)?.scratchPath).toBe(folder);
+    expect(fs.statSync(folder).isDirectory()).toBe(true);
+    expect(fs.readdirSync(scratchRoot)).toEqual([path.basename(folder)]);
+    await system.dispose();
+
+    const restarted = await createPersistentOrchestrationSystem({ dbPath });
+    const restored = await restarted.run(restarted.engine.getReadModel());
+    expect(restored.projects.find((project) => project.id === "scratch")?.kind).toBe("scratch");
+    expect(restored.threads.find((thread) => thread.id === threadId)?.scratchPath).toBe(folder);
+    await restarted.dispose();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }, 60_000);
+
   it("falls back to full replay when projection snapshot hydration fails", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-snapshot-fallback-"));
     const dbPath = path.join(tempDir, "state.sqlite");

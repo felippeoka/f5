@@ -16,6 +16,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   ProjectCloneJob,
+  ProjectEnsureScratchResult,
   AGENTS_WS_CHANNELS,
   AGENTS_WS_METHODS,
   AGENT_BRIDGE_WS_CHANNELS,
@@ -658,6 +659,10 @@ export function createWsNativeApi(): NativeApi {
           await transport.request(WS_METHODS.projectsCloneList, {}),
         ),
       cloneCancel: requestMethod(WS_METHODS.projectsCloneCancel),
+      ensureScratch: async () =>
+        Schema.decodeUnknownSync(ProjectEnsureScratchResult)(
+          await transport.request(WS_METHODS.projectsEnsureScratch, {}),
+        ),
       getCheckedInConfig: (input) =>
         transport.request(WS_METHODS.projectsGetCheckedInConfig, input),
       authorizeEntry: requestMethod(WS_METHODS.projectsAuthorizeEntry),
