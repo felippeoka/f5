@@ -54,7 +54,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
             )
             VALUES (
               ${row.projectId},
-              ${row.kind},
+              ${row.kind ?? "standard"},
               ${row.title},
               ${row.workspaceRoot},
               ${row.defaultModel},
