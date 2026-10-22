@@ -31,18 +31,29 @@ function ThreadHarness() {
   return <output aria-label="location">{href}</output>;
 }
 
-function renderAt(path: string) {
+function createTestRouter(path: string) {
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
   const threadRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/$threadId",
     component: ThreadHarness,
   });
-  const router = createRouter({
-    history: createMemoryHistory({ initialEntries: [path] }),
-    routeTree: rootRoute.addChildren([threadRoute]),
+  // Never finishes loading, so the thread route stays mounted while the location already
+  // shows `/new`.
+  const pendingRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/new",
+    loader: () => new Promise<void>(() => {}),
+    component: () => null,
   });
-  return render(<RouterProvider router={router} />);
+  return createRouter({
+    history: createMemoryHistory({ initialEntries: [path] }),
+    routeTree: rootRoute.addChildren([threadRoute, pendingRoute]),
+  });
+}
+
+function renderAt(path: string) {
+  return render(<RouterProvider router={createTestRouter(path)} />);
 }
 
 const draftPrompt = (threadId: string) =>
@@ -52,6 +63,18 @@ it("fills the thread's composer and removes the link's prompt from the URL", asy
   const screen = await renderAt("/thread-1?prompt=Retry%20the%20deploy&diff=1");
   await vi.waitFor(() => expect(draftPrompt("thread-1")).toBe("Retry the deploy"));
   await expect.element(screen.getByLabelText("location")).toHaveTextContent("/thread-1?diff=1");
+});
+
+it("leaves the current thread alone while a new-thread link is still opening", async () => {
+  const router = createTestRouter("/thread-3");
+  const screen = await render(<RouterProvider router={router} />);
+  await expect.element(screen.getByLabelText("location")).toHaveTextContent("/thread-3");
+
+  void router.navigate({ href: "/new?prompt=Somewhere%20else" });
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/new"));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(draftPrompt("thread-3")).toBeUndefined();
+  expect(toast.add).not.toHaveBeenCalled();
 });
 
 it("asks before replacing a draft the thread already has", async () => {
