@@ -45,6 +45,21 @@ describe("scratch project", () => {
     await expect(FS.stat(Path.join(state, "scratch"))).rejects.toThrow();
   });
 
+  it("allows threads without a project on a machine without Git", async () => {
+    const dir = await tempDir();
+    const previous = process.env.PATH;
+    // An empty PATH hides every git binary, as on a machine that never installed it.
+    process.env.PATH = dir;
+    try {
+      expect(await gitCheckoutState(dir)).toBe("outside");
+      await expect(prepareScratchRoot(Path.join(dir, "state"))).resolves.toBe(
+        Path.join(dir, "state", "scratch"),
+      );
+    } finally {
+      process.env.PATH = previous;
+    }
+  });
+
   it("confines requests below the scratch root to one thread folder and no Git", () => {
     const scratchRoot = "/state/scratch";
     const refusal = (method: string, cwd: string) =>

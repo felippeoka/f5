@@ -600,14 +600,7 @@ function OpenCommandPaletteDialog(props: {
 
   const projectThreadItems = useMemo(
     () => [
-      ...buildProjectActionItems({
-        projects: listedProjects,
-        valuePrefix: "new-thread-in",
-        icon: projectIcon,
-        runProject: async (project) => {
-          await handleNewThread(project.id);
-        },
-      }),
+      // First, so it stays in reach however many projects follow.
       {
         kind: "action" as const,
         value: "new-thread-in:no-project",
@@ -618,6 +611,14 @@ function OpenCommandPaletteDialog(props: {
           await startScratchThread();
         },
       },
+      ...buildProjectActionItems({
+        projects: listedProjects,
+        valuePrefix: "new-thread-in",
+        icon: projectIcon,
+        runProject: async (project) => {
+          await handleNewThread(project.id);
+        },
+      }),
     ],
     [handleNewThread, listedProjects, projectIcon, startScratchThread],
   );
