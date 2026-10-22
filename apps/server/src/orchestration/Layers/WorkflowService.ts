@@ -5301,7 +5301,7 @@ export const makeWorkflowService = Effect.gen(function* () {
           input,
           threadId: authorThreadIdA,
           suffix: document ? "Draft A" : "Branch A",
-          branch: "a",
+          lane: "a",
           now,
         }),
         createWorkflowThread({
@@ -5309,7 +5309,7 @@ export const makeWorkflowService = Effect.gen(function* () {
           input,
           threadId: authorThreadIdB,
           suffix: document ? "Draft B" : "Branch B",
-          branch: "b",
+          lane: "b",
           now,
         }),
       ]).pipe(
@@ -6762,17 +6762,17 @@ function createWorkflowThread({
   input,
   threadId,
   suffix,
-  branch,
+  lane,
   now,
 }: {
   orchestrationEngine: OrchestrationEngineShape;
   input: CreateWorkflowInput;
   threadId: ThreadId;
   suffix: string;
-  branch: "a" | "b";
+  lane: "a" | "b";
   now: string;
 }) {
-  const slot = branch === "a" ? input.branchA : input.branchB;
+  const slot = lane === "a" ? input.branchA : input.branchB;
   return orchestrationEngine.dispatch({
     type: "thread.create",
     commandId: CommandId.makeUnsafe(crypto.randomUUID()),
@@ -6782,7 +6782,8 @@ function createWorkflowThread({
     model: slot.model,
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: WORKFLOW_PLANNING_INTERACTION_MODE,
-    branch,
+    // The lane is not a Git branch; authors work in the project checkout.
+    branch: null,
     worktreePath: null,
     createdAt: now,
   });
