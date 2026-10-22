@@ -55,6 +55,7 @@ import {
   type GitWorktreeProgress,
   type GitPreparedCommitContext,
 } from "../Services/GitCore.ts";
+import { copiedIndexTimestampSeconds } from "../copiedIndex.ts";
 import { makeProgressLineSplitter, parseCheckoutProgressLine } from "../progressLines.ts";
 import {
   isPullRequestTrackingAlias,
@@ -1549,7 +1550,7 @@ const makeGitCore = Effect.gen(function* () {
   interface PreparedIndexSnapshot {
     readonly cwd: string;
     readonly head: string | null;
-    readonly indexFingerprint: string | null;
+    readonly indexFingerprint: string;
     readonly includedTree: string;
     readonly filePaths: readonly string[] | undefined;
   }
@@ -1570,8 +1571,23 @@ const makeGitCore = Effect.gen(function* () {
           cause,
         ),
     });
-  const indexFingerprint = (bytes: Uint8Array | null) =>
-    bytes === null ? null : createHash("sha256").update(bytes).digest("hex");
+  // Hashes what the index stages, not its bytes: `git status` from an IDE or another CLI
+  // rewrites the index to refresh stat data while staging stays the same. Streamed, since an
+  // ordinary repository's listing can exceed the buffered output cap.
+  const indexFingerprint = (cwd: string) =>
+    Effect.gen(function* () {
+      const hash = createHash("sha256");
+      yield* git.execute({
+        operation: "GitCore.commitIndex.fingerprint",
+        cwd,
+        args: ["ls-files", "--stage", "-z"],
+        env: { GIT_OPTIONAL_LOCKS: "0" },
+        onStdoutChunk: (chunk) => {
+          hash.update(chunk);
+        },
+      });
+      return hash.digest("hex");
+    });
 
   // Temporary indexes live beside the real index so split-index dependencies can
   // be resolved and materialized before staging. No repository lock spans generation.
@@ -1588,8 +1604,8 @@ const makeGitCore = Effect.gen(function* () {
       ]);
       const indexPath = resolvePath(cwd, stripPathTerminator(rawPath));
       const head = yield* resolveCommit(cwd, "HEAD");
+      const fingerprint = yield* indexFingerprint(cwd);
       const originalIndex = yield* readIndex(cwd, indexPath);
-      const fingerprint = indexFingerprint(originalIndex);
       return yield* Effect.acquireUseRelease(
         Effect.sync(() => `${indexPath}.f5-${crypto.randomUUID()}`),
         (temporaryIndex) =>
@@ -1614,9 +1630,9 @@ const makeGitCore = Effect.gen(function* () {
                   const originalStat = await stat(indexPath);
                   await writeFile(temporaryIndex, originalIndex, { flag: "wx", mode: 0o600 });
                   // Copying an index with a fresh timestamp hides same-size edits
-                  // made in the original index's timestamp window. Preserve a
-                  // rounded-down boundary before Git reads or rewrites the copy.
-                  const indexTime = Math.max(0, Math.floor((originalStat.mtimeMs - 1) / 1000));
+                  // made in the original index's timestamp window. Preserve its
+                  // second before Git reads or rewrites the copy.
+                  const indexTime = copiedIndexTimestampSeconds(originalStat.mtime);
                   await utimes(temporaryIndex, indexTime, indexTime);
                 },
                 catch: (cause) =>
@@ -1641,7 +1657,7 @@ const makeGitCore = Effect.gen(function* () {
             const result = yield* use(env);
             const stable =
               head === (yield* resolveCommit(cwd, "HEAD")) &&
-              fingerprint === indexFingerprint(yield* readIndex(cwd, indexPath));
+              fingerprint === (yield* indexFingerprint(cwd));
             return {
               result,
               stable,
@@ -1720,15 +1736,9 @@ const makeGitCore = Effect.gen(function* () {
           );
         // Reading a new temporary index also catches edits to included worktree
         // content. Never copy an earlier index back over another client's staging.
-        const rawPath = yield* runGitStdout("GitCore.commitPrepared.indexPath", cwd, [
-          "rev-parse",
-          "--git-path",
-          "index",
-        ]);
         if (
           expected.head !== (yield* resolveCommit(cwd, "HEAD")) ||
-          expected.indexFingerprint !==
-            indexFingerprint(yield* readIndex(cwd, resolvePath(cwd, stripPathTerminator(rawPath))))
+          expected.indexFingerprint !== (yield* indexFingerprint(cwd))
         )
           return { status: "context_changed" as const };
         const current = yield* withPreparedIndex(cwd, expected.filePaths, () => Effect.void).pipe(

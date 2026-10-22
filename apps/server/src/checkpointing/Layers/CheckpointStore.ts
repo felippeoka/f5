@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { Effect, Layer, FileSystem, Path, Schedule } from "effect";
 
 import { CheckpointInvariantError } from "../Errors.ts";
+import { copiedIndexTimestampSeconds } from "../../git/copiedIndex.ts";
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitServiceLive } from "../../git/Layers/GitService.ts";
 import { GitService, type ExecuteGitInput } from "../../git/Services/GitService.ts";
@@ -24,16 +25,6 @@ import { batchLiteralPathspecs, isGitImport, parseNumstatPaths } from "../Diffs.
 
 // Path lists are small next to patches; a bound keeps a pathological history from hanging diffs.
 const AUTHORED_PATHS_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
-
-/**
- * The whole-second timestamp a copied index keeps, so files edited in its own second stay racy
- * for Git. Node already truncates the index mtime to milliseconds, so flooring is enough;
- * subtracting another millisecond would also make every file from the preceding second racy
- * and reread.
- */
-export function copiedIndexTimestampSeconds(mtime: Date): number {
-  return Math.floor(mtime.getTime() / 1000);
-}
 
 function isSafeCheckpointRef(ref: string): boolean {
   if (!ref.startsWith("refs/") || /\s/.test(ref)) return false;

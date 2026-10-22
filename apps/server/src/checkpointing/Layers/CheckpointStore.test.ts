@@ -11,11 +11,11 @@ import { describe, expect, it } from "vitest";
 
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitService, type ExecuteGitInput } from "../../git/Services/GitService.ts";
+import { copiedIndexTimestampSeconds } from "../../git/copiedIndex.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
   CheckpointStoreLiveWithGitService,
   CheckpointStoreLiveWithoutCredentials,
-  copiedIndexTimestampSeconds,
 } from "./CheckpointStore.ts";
 
 function makeLayer(calls: ExecuteGitInput[], refOutput = "") {

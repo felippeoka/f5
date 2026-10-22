@@ -264,6 +264,30 @@ it.layer(TestLayer)("git integration", (it) => {
       );
     }
 
+    it.effect("commits after another tool refreshes the index without changing staging", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const core = yield* GitCore;
+        const fs = yield* FileSystem.FileSystem;
+        yield* writeTextFile(path.join(cwd, "stable.txt"), "unchanged\n");
+        yield* git(cwd, ["add", "stable.txt"]);
+        yield* git(cwd, ["commit", "-m", "Add stable file"]);
+        yield* writeTextFile(path.join(cwd, "README.md"), "suggested content\n");
+        const context = yield* core.prepareCommitContext(cwd, ["README.md"]);
+        const indexPath = path.resolve(cwd, yield* git(cwd, ["rev-parse", "--git-path", "index"]));
+        const before = yield* fs.readFile(indexPath);
+        // What an IDE's `git status` does: new stat data for a file, rewritten into the index.
+        const later = new Date(Date.now() + 60_000);
+        yield* fs.utimes(path.join(cwd, "stable.txt"), later, later);
+        yield* git(cwd, ["update-index", "-q", "--refresh"]);
+        expect(yield* fs.readFile(indexPath)).not.toEqual(before);
+
+        expect((yield* core.commitPrepared(cwd, "Suggested", "", context!)).status).toBe("created");
+        expect(yield* git(cwd, ["show", "HEAD:README.md"])).toBe("suggested content");
+      }),
+    );
+
     for (const changed of ["index", "head", "included", "deleted"] as const) {
       it.effect(`refuses changed ${changed} after generation without replacing staging`, () =>
         Effect.gen(function* () {
