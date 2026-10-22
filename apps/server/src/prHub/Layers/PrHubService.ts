@@ -1,3 +1,4 @@
+import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { isPrHubRepositoryExcluded } from "../repositoryPolicy.ts";
 import { resolveLocalCheckout as discoverLocalCheckout } from "../localCheckout.ts";
 import { nextPrHubRefreshAt } from "../refreshSchedule.ts";
@@ -119,7 +120,7 @@ export const makePrHubServiceForHost = (accountHost = DEFAULT_HOST) =>
           if (!roots.has(root)) projectRepositoryCache.delete(root);
         const candidates: PrHubLocalCheckoutCandidate[] = [];
         for (const project of allProjects) {
-          if (project.deletedAt !== null) continue;
+          if (project.deletedAt !== null || isScratchProject(project)) continue;
           let cached = projectRepositoryCache.get(project.workspaceRoot);
           if (!cached || Date.now() - cached.checkedAt >= 15 * 60_000) {
             const remotes = yield* git.listRemotes(project.workspaceRoot).pipe(

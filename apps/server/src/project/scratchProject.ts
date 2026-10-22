@@ -35,6 +35,35 @@ export function scratchRootFor(stateDir: string): string {
   return NodePath.join(stateDir, SCRATCH_DIRECTORY_NAME);
 }
 
+const SCRATCH_FOLDER_SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * Why a request naming `cwd` must be refused, or null. Below the scratch root only a thread's
+ * own folder (and what is inside it) is a workspace, the shared root never is, and none of it
+ * is a Git repository.
+ */
+export function scratchWorkspaceRefusal(input: {
+  readonly scratchRoot: string;
+  readonly method: string;
+  readonly cwd: string;
+}): string | null {
+  const relative = NodePath.relative(
+    NodePath.resolve(input.scratchRoot),
+    NodePath.resolve(input.cwd),
+  );
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${NodePath.sep}`) ||
+    NodePath.isAbsolute(relative)
+  )
+    return null;
+  if (input.method.startsWith("git.")) return "Threads without a project have no Git repository.";
+  const folder = relative.split(NodePath.sep)[0] ?? "";
+  return SCRATCH_FOLDER_SEGMENT.test(folder)
+    ? null
+    : "The shared folder for threads without a project is not a workspace. Use the thread's own folder.";
+}
+
 /**
  * Whether `dir` is inside a Git checkout or Git directory. Without Git installed no folder
  * can be one, so that reads as outside; any other failure is unknown.

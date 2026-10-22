@@ -6200,6 +6200,33 @@ describe("WebSocket Server", () => {
     });
   });
 
+  it("keeps file and Git requests below the scratch root inside one thread folder", async () => {
+    const stateDir = makeTempDir("f5-ws-scratch-state-");
+    const folder = path.join(stateDir, "scratch", "2026-10-22-notes-abc12345");
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "notes.md"), "# notes", "utf8");
+    server = await createTestServer({ cwd: "/test", stateDir });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const own = await sendRequest(ws, WS_METHODS.projectsSearchEntries, {
+      cwd: folder,
+      query: "notes",
+      limit: 10,
+    });
+    expect(own.error).toBeUndefined();
+    const shared = await sendRequest(ws, WS_METHODS.projectsSearchEntries, {
+      cwd: path.join(stateDir, "scratch"),
+      query: "notes",
+      limit: 10,
+    });
+    expect(shared.error?.message).toContain("not a workspace");
+    const status = await sendRequest(ws, WS_METHODS.gitStatus, { cwd: folder });
+    expect(status.error?.message).toContain("no Git repository");
+  });
+
   it("loads checked-in project defaults through a registered project identity", async () => {
     const workspace = makeTempDir("f5-ws-project-config-");
     fs.writeFileSync(

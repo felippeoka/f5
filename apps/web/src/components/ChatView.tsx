@@ -11,6 +11,7 @@ import { WorktreeMissingBanner } from "./chat/WorktreeMissingBanner";
 import { pickPreferredModel } from "../providerModels";
 import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { resolveThreadWorkspaceCwd, threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
 import { NativeRuntimeTray } from "./chat/NativeRuntimeTray";
@@ -2609,7 +2610,9 @@ export default memo(function ChatView({
     latestTurnSettled,
     timelineEntries,
   ]);
-  const gitCwd = threadWorkspaceCwd(activeThread, activeProject) ?? null;
+  const workspaceCwd = threadWorkspaceCwd(activeThread, activeProject) ?? null;
+  // A thread without a project has a folder but no repository, so nothing asks Git about it.
+  const gitCwd = isScratchProject(activeProject) ? null : workspaceCwd;
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const isPathTrigger = composerTriggerKind === "path";
@@ -2651,7 +2654,7 @@ export default memo(function ChatView({
   );
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
-      cwd: gitCwd,
+      cwd: workspaceCwd,
       query: effectivePathQuery,
       enabled: isPathTrigger,
       limit: 80,
@@ -7708,7 +7711,7 @@ export default memo(function ChatView({
                       onImageExpand={onExpandTimelineImage}
                       onImageActionMenu={onImageActionMenu}
                       usesCustomImageContextMenu={usesCustomImageContextMenu}
-                      markdownCwd={gitCwd ?? undefined}
+                      markdownCwd={workspaceCwd ?? undefined}
                       resolvedTheme={resolvedTheme}
                       timestampFormat={timestampFormat}
                       workspaceRoot={workspaceRoot}
@@ -7822,7 +7825,7 @@ export default memo(function ChatView({
                             key={input.requestId}
                             threadId={activeThread.id}
                             input={input}
-                            cwd={gitCwd ?? undefined}
+                            cwd={workspaceCwd ?? undefined}
                           />
                         ))}
                       {activeThread
@@ -7973,7 +7976,7 @@ export default memo(function ChatView({
           {/* end horizontal flex container */}
 
           {(() => {
-            if (!terminalState.terminalOpen || !activeProject) {
+            if (!terminalState.terminalOpen || !activeProject || !workspaceCwd) {
               return null;
             }
             return (
@@ -7990,7 +7993,7 @@ export default memo(function ChatView({
                 <ThreadTerminalDrawer
                   key={activeThread.id}
                   threadId={activeThread.id}
-                  cwd={gitCwd ?? activeProject.cwd}
+                  cwd={workspaceCwd}
                   runtimeEnv={threadTerminalRuntimeEnv}
                   height={terminalState.terminalHeight}
                   terminalIds={terminalState.terminalIds}

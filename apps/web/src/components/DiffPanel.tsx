@@ -57,6 +57,7 @@ import {
 } from "./chat/changedFilesPresentation";
 import { compareFilePaths } from "../lib/filePathCollator";
 import { changedLineCount } from "../lib/turnDiffTree";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 
 type DiffThemeType = "light" | "dark";
@@ -113,14 +114,15 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const activeCwd = threadWorkspaceCwd(activeThread, activeProject);
   const gitAutoRefreshIntervalMs = settings.gitStatusAutoRefreshIntervalSeconds * 1000;
   const gitAutoRefreshEnabled = settings.gitStatusAutoRefreshIntervalSeconds > 0;
+  const scratch = isScratchProject(activeProject);
   const gitBranchesQuery = useQuery(
     gitBranchesQueryOptions({
-      cwd: activeCwd ?? null,
+      cwd: scratch ? null : (activeCwd ?? null),
       autoRefresh: gitAutoRefreshEnabled,
       refetchIntervalMs: gitAutoRefreshIntervalMs,
     }),
   );
-  const isGitRepo = gitBranchesQuery.data?.isRepo ?? true;
+  const isGitRepo = !scratch && (gitBranchesQuery.data?.isRepo ?? true);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(

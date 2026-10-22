@@ -4,7 +4,12 @@ import * as Path from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { gitCheckoutState, prepareScratchRoot, scratchProjectIdFor } from "./scratchProject.ts";
+import {
+  gitCheckoutState,
+  prepareScratchRoot,
+  scratchProjectIdFor,
+  scratchWorkspaceRefusal,
+} from "./scratchProject.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -38,5 +43,22 @@ describe("scratch project", () => {
     expect(await gitCheckoutState(state)).toBe("inside");
     await expect(prepareScratchRoot(state)).rejects.toThrow("inside a Git checkout");
     await expect(FS.stat(Path.join(state, "scratch"))).rejects.toThrow();
+  });
+
+  it("confines requests below the scratch root to one thread folder and no Git", () => {
+    const scratchRoot = "/state/scratch";
+    const refusal = (method: string, cwd: string) =>
+      scratchWorkspaceRefusal({ scratchRoot, method, cwd });
+    expect(refusal("projects.readFile", "/state/scratch/2026-10-22-notes-abc12345")).toBeNull();
+    expect(refusal("projects.listDirectory", "/state/scratch/2026-10-22-notes/src")).toBeNull();
+    expect(refusal("projects.readFile", "/repo")).toBeNull();
+    expect(refusal("git.status", "/repo")).toBeNull();
+    expect(refusal("projects.searchEntries", "/state/scratch")).toContain("not a workspace");
+    expect(refusal("projects.searchEntries", "/state/scratch/")).toContain("not a workspace");
+    expect(refusal("projects.readFile", "/state/scratch/a/../..")).toBeNull();
+    expect(refusal("projects.writeFile", "/state/scratch/a/../.hidden")).toContain(
+      "not a workspace",
+    );
+    expect(refusal("git.status", "/state/scratch/2026-10-22-notes")).toContain("no Git");
   });
 });

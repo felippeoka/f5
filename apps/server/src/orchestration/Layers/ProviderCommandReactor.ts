@@ -62,6 +62,7 @@ import {
   normalizeProviderStartOptions,
 } from "@t3tools/shared/providerOptions";
 
+import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import {
@@ -1771,11 +1772,13 @@ const make = Effect.gen(function* () {
           retryable: false,
           detail: "Unknown project",
         });
-      yield* assertWorktreeReady(git, {
-        projectCwd: project.workspaceRoot,
-        worktreePath: thread.worktreePath,
-        branch: thread.branch,
-      }).pipe(Effect.mapError(toProviderTurnDeliveryError));
+      // A thread without a project has no checkout to be ready.
+      if (!isScratchProject(project))
+        yield* assertWorktreeReady(git, {
+          projectCwd: project.workspaceRoot,
+          worktreePath: thread.worktreePath,
+          branch: thread.branch,
+        }).pipe(Effect.mapError(toProviderTurnDeliveryError));
       const mcpAppContext = yield* appContextForTurn(
         thread.id,
         providerFromSessionName(thread.session?.providerName) === "codex" &&

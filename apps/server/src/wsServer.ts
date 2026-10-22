@@ -26,7 +26,12 @@ import {
   type GitWorkspaceSwitchHandler,
 } from "./git/workspaceSwitch.ts";
 import { inspectAttachableWorkspace } from "./project/workspaceAttachment.ts";
-import { prepareScratchRoot, scratchProjectIdFor } from "./project/scratchProject.ts";
+import {
+  prepareScratchRoot,
+  scratchProjectIdFor,
+  scratchRootFor,
+  scratchWorkspaceRefusal,
+} from "./project/scratchProject.ts";
 import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { readWorktreeClaims } from "./project/worktreeClaims.ts";
@@ -2521,9 +2526,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       const workspace = await Effect.runPromise(
         projectionWorkspaceQuery.getProjectWorkspace(ProjectId.makeUnsafe(projectId)),
       );
+      // The scratch root is shared by every thread without a project; only a thread scope
+      // reaches one of its folders.
       return Option.match(workspace, {
         onNone: () => null,
-        onSome: (value) => value.workspaceRoot,
+        onSome: (value) => (isScratchProject(value) ? null : value.workspaceRoot),
       });
     },
     resolveThreadWorkspaceRoot: async (threadId) => {
@@ -3813,6 +3820,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       });
 
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
+    const requestCwd = (request.body as { readonly cwd?: unknown }).cwd;
+    if (typeof requestCwd === "string") {
+      const refusal = scratchWorkspaceRefusal({
+        scratchRoot: scratchRootFor(serverConfig.stateDir),
+        method: request.body._tag,
+        cwd: requestCwd,
+      });
+      if (refusal) return yield* new RouteRequestError({ message: refusal });
+    }
     switch (request.body._tag) {
       case WS_METHODS.githubLoginStart:
         return yield* profileCall(() => githubLogin.start());
