@@ -1,30 +1,9 @@
-import type { ProjectId } from "@t3tools/contracts";
 import { useCallback } from "react";
 
 import { toastManager } from "../components/ui/toast";
+import { waitForProjectInStore } from "../lib/projectArrival";
 import { ensureNativeApi } from "../nativeApi";
-import { useStore } from "../store";
 import { useCreateProjectBackedDraftThread } from "./useCreateProjectBackedDraftThread";
-
-const SCRATCH_PROJECT_ARRIVAL_TIMEOUT_MS = 10_000;
-
-/** Resolves once the project's creation event has reached the store. */
-function projectInStore(projectId: ProjectId): Promise<void> {
-  const present = () => useStore.getState().projects.some((project) => project.id === projectId);
-  if (present()) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      unsubscribe();
-      reject(new Error("The home for threads without a project did not load. Try again."));
-    }, SCRATCH_PROJECT_ARRIVAL_TIMEOUT_MS);
-    const unsubscribe = useStore.subscribe(() => {
-      if (!present()) return;
-      clearTimeout(timeout);
-      unsubscribe();
-      resolve();
-    });
-  });
-}
 
 /**
  * Opens a new thread without a project. The server owns the scratch project; it is created on
@@ -35,7 +14,7 @@ export function useStartScratchThread() {
   return useCallback(async () => {
     try {
       const { projectId } = await ensureNativeApi().projects.ensureScratch();
-      await projectInStore(projectId);
+      await waitForProjectInStore(projectId);
       return await createDraftThread(projectId);
     } catch (error) {
       toastManager.add({

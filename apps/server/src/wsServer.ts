@@ -27,6 +27,12 @@ import {
 } from "./git/workspaceSwitch.ts";
 import { inspectAttachableWorkspace } from "./project/workspaceAttachment.ts";
 import {
+  initializeNewProject,
+  projectFolderSlug,
+  reserveProjectFolder,
+  resolveProjectsRoot,
+} from "./project/createNewProject.ts";
+import {
   prepareScratchRoot,
   scratchProjectIdFor,
   scratchRootFor,
@@ -4799,6 +4805,56 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             message: "Could not create the home for threads without a project.",
           });
         return { projectId: created.id };
+      }
+      case WS_METHODS.projectsCreateNew: {
+        const body = stripRequestTag(request.body);
+        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError(
+            () => new RouteRequestError({ message: "Could not read the projects folder setting." }),
+          ),
+        );
+        const root = resolveProjectsRoot({
+          setting: settings.projectsRoot,
+          profileId: activeProfile.id,
+          isDefaultProfile: serverConfig.profile?.isDefault ?? true,
+        });
+        const created = yield* Effect.tryPromise({
+          try: async () => {
+            const folder = await reserveProjectFolder(root, projectFolderSlug(body.name));
+            const { warning } = await initializeNewProject({
+              folder,
+              name: body.name,
+              authorName: settings.gitAuthorName,
+              authorEmail: settings.gitAuthorEmail,
+            });
+            return { folder, warning };
+          },
+          catch: (cause) =>
+            new RouteRequestError({
+              message: `Could not create the project: ${cause instanceof Error ? cause.message : String(cause)}`,
+            }),
+        });
+        const projectId = ProjectId.makeUnsafe(randomUUID());
+        yield* orchestrationEngine
+          .dispatch({
+            type: "project.create",
+            commandId: CommandId.makeUnsafe(`project-create-new:${projectId}`),
+            projectId,
+            title: body.name,
+            workspaceRoot: created.folder,
+            defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
+            createdAt: new Date().toISOString(),
+          })
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new RouteRequestError({
+                  message: `The folder ${created.folder} was created but could not be added as a project: ${String(error)}`,
+                }),
+            ),
+          );
+        return { projectId, workspaceRoot: created.folder, warning: created.warning };
       }
       case WS_METHODS.projectsCloneCancel: {
         yield* projectClones.cancel(request.body.operationId);

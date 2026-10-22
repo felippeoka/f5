@@ -1,6 +1,7 @@
 "use client";
 
 import { openProjectCloneDialog } from "./ProjectCloneController";
+import { openProjectCreateNewDialog } from "./ProjectCreateNewController";
 import { useTheme } from "../hooks/useTheme";
 import { getAvailableThemePalettes } from "../themePalette";
 
@@ -944,6 +945,17 @@ function OpenCommandPaletteDialog(props: {
     icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       openProjectCloneDialog(currentProjectCwd ?? "");
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:new-project",
+    title: "New project",
+    searchTerms: ["new project", "create project", "empty", "repository", "git init"],
+    icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      openProjectCreateNewDialog();
     },
   });
 

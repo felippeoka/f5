@@ -5,6 +5,7 @@ import { useSnapShotRouting } from "../hooks/useSnapShotRouting";
 import { useDesktopLinkRouting } from "../hooks/useDesktopLinkRouting";
 import { QuitHoldOverlay } from "../components/QuitHoldOverlay";
 import { ProjectCloneController } from "../components/ProjectCloneController";
+import { ProjectCreateNewController } from "../components/ProjectCreateNewController";
 import { ThreadNavigationController } from "../components/ThreadNavigationController";
 import { Outlet, createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
@@ -137,6 +138,7 @@ function ChatRouteLayout() {
         <ThreadRecencyController />
         <ThreadNavigationController />
         <ProjectCloneController />
+        <ProjectCreateNewController />
         <ModelRecencyController />
         <ThreadStatusNotificationController />
         <QuitHoldOverlay />

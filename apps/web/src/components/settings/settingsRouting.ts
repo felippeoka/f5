@@ -476,6 +476,9 @@ export const SETTINGS_ITEM_ROUTES = defineItemRoutes({
   "projects.base-directory": {
     category: "projects",
   },
+  "projects.projects-root": {
+    category: "projects",
+  },
   "projects.list": {
     category: "projects",
   },

@@ -459,6 +459,8 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvModeType),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  /** Where "New project" creates folders. Empty uses `~/f5-projects` (suffixed per profile). */
+  projectsRoot: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
       instanceId: ProviderInstanceId.make("codex"),
@@ -648,6 +650,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
+  projectsRoot: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sessionNotesModelSelection: Schema.optionalKey(ModelSelectionPatch),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),

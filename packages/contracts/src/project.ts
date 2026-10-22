@@ -283,6 +283,19 @@ export const ProjectEnsureScratchResult = Schema.Struct({
   projectId: ProjectId,
 });
 export type ProjectEnsureScratchResult = typeof ProjectEnsureScratchResult.Type;
+
+/** A new, empty Git project created from just a name under the profile's projects folder. */
+export const ProjectCreateNewInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
+});
+export type ProjectCreateNewInput = typeof ProjectCreateNewInput.Type;
+export const ProjectCreateNewResult = Schema.Struct({
+  projectId: ProjectId,
+  workspaceRoot: Schema.String,
+  /** Set when the folder was kept but Git setup or the first commit did not finish. */
+  warning: Schema.NullOr(Schema.String),
+});
+export type ProjectCreateNewResult = typeof ProjectCreateNewResult.Type;
 export const ProjectCloneJob = Schema.Struct({
   ...ProjectCloneInput.fields,
   destination: Schema.String,

@@ -25,6 +25,7 @@ export const WS_METHODS = {
   projectsCloneList: "projects.cloneList",
   projectsCloneCancel: "projects.cloneCancel",
   projectsEnsureScratch: "projects.ensureScratch",
+  projectsCreateNew: "projects.createNew",
   projectsListDirectory: "projects.listDirectory",
   projectsSearchEntries: "projects.searchEntries",
   projectsSearchContents: "projects.searchContents",

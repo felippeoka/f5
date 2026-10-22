@@ -6200,6 +6200,41 @@ describe("WebSocket Server", () => {
     });
   });
 
+  it("creates a committed project from a name in the configured projects folder", async () => {
+    const projectsRoot = makeTempDir("f5-ws-new-projects-");
+    fs.mkdirSync(path.join(projectsRoot, "my-app"));
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    expect(
+      (
+        await sendRequest(ws, WS_METHODS.serverUpdateSettings, {
+          projectsRoot,
+          gitAuthorName: "F5 Test",
+          gitAuthorEmail: "f5@example.com",
+        })
+      ).error,
+    ).toBeUndefined();
+
+    const response = await sendRequest(ws, WS_METHODS.projectsCreateNew, { name: "My App" });
+    expect(response.error).toBeUndefined();
+    const result = response.result as { projectId: string; workspaceRoot: string; warning: null };
+    // The taken name gets a suffix rather than reusing a folder that already exists.
+    expect(result.workspaceRoot).toBe(path.join(projectsRoot, "my-app-2"));
+    expect(result.warning).toBeNull();
+    expect(
+      execFileSync("git", ["log", "--format=%s"], { cwd: result.workspaceRoot }).toString().trim(),
+    ).toBe("Initial commit");
+    const snapshot = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+    expect(
+      (snapshot.result as OrchestrationReadModel).projects.find(
+        (project) => project.id === result.projectId,
+      ),
+    ).toMatchObject({ title: "My App", workspaceRoot: result.workspaceRoot, kind: "standard" });
+  });
+
   it("keeps file and Git requests below the scratch root inside one thread folder", async () => {
     const stateDir = makeTempDir("f5-ws-scratch-state-");
     const folder = path.join(stateDir, "scratch", "2026-10-22-notes-abc12345");

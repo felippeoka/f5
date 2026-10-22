@@ -10,6 +10,13 @@ export const PROJECTS_SETTINGS_DESCRIPTORS = [
     targetSelector: "#add-project-base-directory",
   },
   {
+    ...SETTINGS_ITEM_ROUTES["projects.projects-root"],
+    label: "New projects folder",
+    description: "Choose where New project creates folders.",
+    keywords: ["new project", "create", "folder", "path", "f5-projects"],
+    targetSelector: "#new-projects-root",
+  },
+  {
     ...SETTINGS_ITEM_ROUTES["projects.list"],
     label: "Project settings",
     description: "Open a project's icon, memory, and overrides.",
