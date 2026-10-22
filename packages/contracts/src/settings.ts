@@ -366,6 +366,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   previewExternalHosts: Schema.optionalKey(PreviewExternalHosts),
   enableClaudeInChrome: Schema.optionalKey(Schema.Boolean),
+  enableCodexChrome: Schema.optionalKey(Schema.Boolean),
   enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   autoPullDefaultBranch: Schema.optionalKey(Schema.Boolean),
 });
@@ -425,6 +426,8 @@ export const ServerSettings = Schema.Struct({
   previewExternalHosts: PreviewExternalHosts.pipe(Schema.withDecodingDefault(() => [])),
   /** Launch Claude sessions with Claude in Chrome. Off by default. */
   enableClaudeInChrome: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  /** Let Codex use Chrome through the ChatGPT extension, via F5's proxy. Off by default. */
+  enableCodexChrome: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   computerUseBackend: Schema.Literals(["auto", "f5"]).pipe(
     Schema.withDecodingDefault(() => "auto" as const),
   ),
@@ -588,6 +591,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   previewExternalHosts: Schema.optionalKey(PreviewExternalHosts),
   enableClaudeInChrome: Schema.optionalKey(Schema.Boolean),
+  enableCodexChrome: Schema.optionalKey(Schema.Boolean),
   enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   computerUseBackend: Schema.optionalKey(Schema.Literals(["auto", "f5"])),
   computerUseExecutionMode: Schema.optionalKey(ComputerUseExecutionMode),
@@ -642,6 +646,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "enableAgentBrowserAccess",
   "previewExternalHosts",
   "enableClaudeInChrome",
+  "enableCodexChrome",
   "enableAgentComputerUse",
   "autoPullDefaultBranch",
 ] as const satisfies ReadonlyArray<keyof ServerSettings>;

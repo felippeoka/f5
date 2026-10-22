@@ -1,0 +1,381 @@
+import { execFile } from "node:child_process";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import type { ChromeProcessRegistration } from "@t3tools/contracts";
+
+export interface ChromeProcessRow {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly pgid: number;
+  /** Epoch milliseconds, one-second resolution. */
+  readonly startTime: number;
+  /** Zombies can no longer act. */
+  readonly zombie: boolean;
+}
+export interface ChromeProcessIo {
+  /** Every process on the machine, or null when the listing could not be read. */
+  readonly snapshot: () => Promise<ReadonlyArray<ChromeProcessRow> | null>;
+  readonly killGroup: (pgid: number, signal: NodeJS.Signals) => void;
+  readonly setTimeout: (callback: () => void, ms: number) => unknown;
+  readonly clearTimeout: (handle: unknown) => void;
+  readonly now: () => number;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const PS_ROW =
+  /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})\s*$/;
+
+/**
+ * Parses `ps -o pid=,ppid=,pgid=,stat=,lstart=` run with `TZ=UTC`. `lstart` carries no
+ * zone, so it is read explicitly as UTC rather than through `Date.parse` (local time).
+ * Any unreadable row makes the whole listing unknown: a skipped row could hide a member.
+ */
+export function parseProcessListing(stdout: string): ChromeProcessRow[] | null {
+  const rows: ChromeProcessRow[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line.trim()) continue;
+    const match = PS_ROW.exec(line);
+    const month = match ? MONTHS.indexOf(match[5]!) : -1;
+    if (!match || month < 0) return null;
+    rows.push({
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      pgid: Number(match[3]),
+      zombie: match[4]!.startsWith("Z"),
+      startTime: Date.UTC(
+        Number(match[10]),
+        month,
+        Number(match[6]),
+        Number(match[7]),
+        Number(match[8]),
+        Number(match[9]),
+      ),
+    });
+  }
+  return rows.length ? rows : null;
+}
+
+/** `ps` is read by main (outside the backend sandbox). */
+export const defaultChromeProcessIo: ChromeProcessIo = {
+  snapshot: () =>
+    new Promise((resolve) => {
+      execFile(
+        "/bin/ps",
+        ["-A", "-o", "pid=,ppid=,pgid=,stat=,lstart="],
+        { timeout: 2000, maxBuffer: 16 * 1024 * 1024, env: { LC_ALL: "C", TZ: "UTC" } },
+        (error, stdout) => resolve(error ? null : parseProcessListing(stdout)),
+      );
+    }),
+  killGroup: (pgid, signal) => {
+    try {
+      process.kill(-pgid, signal);
+    } catch {
+      // Already gone.
+    }
+  },
+  setTimeout: (callback, ms) => setTimeout(callback, ms),
+  clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+  now: () => Date.now(),
+};
+
+type GroupState = "alive" | "gone" | "unknown";
+/**
+ * Positive evidence only. A group is gone when no non-zombie process remains in it, or when
+ * its leader's PID now belongs to a different process: the kernel never reuses a PID while
+ * a process group with that ID still exists. Surviving descendants keep the group alive.
+ */
+function groupState(
+  rows: ReadonlyArray<ChromeProcessRow> | null,
+  pgid: number,
+  observedStart: number,
+): GroupState {
+  if (!rows) return "unknown";
+  const leader = rows.find((row) => row.pid === pgid);
+  if (leader && leader.startTime !== observedStart) return "gone";
+  return rows.some((row) => row.pgid === pgid && !row.zombie) ? "alive" : "gone";
+}
+function descendsFrom(rows: ReadonlyArray<ChromeProcessRow>, pid: number, ancestor: number) {
+  let current = rows.find((row) => row.pid === pid);
+  for (let depth = 0; current && depth < 64; depth += 1) {
+    if (current.ppid === ancestor) return true;
+    if (current.ppid <= 1) return false;
+    const parent = current.ppid;
+    current = rows.find((row) => row.pid === parent);
+  }
+  return false;
+}
+
+interface Entry {
+  readonly registration: ChromeProcessRegistration;
+  /** Start time main observed at registration; every signal re-checks it. */
+  readonly observedStart: number;
+  exited: boolean;
+  timers: unknown[];
+}
+interface PersistedRecovery {
+  readonly registration: ChromeProcessRegistration;
+  readonly observedStart: number;
+}
+export type ChromeStopReason = "emergency" | "unresponsive" | "shutdown" | "release";
+
+const START_TOLERANCE_MS = 5_000;
+const POLL_MS = 250;
+const IDLE_POLL_MS = 2_000;
+export const CHROME_EXIT_DEADLINE_MS = 5_000;
+const generationKey = (profileId: string, threadId: string, generation: string) =>
+  `${profileId}\0${threadId}\0${generation}`;
+
+/**
+ * Main-owned stop for provider-integration children. Main signals only groups led by a
+ * verified descendant of the registering backend, never a process whose start time
+ * differs from the one it observed (PID reuse), and never Chrome itself, unrelated native
+ * hosts or terminal Claude. A group counts as stopped only on positive evidence that no
+ * member remains; an unreadable listing keeps ownership. A group whose exit is not
+ * observed in time becomes `recovery-required`, persisted so a desktop restart cannot
+ * assume control ended.
+ */
+export class ChromeProcessSupervisor {
+  private readonly entries = new Map<string, Entry>();
+  private recovery: PersistedRecovery[] = [];
+  /** Generations stopped by the emergency shortcut, refused until the user resumes. */
+  private readonly invalidatedGenerations = new Set<string>();
+  private polling: unknown;
+  constructor(
+    private readonly options: {
+      readonly io?: ChromeProcessIo;
+      readonly statePath?: string;
+      readonly registered?: (registration: ChromeProcessRegistration) => void;
+      /** A registered group exited (or was found exited). */
+      readonly exited?: (registration: ChromeProcessRegistration) => void;
+      readonly recoveryChanged?: (recoveryRequired: boolean) => void;
+    } = {},
+  ) {
+    this.loadRecovery();
+  }
+  private get io(): ChromeProcessIo {
+    return this.options.io ?? defaultChromeProcessIo;
+  }
+
+  /** `ancestorPid` is the registering backend's process, which main spawned. */
+  async register(registration: ChromeProcessRegistration, ancestorPid: number): Promise<void> {
+    if (this.recoveryRequired())
+      throw new Error("A previous browser-control process has not exited yet.");
+    if (
+      this.invalidated(
+        registration.profileId,
+        registration.threadId,
+        registration.sessionGeneration,
+      )
+    )
+      throw new Error("Computer control was stopped for this session. Resume it first.");
+    if (registration.pgid !== registration.pid)
+      throw new Error("Integration processes must lead their own process group.");
+    if (this.entries.has(registration.launchToken)) throw new Error("Duplicate launch token.");
+    const rows = await this.io.snapshot();
+    const leader = rows?.find((row) => row.pid === registration.pid);
+    if (
+      !rows ||
+      !leader ||
+      leader.zombie ||
+      leader.pgid !== registration.pgid ||
+      Math.abs(leader.startTime - registration.startTime) > START_TOLERANCE_MS ||
+      // Main never signals a group the backend could not have started itself.
+      !descendsFrom(rows, registration.pid, ancestorPid)
+    )
+      throw new Error("The integration process could not be verified.");
+    this.entries.set(registration.launchToken, {
+      registration,
+      observedStart: leader.startTime,
+      exited: false,
+      timers: [],
+    });
+    try {
+      // The host may veto (for example when the emergency shortcut is unavailable).
+      this.options.registered?.(registration);
+    } catch (error) {
+      this.entries.delete(registration.launchToken);
+      throw error;
+    }
+    this.schedulePoll();
+  }
+
+  registrations(filter: (registration: ChromeProcessRegistration) => boolean = () => true) {
+    return [...this.entries.values()]
+      .filter((entry) => !entry.exited && filter(entry.registration))
+      .map((entry) => entry.registration);
+  }
+  alive(filter: (registration: ChromeProcessRegistration) => boolean): boolean {
+    return this.registrations(filter).length > 0;
+  }
+  recoveryRequired(): boolean {
+    return this.recovery.length > 0;
+  }
+  invalidated(profileId: string, threadId: string, generation: string): boolean {
+    return this.invalidatedGenerations.has(generationKey(profileId, threadId, generation));
+  }
+  /** The user resumed the thread: its stopped generations may register again. */
+  resumed(profileId: string, threadId: string): void {
+    const prefix = `${profileId}\0${threadId}\0`;
+    for (const key of this.invalidatedGenerations)
+      if (key.startsWith(prefix)) this.invalidatedGenerations.delete(key);
+  }
+
+  /**
+   * Emergency and unresponsive stops signal SIGTERM now and SIGKILL after 1 s; shutdown
+   * and release allow a 2 s grace first. Missing the exit deadline means recovery. An
+   * emergency stop also invalidates each affected generation until the user resumes.
+   */
+  stop(
+    filter: (registration: ChromeProcessRegistration) => boolean,
+    reason: ChromeStopReason,
+  ): ChromeProcessRegistration[] {
+    const io = this.io;
+    const grace = reason === "shutdown" || reason === "release" ? 2_000 : 0;
+    const stopped: ChromeProcessRegistration[] = [];
+    for (const entry of this.entries.values()) {
+      if (entry.exited || !filter(entry.registration)) continue;
+      stopped.push(entry.registration);
+      if (reason === "emergency")
+        this.invalidatedGenerations.add(
+          generationKey(
+            entry.registration.profileId,
+            entry.registration.threadId,
+            entry.registration.sessionGeneration,
+          ),
+        );
+      if (entry.timers.length) {
+        // An urgent stop replaces a graceful one already in progress.
+        if (grace) continue;
+        for (const timer of entry.timers) io.clearTimeout(timer);
+        entry.timers = [];
+      }
+      const term = () => void this.signal(entry, "SIGTERM");
+      if (grace) entry.timers.push(io.setTimeout(term, grace));
+      else term();
+      entry.timers.push(io.setTimeout(() => void this.signal(entry, "SIGKILL"), grace + 1_000));
+      entry.timers.push(
+        io.setTimeout(
+          () => {
+            if (!entry.exited) this.enterRecovery(entry);
+          },
+          Math.max(CHROME_EXIT_DEADLINE_MS, grace + 1_000 + POLL_MS * 2),
+        ),
+      );
+    }
+    this.reschedulePoll();
+    return stopped;
+  }
+
+  /** The backend reports an exit; main confirms it before acting on it. */
+  reportedExit(launchToken: string): void {
+    const entry = this.entries.get(launchToken);
+    if (entry && !entry.exited) void this.check(entry);
+  }
+
+  private async signal(entry: Entry, signal: NodeJS.Signals): Promise<void> {
+    if (entry.exited) return;
+    const state = groupState(
+      await this.io.snapshot(),
+      entry.registration.pgid,
+      entry.observedStart,
+    );
+    if (state === "gone") return this.markExited(entry);
+    // An unreadable listing never authorizes a signal; the deadline enters recovery.
+    if (state === "alive") this.io.killGroup(entry.registration.pgid, signal);
+  }
+
+  private async check(entry: Entry): Promise<void> {
+    const rows = await this.io.snapshot();
+    if (groupState(rows, entry.registration.pgid, entry.observedStart) === "gone")
+      this.markExited(entry);
+  }
+
+  private markExited(entry: Entry): void {
+    if (entry.exited) return;
+    entry.exited = true;
+    for (const timer of entry.timers) this.io.clearTimeout(timer);
+    entry.timers = [];
+    this.entries.delete(entry.registration.launchToken);
+    const before = this.recovery.length;
+    this.recovery = this.recovery.filter(
+      (persisted) => persisted.registration.launchToken !== entry.registration.launchToken,
+    );
+    if (before !== this.recovery.length) this.persistRecovery();
+    this.options.exited?.(entry.registration);
+  }
+
+  private enterRecovery(entry: Entry): void {
+    const token = entry.registration.launchToken;
+    if (this.recovery.some((persisted) => persisted.registration.launchToken === token)) return;
+    this.recovery.push({ registration: entry.registration, observedStart: entry.observedStart });
+    this.persistRecovery();
+  }
+
+  /** Fast while a stop is in progress or recovery is pending, slow otherwise. */
+  private pollInterval(): number {
+    const stopping = [...this.entries.values()].some((entry) => entry.timers.length > 0);
+    return stopping || this.recovery.length ? POLL_MS : IDLE_POLL_MS;
+  }
+  private schedulePoll(): void {
+    if (this.polling !== undefined) return;
+    if (!this.entries.size && !this.recovery.length) return;
+    this.polling = this.io.setTimeout(() => {
+      this.polling = undefined;
+      void this.poll();
+    }, this.pollInterval());
+  }
+  private reschedulePoll(): void {
+    if (this.polling !== undefined) this.io.clearTimeout(this.polling);
+    this.polling = undefined;
+    this.schedulePoll();
+  }
+  private async poll(): Promise<void> {
+    const rows = await this.io.snapshot();
+    for (const entry of [...this.entries.values()])
+      if (groupState(rows, entry.registration.pgid, entry.observedStart) === "gone")
+        this.markExited(entry);
+    // Recovered from a previous run: entries are gone, only the persisted registrations remain.
+    const remaining = this.recovery.filter(
+      (persisted) =>
+        this.entries.has(persisted.registration.launchToken) ||
+        groupState(rows, persisted.registration.pgid, persisted.observedStart) !== "gone",
+    );
+    if (remaining.length !== this.recovery.length) {
+      this.recovery = remaining;
+      this.persistRecovery();
+    }
+    this.schedulePoll();
+  }
+
+  private loadRecovery(): void {
+    if (!this.options.statePath) return;
+    try {
+      const parsed = JSON.parse(readFileSync(this.options.statePath, "utf8")) as {
+        recovery?: PersistedRecovery[];
+      };
+      this.recovery = Array.isArray(parsed.recovery)
+        ? parsed.recovery.filter(
+            (persisted) =>
+              typeof persisted?.observedStart === "number" &&
+              typeof persisted.registration?.pgid === "number",
+          )
+        : [];
+    } catch {
+      this.recovery = [];
+    }
+    if (this.recovery.length) this.schedulePoll();
+  }
+  private persistRecovery(): void {
+    if (this.options.statePath) {
+      try {
+        mkdirSync(dirname(this.options.statePath), { recursive: true });
+        const temporary = `${this.options.statePath}.${process.pid}.tmp`;
+        writeFileSync(temporary, JSON.stringify({ recovery: this.recovery }));
+        renameSync(temporary, this.options.statePath);
+      } catch {
+        // In-memory state still refuses ownership for this run.
+      }
+    }
+    this.options.recoveryChanged?.(this.recoveryRequired());
+  }
+}

@@ -37,6 +37,15 @@ export const BROWSER_SETTINGS_DESCRIPTORS = [
     scope: "both",
   },
   {
+    id: "browser.codex-chrome",
+    category: "browser",
+    label: "Codex Chrome control",
+    description: "Let Codex use Chrome through the ChatGPT app's extension.",
+    keywords: ["chrome", "extension", "codex", "chatgpt"],
+    targetSelector: '[data-settings-search-target="browser.codex-chrome"]',
+    scope: "both",
+  },
+  {
     id: "browser.computer-use",
     category: "browser",
     label: "Computer use",

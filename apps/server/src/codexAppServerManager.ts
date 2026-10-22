@@ -312,6 +312,8 @@ export interface CodexAppServerStartSessionInput {
   readonly serviceTier?: string;
   readonly mcpServers?: Record<string, CodexMcpServerEntry>;
   readonly mcpEnvironment?: Record<string, string>;
+  /** Appended to developer instructions (absolute, F5-verified integration paths). */
+  readonly integrationInstructions?: ReadonlyArray<string>;
   readonly mcpOAuthCallbackPort?: number;
   readonly mcpOAuthCallbackUrl?: string;
   readonly resumeCursor?: unknown;
@@ -925,6 +927,9 @@ function buildCodexCollaborationMode(input: {
     ...(context?.cwd ? { cwd: context.cwd } : {}),
     ...(context?.runtimeMode ? { runtimeMode: context.runtimeMode } : {}),
     ...(context?.projectMemories ? { projectMemories: context.projectMemories } : {}),
+    ...(context?.integrationInstructions
+      ? { integrationInstructions: context.integrationInstructions }
+      : {}),
     ...(input.includeResumedContext && context?.priorWorkSummary
       ? { priorWorkSummary: context.priorWorkSummary }
       : {}),
@@ -973,6 +978,9 @@ function buildCodexInstructionContext(
       ? { workflowExecutionProfile: input.workflowExecutionProfile }
       : {}),
     ...(input.projectMemories ? { projectMemories: input.projectMemories } : {}),
+    ...(input.integrationInstructions?.length
+      ? { integrationInstructions: input.integrationInstructions }
+      : {}),
     ...(input.priorWorkSummary ? { priorWorkSummary: input.priorWorkSummary } : {}),
     ...(input.preservedTranscriptBefore
       ? { preservedTranscriptBefore: input.preservedTranscriptBefore }
@@ -1795,7 +1803,14 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const response = await this.sendRequest(context, "thread/start", params.start);
     const providerThreadId = this.readThreadOpenProviderThreadId("thread/start", response);
     context.instructionContext = buildCodexInstructionContext(
-      { threadId, runtimeMode: input.runtimeMode },
+      {
+        threadId,
+        runtimeMode: input.runtimeMode,
+        // Integrations belong to the session, not the provider thread.
+        ...(context.instructionContext?.integrationInstructions
+          ? { integrationInstructions: context.instructionContext.integrationInstructions }
+          : {}),
+      },
       resolvedCwd,
     );
     context.resumedContextSent = false;

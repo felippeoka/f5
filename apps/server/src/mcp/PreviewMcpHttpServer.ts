@@ -33,6 +33,10 @@ import {
   type PreviewAutomationBrokerShape,
 } from "./PreviewAutomationBroker.ts";
 import {
+  INTEGRATION_TOOL_TIMEOUT_SEC,
+  type IntegrationProxySession,
+} from "./IntegrationProxyCatalog.ts";
+import {
   asObject,
   isAllowedHostHeader,
   isLoopbackAddress,
@@ -60,14 +64,23 @@ const PREVIEW_MCP_SERVER_NAME = "__f5_preview";
 const PREVIEW_MCP_ENV_PREFIX = "F5_PREVIEW_MCP_TOKEN_";
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 
+type McpCatalog = "preview" | "computer" | "integration";
+const CATALOG_PATHS: Record<McpCatalog, string> = {
+  preview: MCP_ENDPOINT_PATH,
+  computer: "/mcp/computer",
+  integration: "/mcp/integration",
+};
+
 interface PreviewMcpSessionScope {
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly automationSessionId: string;
   readonly issuedAt: string;
-  readonly catalog: "preview" | "computer";
+  readonly catalog: McpCatalog;
   geometry: ComputerToolGeometry;
   computerScope?: ComputerSessionScope;
+  /** Provider-native integration proxied through F5's per-call admission. */
+  integration?: IntegrationProxySession;
   rpcIncarnation?: string;
 }
 
@@ -80,14 +93,16 @@ export interface PreviewMcpSessionConfig {
 }
 
 export interface PreviewMcpHttpServerShape {
-  readonly getUrl: (catalog?: "preview" | "computer") => string;
+  readonly getUrl: (catalog?: McpCatalog) => string;
   readonly createSessionConfig: (input: {
     readonly threadId: ThreadId;
     readonly providerInstanceId?: ProviderInstanceId;
     readonly existingServerNames?: ReadonlySet<string>;
-    readonly catalog?: "preview" | "computer";
+    readonly catalog?: McpCatalog;
     readonly provider?: ComputerAgentProvider;
     readonly serverName?: string;
+    /** Required for the `integration` catalog; disposed with the session config. */
+    readonly integration?: IntegrationProxySession;
   }) => PreviewMcpSessionConfig;
 }
 
@@ -124,6 +139,10 @@ function makeToolCallHandler(
       return previewToolErrorResult(
         new PreviewAutomationExecutionError({ message: "MCP credential is no longer valid." }),
       );
+    }
+    if (scope.catalog === "integration") {
+      if (!scope.integration) return previewToolErrorResult(new Error("Integration unavailable."));
+      return scope.integration.callTool(name, rawArguments, invocationId);
     }
     if (scope.catalog === "computer") {
       if (!computer) return previewToolErrorResult(new Error("Computer host unavailable."));
@@ -164,7 +183,10 @@ function nextEnvVarName(): string {
 function handleRpcRequest(input: {
   readonly request: JsonRpcRequest;
   readonly token: string;
-  readonly catalog: "preview" | "computer";
+  readonly catalog: McpCatalog;
+  readonly integration?: IntegrationProxySession;
+  /** Scopes a client JSON-RPC id to this MCP connection. */
+  readonly invocationKey: (id: string) => string;
   readonly callTool: (
     token: string,
     name: string,
@@ -174,6 +196,13 @@ function handleRpcRequest(input: {
 }): Promise<JsonRpcResponse | null> {
   const { request } = input;
   if (request.id === undefined && request.method?.startsWith("notifications/")) {
+    // Calls are keyed by the client's JSON-RPC id, so a client cancellation reaches the
+    // proxied child (and starts the bounded drain) instead of being dropped.
+    if (input.catalog === "integration" && request.method === "notifications/cancelled") {
+      const requestId = asObject(request.params).requestId;
+      if (requestId !== undefined)
+        input.integration?.cancelCall(input.invocationKey(JSON.stringify(requestId)));
+    }
     return Promise.resolve(null);
   }
   if (typeof request.method !== "string") {
@@ -190,7 +219,12 @@ function handleRpcRequest(input: {
             tools: {},
           },
           serverInfo: {
-            name: input.catalog === "computer" ? "F5 Computer" : "F5 Preview",
+            name:
+              input.catalog === "computer"
+                ? "F5 Computer"
+                : input.catalog === "integration"
+                  ? "F5 Integration"
+                  : "F5 Preview",
             version: "0.0.0",
           },
         }),
@@ -198,6 +232,17 @@ function handleRpcRequest(input: {
     case "ping":
       return Promise.resolve(jsonRpcSuccess(request.id, {}));
     case "tools/list":
+      if (input.catalog === "integration")
+        return (input.integration?.listTools() ?? Promise.resolve([])).then((tools) =>
+          jsonRpcSuccess(request.id, {
+            tools: tools.map((tool) => ({
+              name: tool.name,
+              ...(tool.description ? { description: tool.description } : {}),
+              inputSchema: tool.inputSchema,
+              ...(tool.annotations ? { annotations: tool.annotations } : {}),
+            })),
+          }),
+        );
       return Promise.resolve(
         jsonRpcSuccess(request.id, {
           tools:
@@ -219,7 +264,7 @@ function handleRpcRequest(input: {
           input.token,
           name,
           params.arguments,
-          request.id === undefined ? undefined : JSON.stringify(request.id),
+          request.id === undefined ? undefined : input.invocationKey(JSON.stringify(request.id)),
         )
         .then((result) => jsonRpcSuccess(request.id, result));
     }
@@ -253,8 +298,10 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         writeJson(response, 403, { error: "invalid_host" });
         return;
       }
-      const catalog = request.url === "/mcp/computer" ? "computer" : "preview";
-      if (request.url !== MCP_ENDPOINT_PATH && request.url !== "/mcp/computer") {
+      const catalog = (Object.keys(CATALOG_PATHS) as McpCatalog[]).find(
+        (entry) => CATALOG_PATHS[entry] === request.url,
+      );
+      if (!catalog) {
         writeJson(response, 404, { error: "not_found" });
         return;
       }
@@ -309,15 +356,9 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
               request: asObject(entry) as JsonRpcRequest,
               token,
               catalog,
-              callTool: (token, name, args, id) =>
-                callTool(
-                  token,
-                  name,
-                  args,
-                  id === undefined
-                    ? undefined
-                    : `${scope.rpcIncarnation ?? scope.automationSessionId}:${id}`,
-                ),
+              ...(scope.integration ? { integration: scope.integration } : {}),
+              invocationKey: (id) => `${scope.rpcIncarnation ?? scope.automationSessionId}:${id}`,
+              callTool,
             }),
           ),
         )
@@ -367,7 +408,6 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
     return yield* Effect.die("Preview MCP server did not expose a port.");
   }
   expectedHostPort = port;
-  const url = `http://127.0.0.1:${port}${MCP_ENDPOINT_PATH}`;
 
   yield* Effect.addFinalizer(() =>
     Effect.promise(
@@ -378,17 +418,21 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
     ),
   );
 
+  const catalogUrl = (catalog: McpCatalog) => `http://127.0.0.1:${port}${CATALOG_PATHS[catalog]}`;
   return {
-    getUrl: (catalog = "preview") =>
-      catalog === "computer" ? `http://127.0.0.1:${port}/mcp/computer` : url,
+    getUrl: (catalog = "preview") => catalogUrl(catalog),
     createSessionConfig: (input) => {
       const catalog = input.catalog ?? "preview";
       if (catalog === "computer" && !computer) throw new Error("Computer host unavailable.");
+      if (catalog === "integration" && (!input.integration || !input.serverName))
+        throw new Error("Integration catalogs need a proxy session and a fixed server name.");
       const token = nextToken();
       const envVarName =
         catalog === "computer"
           ? `F5_COMPUTER_MCP_TOKEN_${randomUUID().replaceAll("-", "_").toUpperCase()}`
-          : nextEnvVarName();
+          : catalog === "integration"
+            ? `F5_INTEGRATION_MCP_TOKEN_${randomUUID().replaceAll("-", "_").toUpperCase()}`
+            : nextEnvVarName();
       const serverName =
         input.serverName ??
         chooseServerName(
@@ -414,6 +458,7 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         catalog,
         geometry,
         ...(computerScope ? { computerScope } : {}),
+        ...(catalog === "integration" ? { integration: input.integration! } : {}),
         issuedAt: new Date().toISOString(),
       });
       tokenByEnvVar.set(envVarName, token);
@@ -429,20 +474,26 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
           sessionsByToken.delete(storedToken);
         }
         computerScope?.dispose();
+        // Credential revocation tears the proxied child down (SIGTERM, then SIGKILL).
+        if (catalog === "integration") void input.integration!.dispose();
       };
 
       return {
         serverName,
         serverDefinition: {
           type: "http",
-          url: catalog === "computer" ? `http://127.0.0.1:${port}/mcp/computer` : url,
+          url: catalogUrl(catalog),
           enabled: true,
           bearerTokenEnvVar: envVarName,
           supportsParallelToolCalls: false,
-          startupTimeoutSec: 10,
+          // The integration spawns and verifies its child on the first list.
+          startupTimeoutSec: catalog === "integration" ? 60 : 10,
           // Explicit, above the longest broker deadline (60 s executor + 2 s grace).
           toolTimeoutSec:
-            (catalog === "computer" ? COMPUTER_TOOL_TIMEOUT_MS : PREVIEW_TOOL_TIMEOUT_MS) / 1000,
+            catalog === "integration"
+              ? INTEGRATION_TOOL_TIMEOUT_SEC
+              : (catalog === "computer" ? COMPUTER_TOOL_TIMEOUT_MS : PREVIEW_TOOL_TIMEOUT_MS) /
+                1000,
         },
         env: {
           [envVarName]: token,
