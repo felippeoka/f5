@@ -129,6 +129,16 @@ describe("link round trips", () => {
     expect(promptLinkAppPath("https://evil.test/new?prompt=hi")).toBeNull();
     expect(promptLinkAppPath("t3://app/index.html")).toBeNull();
   });
+
+  it("forwards only the parameters each route reads", () => {
+    expect(promptLinkAppPath("f5://thread/abc?prompt=x&diff=1&fileViewPath=.env")).toBe(
+      "/abc?prompt=x",
+    );
+    expect(
+      promptLinkAppPath("f5://new?prompt=x&repo=o/r&provider=codex&model=m&fileViewPath=.env"),
+    ).toBe("/new?prompt=x&repo=o%2Fr&provider=codex&model=m");
+    expect(promptLinkAppPath("f5://thread/abc")).toBe("/abc");
+  });
 });
 
 describe("promptLinkRepositoryOfRemote", () => {

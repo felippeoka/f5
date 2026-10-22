@@ -280,6 +280,18 @@ const RESERVED_ROUTES = new Set([
   "worktrees",
 ]);
 const DOT_SEGMENT = /\/\.\.?(?:[/?#]|$)/;
+// Only the parameters each route reads pass through, so a link cannot also open a panel such as
+// the file viewer (`?fileViewPath=.env`) next to the prompt.
+const NEW_LINK_PARAMS = ["prompt", "repo", "pr", "provider", "model"] as const;
+const THREAD_LINK_PARAMS = ["prompt"] as const;
+
+function allowedSearch(url: URL, keys: ReadonlyArray<string>): string {
+  const params = new URLSearchParams();
+  for (const key of keys)
+    for (const value of url.searchParams.getAll(key)) params.append(key, value);
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
 
 /**
  * The in-app route a prompt link opens, or null for anything that is not one. Only `new` and
@@ -291,7 +303,9 @@ export function promptLinkAppPath(value: string): string | null {
   const url = new URL(value);
   if (!APP_SCHEME.test(url.protocol)) return null;
   if (url.host === "new" && (url.pathname === "" || url.pathname === "/"))
-    return `/new${url.search}`;
+    return `/new${allowedSearch(url, NEW_LINK_PARAMS)}`;
   const thread = url.host === "thread" ? THREAD_ID.exec(url.pathname) : null;
-  return thread?.[1] && !RESERVED_ROUTES.has(thread[1]) ? `/${thread[1]}${url.search}` : null;
+  return thread?.[1] && !RESERVED_ROUTES.has(thread[1])
+    ? `/${thread[1]}${allowedSearch(url, THREAD_LINK_PARAMS)}`
+    : null;
 }
