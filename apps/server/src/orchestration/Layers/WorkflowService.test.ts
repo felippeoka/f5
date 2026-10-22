@@ -2519,15 +2519,16 @@ describe("WorkflowService", () => {
       }),
     );
 
-    const createdTitles = harness.dispatched
-      .filter(
-        (command): command is Extract<OrchestrationCommand, { type: "thread.create" }> =>
-          command.type === "thread.create",
-      )
-      .map((command) => command.title);
+    const createdThreads = harness.dispatched.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.create" }> =>
+        command.type === "thread.create",
+    );
+    const createdTitles = createdThreads.map((command) => command.title);
 
     expect(createdTitles).toContain("Branch A");
     expect(createdTitles).toContain("Branch B");
+    // Lanes are not Git branches; recording them trips the send-time branch check.
+    expect(createdThreads.map((command) => command.branch)).toEqual([null, null]);
     expect(createdTitles).not.toContain("Code review-only workflow Branch A");
     expect(createdTitles).not.toContain("Code review-only workflow Branch B");
   });
