@@ -10,6 +10,17 @@ const layer = it.layer(SqliteClient.layerMemory());
 layer("127_ClearPlanningWorkflowLaneBranches", (it) => {
   it.effect("skips databases without the projection tables", () => Migration0127);
 
+  it.effect("skips a minimal projection_threads without branch columns", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE projection_threads (thread_id TEXT PRIMARY KEY)`;
+      yield* sql`CREATE TABLE projection_planning_workflows (workflow_id TEXT PRIMARY KEY, workflow_json TEXT NOT NULL)`;
+      yield* Migration0127;
+      yield* sql`DROP TABLE projection_threads`;
+      yield* sql`DROP TABLE projection_planning_workflows`;
+    }),
+  );
+
   it.effect("clears lane labels only on planning workflow author threads", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

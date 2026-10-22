@@ -20,6 +20,16 @@ export default Effect.gen(function* () {
     return;
   }
 
+  // A repaired database can hold a minimal projection_threads without these columns; it has
+  // no lane labels to clear.
+  const columns = yield* sql<{ readonly name: string }>`
+    SELECT name FROM pragma_table_info('projection_threads')
+  `;
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has("branch") || !names.has("worktree_path")) {
+    return;
+  }
+
   yield* sql`
     UPDATE projection_threads
     SET branch = NULL
