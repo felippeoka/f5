@@ -3265,6 +3265,7 @@ function registerIpcHandlers(): void {
     entry: resolveBackendEntry(),
     launcherDirectory: Path.join(app.getPath("userData"), "cli"),
     home: OS.homedir(),
+    transientPaths: Boolean(process.env.APPIMAGE),
   });
   for (const [channel, action] of [
     ["desktop:cli-command-state", cliInstaller.state],

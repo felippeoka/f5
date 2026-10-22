@@ -97,6 +97,38 @@ it("reports the installed location when it is not on PATH", async () => {
   expect(result.onPath).toBe(false);
   expect(result.installedPaths.f5).toBe(path.join(f.systemBin, "f5"));
 });
+it("offers no CLI when the app runs from a temporary location, as an AppImage does", async () => {
+  const f = await fixture();
+  const appImage = createDesktopCliInstaller({
+    ...f.options,
+    platform: "linux",
+    transientPaths: true,
+  });
+  expect((await appImage.state()).supported).toBe(false);
+  await expect(appImage.install()).rejects.toThrow("AppImage");
+});
+it("stops reporting the commands as installed once the app they run has moved", async () => {
+  const f = await fixture();
+  await f.installer.install();
+  const moved = path.join(f.root, "moved runtime");
+  await fs.rename(f.options.executable, moved);
+  const relocated = createDesktopCliInstaller({ ...f.options, executable: moved });
+  const stale = await relocated.state();
+  expect(stale).toMatchObject({ onPath: false, installedPaths: { f5: null, t3: null } });
+  expect(stale.shadowedBy).toBeUndefined();
+
+  const repaired = await relocated.install();
+  expect(repaired).toMatchObject({
+    onPath: true,
+    installedPaths: { f5: path.join(f.systemBin, "f5") },
+  });
+  expect((await execute(path.join(f.systemBin, "f5"), ["x"])).stdout.split("\n")).toEqual([
+    "1",
+    f.entry,
+    "x",
+    "",
+  ]);
+});
 it("refuses an unowned launcher and disables symlink installation on Windows", async () => {
   const f = await fixture();
   await fs.mkdir(f.launcherDirectory, { recursive: true });

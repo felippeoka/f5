@@ -19,8 +19,13 @@ export function createDesktopCliInstaller(options: {
   platform?: NodeJS.Platform;
   path?: () => string;
   systemBin?: string;
+  /**
+   * The executable and entry move on every launch, as under an AppImage, which runs from a
+   * temporary mount. A launcher would break as soon as F5 quits, so none is offered.
+   */
+  transientPaths?: boolean;
 }) {
-  const supported = (options.platform ?? process.platform) !== "win32";
+  const supported = (options.platform ?? process.platform) !== "win32" && !options.transientPaths;
   const candidates = [options.systemBin ?? "/usr/local/bin", path.join(options.home, ".local/bin")];
   const launcher = path.join(options.launcherDirectory, "f5");
   const content = `#!/bin/sh\n${MARKER}ELECTRON_RUN_AS_NODE=1 exec ${quote(options.executable)} ${quote(options.entry)} "$@"\n`;
@@ -54,22 +59,32 @@ export function createDesktopCliInstaller(options: {
     }
     return null;
   };
+  // A launcher written by an earlier install can name an app that has since moved; the commands
+  // count as installed only while it runs this one, so installing again repairs it.
+  const launcherCurrent = async () => {
+    try {
+      return (await fs.readFile(launcher, "utf8")) === content;
+    } catch (error) {
+      if (missing(error)) return false;
+      throw error;
+    }
+  };
   const state = async (): Promise<DesktopCliCommandState> => {
     const installedPaths: Record<"f5" | "t3", string | null> = { f5: null, t3: null };
     if (!supported) return { supported, installedPaths, onPath: false };
     let shadowedBy: string | undefined;
     let onPath = true;
+    const current = await launcherCurrent();
     for (const command of COMMANDS) {
       for (const directory of candidates)
-        if (await ownLink(path.join(directory, command))) {
+        if (current && (await ownLink(path.join(directory, command)))) {
           installedPaths[command] = path.join(directory, command);
           break;
         }
       const first = await firstOnPath(command);
-      if (!first || !(await ownLink(first))) {
-        onPath = false;
-        if (first) shadowedBy ??= first;
-      }
+      const ours = first !== null && (await ownLink(first));
+      if (!current || !ours) onPath = false;
+      if (first && !ours) shadowedBy ??= first;
     }
     return { supported, installedPaths, onPath, ...(shadowedBy ? { shadowedBy } : {}) };
   };
@@ -97,7 +112,12 @@ export function createDesktopCliInstaller(options: {
     }
   };
   const performInstall = async () => {
-    if (!supported) throw new Error("Desktop CLI symlinks are available on macOS and Linux.");
+    if (!supported)
+      throw new Error(
+        options.transientPaths
+          ? "The CLI cannot be installed from an AppImage, which runs from a temporary location."
+          : "Desktop CLI symlinks are available on macOS and Linux.",
+      );
     const current = await state();
     if (current.shadowedBy)
       throw new Error(
