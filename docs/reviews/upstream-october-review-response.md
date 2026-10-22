@@ -3006,7 +3006,8 @@ New ports:
 - [t3code#14573](https://github.com/pingdotgg/t3code/pull/14573): a download
   from a preview tab the agent is driving saves to `preview-downloads` in the
   owning profile's state directory instead of opening a native Save dialog over the whole app.
-  A download the user starts keeps the dialog.
+  A download the user starts keeps the dialog. After review, each agent download is capped at
+  256 MiB and the folder keeps its 50 newest downloads, so a page cannot fill the disk.
 - [t3code#16961](https://github.com/pingdotgg/t3code/pull/16961), in part:
   preview sessions had no permission handler, and Electron approves every
   request then, so any page could read the clipboard, post notifications, ask
