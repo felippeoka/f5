@@ -6,6 +6,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import type { LinkedPrompt } from "@t3tools/shared/promptLinks";
+import { Schema } from "effect";
 import { resolveProjectProviderInstanceEnabled } from "@t3tools/shared/serverSettings";
 
 import { useComposerDraftStore } from "~/composerDraftStore";
@@ -70,16 +71,18 @@ export function applyLinkedModel(
   link: { readonly provider: string | null; readonly model: string | null },
 ): string | null {
   if (link.provider === null) return null;
+  const notSetUp = `The link asked for ${link.provider}, which is not set up here, so your default model is used.`;
+  // A link's provider is untrusted text; one that is not a valid id cannot name a provider here.
+  if (!Schema.is(ProviderInstanceId)(link.provider)) return notSetUp;
   const settings = cachedGlobalDraftSettings();
-  const instanceId = ProviderInstanceId.make(link.provider);
+  const instanceId = link.provider;
   const instance = settings.providerInstances[instanceId];
   const driver = instance?.driver ?? link.provider;
   const configured =
     isKnownProviderKind(driver) &&
     (instance !== undefined || link.provider in settings.providers) &&
     resolveProjectProviderInstanceEnabled(settings, undefined, instanceId);
-  if (!configured)
-    return `The link asked for ${link.provider}, which is not set up here, so your default model is used.`;
+  if (!configured) return notSetUp;
   const provider = driver as ProviderKind;
   const draft = useComposerDraftStore.getState();
   draft.setProvider(threadId, provider);

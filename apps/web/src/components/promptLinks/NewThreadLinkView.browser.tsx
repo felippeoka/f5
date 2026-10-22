@@ -61,6 +61,21 @@ it("puts a link without a repository in a new thread without a project and never
   expect(api.nextTurnQueue.submit).not.toHaveBeenCalled();
 });
 
+it("still places the prompt when the link names a malformed provider", async () => {
+  const threadId = ThreadId.makeUnsafe("malformed-provider-draft");
+  startScratchThread.mockResolvedValueOnce({ threadId, projectId: "scratch" });
+  await render(
+    <NewThreadLinkView search={search({ prompt: "Fix the build", provider: "foo.bar" })} />,
+  );
+
+  await vi.waitFor(() => expect(draftPrompt(threadId)).toBe("Fix the build"));
+  expect(toast.add).toHaveBeenCalledWith(
+    expect.objectContaining({
+      description: expect.stringContaining("foo.bar, which is not set up"),
+    }),
+  );
+});
+
 it("opens a link in the project whose remote matches its repository", async () => {
   const threadId = ThreadId.makeUnsafe("project-draft");
   api.projects.findByRepository.mockResolvedValueOnce([project]);
