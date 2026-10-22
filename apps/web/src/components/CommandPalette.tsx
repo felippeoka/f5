@@ -130,6 +130,24 @@ const FILE_SEARCH_LIMIT = 100;
 
 const ShortcutsDialog = lazy(() => import("./ShortcutsDialog"));
 
+/** Resolves a frame after the palette leaves the DOM, or after `timeoutMs`. */
+function afterPaletteCloses(timeoutMs = 1_000): Promise<void> {
+  const startedAt = performance.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (
+        document.querySelector("[data-palette-mode]") === null ||
+        performance.now() - startedAt > timeoutMs
+      ) {
+        requestAnimationFrame(() => resolve());
+        return;
+      }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+}
+
 function getLocalFileManagerName(platform: string): string {
   if (isMacPlatform(platform)) {
     return "Finder";
@@ -892,8 +910,16 @@ function OpenCommandPaletteDialog(props: {
         icon: <ListOrderedIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
           const panel = document.getElementById("next-turn-queue-panel");
-          panel?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          panel?.focus();
+          if (!panel) {
+            // The compact chat layout keeps the queue behind a status chip.
+            // Open it once the palette has closed and restored focus, so that
+            // restore does not dismiss the popover.
+            await afterPaletteCloses();
+            document.querySelector<HTMLElement>('[data-status-chip="queue"]')?.click();
+            return;
+          }
+          panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          panel.focus();
         },
       },
     );

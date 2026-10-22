@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { type QueueEditDraft, useNextTurnQueueStore } from "~/nextTurnQueueStore";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { SkillInlineChip } from "./SkillInlineChip";
@@ -69,21 +70,39 @@ export function NextTurnQueueRow({
 }) {
   const disabled = busy || item.status === "dispatching";
   const display = buildQueueRowDisplay(item);
-  const [editing, setEditing] = useState(false);
-  const [editText, setEditText] = useState(display.visibleText);
-  const [editModel, setEditModel] = useState(item.command.model ?? "");
-  const [editRuntimeMode, setEditRuntimeMode] = useState(item.command.runtimeMode);
   const continuation = item.command.presentation === "continuation";
-  const [editInteractionMode, setEditInteractionMode] = useState(item.command.interactionMode);
+  const draft = useNextTurnQueueStore(
+    (store) => store.byThreadId[snapshot.threadId]?.editDrafts[item.itemId] ?? null,
+  );
+  const setEditDraft = useNextTurnQueueStore((store) => store.setEditDraft);
+  const editing = draft !== null;
   const [nowMs, setNowMs] = useState(() => Date.now());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Only an edit the user just started takes focus; a draft restored when the
+  // panel remounts leaves focus where it is.
+  const focusEditorRef = useRef(false);
   const sortable = useSortable({ id: item.itemId, disabled });
 
   useEffect(() => {
-    if (!editing) return;
+    if (!editing || !focusEditorRef.current) return;
+    focusEditorRef.current = false;
     textareaRef.current?.focus();
     textareaRef.current?.select();
   }, [editing]);
+
+  const updateDraft = (patch: Partial<QueueEditDraft>) => {
+    if (draft) setEditDraft(snapshot.threadId, item.itemId, { ...draft, ...patch });
+  };
+  const stopEditing = () => setEditDraft(snapshot.threadId, item.itemId, null);
+  const saveDraft = () => {
+    if (!draft) return;
+    void onUpdate(item, {
+      text: draft.text,
+      model: draft.model.trim() || undefined,
+      runtimeMode: draft.runtimeMode,
+      interactionMode: draft.interactionMode,
+    }).then(stopEditing);
+  };
 
   useEffect(() => {
     if (!item.notBefore) return;
@@ -153,25 +172,20 @@ export function NextTurnQueueRow({
         }
       }}
     >
-      {editing ? (
+      {draft ? (
         <div className="space-y-2">
           <Textarea
             ref={textareaRef}
             size="sm"
-            value={editText}
-            onChange={(event) => setEditText(event.currentTarget.value)}
+            value={draft.text}
+            onChange={(event) => updateDraft({ text: event.currentTarget.value })}
             onKeyDown={(event) => {
               event.stopPropagation();
               if (event.key === "Escape") {
-                setEditing(false);
+                stopEditing();
               } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
-                void onUpdate(item, {
-                  text: editText,
-                  model: editModel.trim() || undefined,
-                  runtimeMode: editRuntimeMode,
-                  interactionMode: editInteractionMode,
-                }).then(() => setEditing(false));
+                saveDraft();
               }
             }}
             aria-label="Queued turn text"
@@ -181,15 +195,15 @@ export function NextTurnQueueRow({
               className="h-8 rounded-md border bg-background px-2 text-xs"
               aria-label="Queued turn model"
               placeholder="Thread model"
-              value={editModel}
-              onChange={(event) => setEditModel(event.currentTarget.value)}
+              value={draft.model}
+              onChange={(event) => updateDraft({ model: event.currentTarget.value })}
             />
             <select
               className="h-8 rounded-md border bg-background px-2 text-xs"
               aria-label="Queued turn mode"
-              value={editInteractionMode}
+              value={draft.interactionMode}
               onChange={(event) =>
-                setEditInteractionMode(event.currentTarget.value as "default" | "plan")
+                updateDraft({ interactionMode: event.currentTarget.value as "default" | "plan" })
               }
             >
               <option value="default">Default mode</option>
@@ -198,8 +212,10 @@ export function NextTurnQueueRow({
             <select
               className="h-8 rounded-md border bg-background px-2 text-xs"
               aria-label="Queued turn access"
-              value={editRuntimeMode}
-              onChange={(event) => setEditRuntimeMode(event.currentTarget.value as RuntimeMode)}
+              value={draft.runtimeMode}
+              onChange={(event) =>
+                updateDraft({ runtimeMode: event.currentTarget.value as RuntimeMode })
+              }
             >
               {RUNTIME_MODE_VALUES.map((mode) => (
                 <option key={mode} value={mode}>
@@ -214,21 +230,14 @@ export function NextTurnQueueRow({
             </p>
           ) : null}
           <div className="flex justify-end gap-1.5">
-            <Button type="button" variant="ghost" size="xs" onClick={() => setEditing(false)}>
+            <Button type="button" variant="ghost" size="xs" onClick={stopEditing}>
               Cancel
             </Button>
             <Button
               type="button"
               size="xs"
-              disabled={editText.trim().length === 0}
-              onClick={() =>
-                void onUpdate(item, {
-                  text: editText,
-                  model: editModel.trim() || undefined,
-                  runtimeMode: editRuntimeMode,
-                  interactionMode: editInteractionMode,
-                }).then(() => setEditing(false))
-              }
+              disabled={draft.text.trim().length === 0}
+              onClick={saveDraft}
             >
               Save
             </Button>
@@ -358,11 +367,13 @@ export function NextTurnQueueRow({
               disabled={disabled || continuation}
               aria-label="Edit queued turn"
               onClick={() => {
-                setEditText(display.visibleText);
-                setEditModel(item.command.model ?? "");
-                setEditRuntimeMode(item.command.runtimeMode);
-                setEditInteractionMode(item.command.interactionMode);
-                setEditing(true);
+                focusEditorRef.current = true;
+                setEditDraft(snapshot.threadId, item.itemId, {
+                  text: display.visibleText,
+                  model: item.command.model ?? "",
+                  runtimeMode: item.command.runtimeMode,
+                  interactionMode: item.command.interactionMode,
+                });
               }}
             >
               <PencilIcon />
