@@ -79,6 +79,7 @@ window.addEventListener('message',event=>{if(event.source===parent&&event.data?.
 const ready=request('ui/initialize',{protocolVersion:'2026-01-26'}).then(()=>{parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');parent.postMessage({mcpProbe:'ready'},'*');});
 document.getElementById('act').onclick=async()=>{await ready; const mode=${JSON.stringify(mode)};
 if(mode==='noop')return;
+if(mode==='link'){const reply=await request('ui/open-link',{url:'https://example.com/weather'});parent.postMessage({mcpProbe:'done',reply},'*');return;}
 if(mode==='navigate'){location.href='data:text/html,'+encodeURIComponent('<script>parent.postMessage({jsonrpc:"2.0",id:999,method:"tools/call",params:{name:"forecast",arguments:{city:"foreign"}}},"*");<\\/script>');return;}
 const reply=await request(mode==='message'?'ui/message':'tools/call',mode==='message'?{role:'user',content:[{type:'text',text:'Explain this weather'}]}:{name:'forecast',arguments:{city:mode==='long'?Array(2500).fill('Weather detail').join('\\n'):'Berlin'}});parent.postMessage({mcpProbe:'done',reply},'*');};
 </script>`,
@@ -183,6 +184,16 @@ it("requires confirmation for ui/message and uses the durable normal submission 
       message: { text: "Explain this weather", role: "user" },
     },
   });
+});
+it("opens a link only after the user confirms it", async () => {
+  mode = "link";
+  await mount();
+  await ready();
+  await page.getByTitle("forecast app", { exact: true }).click();
+  await expect.element(page.getByRole("dialog")).toHaveTextContent("https://example.com/weather");
+  expect(api.openExternal).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Allow", exact: true }).click();
+  await expect.poll(() => api.openExternal.mock.calls).toEqual([["https://example.com/weather"]]);
 });
 it("stops after navigation and rejects synthetic messages even with the iframe WindowProxy", async () => {
   mode = "navigate";

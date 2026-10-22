@@ -207,8 +207,11 @@ export function McpAppFrame({ app, threadId }: { app: McpAppView; threadId: Thre
         await active();
         await ensureNativeApi().mcpApps.updateModelContext({ ...base, ...input });
       },
+      // The parent cannot tell whether a click inside the app asked for a link or a download, so
+      // the user confirms each one, as with messages; an app cannot open them in a loop.
       openLink: async (url) => {
         await active();
+        await confirm("Open this link?", url);
         await ensureNativeApi().shell.openExternal(url);
       },
       sendMessage: async (text) => {
@@ -253,6 +256,10 @@ export function McpAppFrame({ app, threadId }: { app: McpAppView; threadId: Thre
             25 * 1024 * 1024
         )
           throw new McpAppHostRefusal("The download exceeds its size limit.");
+        await confirm(
+          files.length === 1 ? "Download this file?" : `Download ${files.length} files?`,
+          files.map((file) => (file._tag === "link" ? file.uri : file.name)).join("\n"),
+        );
         for (const file of files) {
           if (file._tag === "link") {
             if (!/^https?:\/\//i.test(file.uri))
