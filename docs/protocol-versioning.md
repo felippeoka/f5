@@ -98,3 +98,9 @@ optional move summaries on transition snapshots. Private move snapshots and clea
 progress extend the existing transition JSON record with optional fields, so older
 persisted transitions remain readable. An additive partial index bounds startup recovery
 to unfinished moves and pending private-ref cleanup.
+
+Upstream Ports uses version 31. It adds the `upstreamPorts.*` methods (`listProjects`,
+`getOverview`, `listTopics`, `getTopic`, `decide`, `acceptSuggestions`, `run`, `startPort`,
+`unlinkPort`, `getPortPrompt`, `resolvePublication`, `addRemote`, `takeOverWriter`) and the
+`upstreamPorts.changed` push channel, which carries invalidation only. Older clients have no
+Upstream page, so the bump only forces them to reload before calling the new methods.

@@ -11,6 +11,9 @@ import {
   AGENTS_WS_METHODS,
   AGENT_BRIDGE_WS_CHANNELS,
   AGENT_BRIDGE_WS_METHODS,
+  UPSTREAM_PORTS_WS_CHANNELS,
+  UPSTREAM_PORTS_WS_METHODS,
+  type UpstreamPortsChanged,
   ELICITATION_WS_METHODS,
   USAGE_WS_METHODS,
   type AgentsSnapshot,
@@ -97,6 +100,7 @@ const prHubChangedListeners = new Set<(payload: PrHubChanged) => void>();
 const prHubAdvisoriesUpdatedListeners = new Set<(payload: PrHubAdvisoriesChanged) => void>();
 const agentsSnapshotUpdatedListeners = new Set<(payload: AgentsSnapshot) => void>();
 const agentBridgeStateChangedListeners = new Set<(payload: AgentBridgeStateChanged) => void>();
+const upstreamPortsChangedListeners = new Set<(payload: UpstreamPortsChanged) => void>();
 
 function decodeRetryWorkflowResult(result: unknown) {
   return result === undefined
@@ -264,6 +268,16 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(AGENT_BRIDGE_WS_CHANNELS.stateChanged, (message) => {
     const payload = message.data;
     for (const listener of agentBridgeStateChangedListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(UPSTREAM_PORTS_WS_CHANNELS.changed, (message) => {
+    const payload = message.data;
+    for (const listener of upstreamPortsChangedListeners) {
       try {
         listener(payload);
       } catch {
@@ -871,6 +885,29 @@ export function createWsNativeApi(): NativeApi {
       pauseTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.pauseTask, input),
       resumeTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.resumeTask, input),
       cancelTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.cancelTask, input),
+    },
+    upstreamPorts: {
+      listProjects: () => transport.request(UPSTREAM_PORTS_WS_METHODS.listProjects, {}),
+      getOverview: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.getOverview, input),
+      listTopics: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.listTopics, input),
+      getTopic: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.getTopic, input),
+      decide: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.decide, input),
+      acceptSuggestions: (input) =>
+        transport.request(UPSTREAM_PORTS_WS_METHODS.acceptSuggestions, input),
+      run: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.run, input),
+      startPort: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.startPort, input),
+      unlinkPort: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.unlinkPort, input),
+      getPortPrompt: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.getPortPrompt, input),
+      resolvePublication: (input) =>
+        transport.request(UPSTREAM_PORTS_WS_METHODS.resolvePublication, input),
+      addRemote: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.addRemote, input),
+      takeOverWriter: (input) => transport.request(UPSTREAM_PORTS_WS_METHODS.takeOverWriter, input),
+      onChanged: (callback) => {
+        upstreamPortsChangedListeners.add(callback);
+        return () => {
+          upstreamPortsChangedListeners.delete(callback);
+        };
+      },
     },
     agents: {
       getSnapshot: (input) => transport.request(AGENTS_WS_METHODS.getSnapshot, input ?? {}),

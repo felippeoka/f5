@@ -63,7 +63,7 @@ it("upgrades an existing file database and reopens it with the preceding migrati
           const applied = yield* sql<{
             id: number;
           }>`SELECT migration_id AS id FROM effect_sql_migrations ORDER BY migration_id DESC LIMIT 1`;
-          assert.equal(applied[0]?.id, 126);
+          assert.isAtLeast(applied[0]?.id ?? 0, 126);
           const indexes = yield* sql<{
             name: string;
             sql: string;

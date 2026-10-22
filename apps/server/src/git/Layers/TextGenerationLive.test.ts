@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { Effect, PubSub, Result, Stream } from "effect";
+import { Effect, PubSub, Result, Schema, Stream } from "effect";
 import { describe, expect } from "vitest";
 
 import { ProviderInstanceId } from "@t3tools/contracts";
@@ -9,7 +9,11 @@ import type { ProviderInstance } from "../../provider/ProviderDriver.ts";
 import type { ProviderInstanceRegistryShape } from "../../provider/Services/ProviderInstanceRegistry.ts";
 import type { TextGenerationShape } from "../Services/TextGeneration.ts";
 
-import { resolveAuxiliaryTextModel, makeTextGenerationFromRegistry } from "./TextGenerationLive.ts";
+import {
+  resolveAuxiliaryTextModel,
+  makeTextGenerationFromRegistry,
+  supportsNoWorkspaceIsolation,
+} from "./TextGenerationLive.ts";
 
 const makeStubTextGeneration = (overrides: Partial<TextGenerationShape>): TextGenerationShape => ({
   generateCommitMessage: () =>
@@ -116,6 +120,36 @@ describe("makeTextGenerationFromRegistry", () => {
         expect(result.failure.operation).toBe("generateBranchName");
         expect(result.failure.detail).toContain("missing_instance");
       }
+    }),
+  );
+});
+
+describe("no-workspace isolation", () => {
+  const schema = { groups: [] } as never;
+  const succeed = makeStubTextGeneration({ generateStructuredJson: () => Effect.succeed(schema) });
+
+  it.effect("routes isolated requests only to Claude instances", () =>
+    Effect.gen(function* () {
+      const tg = makeTextGenerationFromRegistry(
+        makeStubRegistry([
+          makeStubInstance(ProviderInstanceId.make("claudeAgent"), succeed),
+          makeStubInstance(ProviderInstanceId.make("codex"), succeed),
+        ]),
+      );
+      const input = (instance: string) => ({
+        cwd: process.cwd(),
+        operation: "upstreamTriage",
+        prompt: "x",
+        outputSchema: Schema.Struct({ groups: Schema.Array(Schema.String) }),
+        modelSelection: createModelSelection(ProviderInstanceId.make(instance), "m"),
+        isolation: "no-workspace" as const,
+      });
+      expect(yield* tg.generateStructuredJson(input("claudeAgent"))).toBe(schema);
+      const codex = yield* tg.generateStructuredJson(input("codex")).pipe(Effect.flip);
+      expect(codex.kind).toBe("unsupported");
+      expect(supportsNoWorkspaceIsolation("claudeAgent")).toBe(true);
+      expect(supportsNoWorkspaceIsolation("codex")).toBe(false);
+      expect(supportsNoWorkspaceIsolation("cursor")).toBe(false);
     }),
   );
 });

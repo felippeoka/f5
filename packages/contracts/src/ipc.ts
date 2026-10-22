@@ -55,6 +55,28 @@ import type {
   BotTask,
 } from "./agentBridge";
 import type { DesktopComputerAutomationBridge } from "./computerAutomation";
+import type {
+  UpstreamAcceptSuggestionsInput,
+  UpstreamDecideInput,
+  UpstreamDecideResult,
+  UpstreamGetPortPromptInput,
+  UpstreamGetPortPromptResult,
+  UpstreamGetTopicInput,
+  UpstreamListTopicsInput,
+  UpstreamListTopicsResult,
+  UpstreamOverview,
+  UpstreamPortsChanged,
+  UpstreamPortsListProjectsResult,
+  UpstreamPortsProjectInput,
+  UpstreamResolvePublicationInput,
+  UpstreamRevisionResult,
+  UpstreamRunInput,
+  UpstreamRunResult,
+  UpstreamStartPortInput,
+  UpstreamStartPortResult,
+  UpstreamTopicDetail,
+  UpstreamUnlinkPortInput,
+} from "./upstreamPorts";
 import type { PullRequestKey } from "./prHub";
 import type {
   ForgeAccount,
@@ -1054,6 +1076,23 @@ export interface NativeApi {
     inspectRun: (
       input: WorkflowPlatformInspectRunInput,
     ) => Promise<WorkflowPlatformInspectRunResult>;
+  };
+  upstreamPorts: {
+    listProjects: () => Promise<UpstreamPortsListProjectsResult>;
+    getOverview: (input: UpstreamPortsProjectInput) => Promise<UpstreamOverview>;
+    listTopics: (input: UpstreamListTopicsInput) => Promise<UpstreamListTopicsResult>;
+    getTopic: (input: UpstreamGetTopicInput) => Promise<UpstreamTopicDetail>;
+    decide: (input: UpstreamDecideInput) => Promise<UpstreamDecideResult>;
+    acceptSuggestions: (input: UpstreamAcceptSuggestionsInput) => Promise<UpstreamDecideResult>;
+    run: (input: UpstreamRunInput) => Promise<UpstreamRunResult>;
+    startPort: (input: UpstreamStartPortInput) => Promise<UpstreamStartPortResult>;
+    unlinkPort: (input: UpstreamUnlinkPortInput) => Promise<UpstreamRevisionResult>;
+    getPortPrompt: (input: UpstreamGetPortPromptInput) => Promise<UpstreamGetPortPromptResult>;
+    resolvePublication: (input: UpstreamResolvePublicationInput) => Promise<UpstreamRevisionResult>;
+    addRemote: (input: UpstreamPortsProjectInput) => Promise<UpstreamRevisionResult>;
+    takeOverWriter: (input: UpstreamPortsProjectInput) => Promise<UpstreamRevisionResult>;
+    /** Invalidation only: refetch when it fires. */
+    onChanged: (callback: (payload: UpstreamPortsChanged) => void) => () => void;
   };
   prHub: {
     listAccounts: () => Promise<ReadonlyArray<ForgeAccount>>;

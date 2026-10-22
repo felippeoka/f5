@@ -33,6 +33,7 @@ import {
   buildThreadTitlePrompt,
 } from "../Prompts.ts";
 import {
+  classifyCliFailureKind,
   normalizeCliError,
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -246,6 +247,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
             detail.length > 0
               ? `Claude CLI command failed: ${detail}`
               : `Claude CLI command failed with code ${exitCode}.`,
+          kind: classifyCliFailureKind(detail),
         });
       }
 
@@ -259,7 +261,11 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         Option.match({
           onNone: () =>
             Effect.fail(
-              new TextGenerationError({ operation, detail: "Claude CLI request timed out." }),
+              new TextGenerationError({
+                operation,
+                detail: "Claude CLI request timed out.",
+                kind: "timeout",
+              }),
             ),
           onSome: (value) => Effect.succeed(value),
         }),
@@ -276,6 +282,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           new TextGenerationError({
             operation,
             detail: "Claude CLI returned unexpected output format.",
+            kind: "invalid-output",
             cause,
           }),
         ),
@@ -291,6 +298,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           new TextGenerationError({
             operation,
             detail: "Claude returned invalid structured output.",
+            kind: "invalid-output",
             cause,
           }),
         ),
