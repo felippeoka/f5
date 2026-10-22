@@ -18,6 +18,7 @@ import {
   ProjectCloneJob,
   ProjectEnsureScratchResult,
   ProjectCreateNewResult,
+  ProjectFindByRepositoryResult,
   AGENTS_WS_CHANNELS,
   AGENTS_WS_METHODS,
   AGENT_BRIDGE_WS_CHANNELS,
@@ -667,6 +668,10 @@ export function createWsNativeApi(): NativeApi {
       createNew: async (input) =>
         Schema.decodeUnknownSync(ProjectCreateNewResult)(
           await transport.request(WS_METHODS.projectsCreateNew, input),
+        ),
+      findByRepository: async (input) =>
+        Schema.decodeUnknownSync(ProjectFindByRepositoryResult)(
+          await transport.request(WS_METHODS.projectsFindByRepository, input),
         ),
       getCheckedInConfig: (input) =>
         transport.request(WS_METHODS.projectsGetCheckedInConfig, input),

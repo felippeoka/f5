@@ -39,6 +39,7 @@ import {
 import { Button } from "../components/ui/button";
 import { toastManager } from "../components/ui/toast";
 import { workspaceIdentityForRoot } from "../components/fileTreeDragMention";
+import { useThreadLinkPrompt } from "../components/promptLinks/useThreadLinkPrompt";
 import { useComposerDraftStore } from "../composerDraftStore";
 import {
   clearFileViewSearchParams,
@@ -357,6 +358,7 @@ function ChatThreadRouteView() {
       : null,
   );
   const routeThreadExists = threadExists || draftThread !== null;
+  useThreadLinkPrompt(threadId, startupReady && routeThreadExists);
   useContextDocumentTitle({
     projectName: activeProject?.name ?? null,
     itemTitle: thread?.title ?? (draftThread ? "New thread" : null),

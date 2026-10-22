@@ -1,6 +1,12 @@
 "use client";
 
 import { openProjectCloneDialog } from "./ProjectCloneController";
+import {
+  copyPromptLink,
+  promptLinkFor,
+  promptLinkRepositoryOf,
+} from "./promptLinks/copyPromptLink";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { openProjectCreateNewDialog } from "./ProjectCreateNewController";
 import { useTheme } from "../hooks/useTheme";
 import { getAvailableThemePalettes } from "../themePalette";
@@ -26,6 +32,7 @@ import {
   FolderPlusIcon,
   HomeIcon,
   KeyboardIcon,
+  LinkIcon,
   ListOrderedIcon,
   MessageSquareIcon,
   PauseCircleIcon,
@@ -923,6 +930,31 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.newScratch",
       run: async () => {
         await startScratchThread();
+      },
+    });
+
+  if (routeThreadId)
+    actionItems.push({
+      kind: "action",
+      value: "action:copy-prompt-link",
+      searchTerms: ["copy", "prompt", "link", "share", "url"],
+      title: "Copy prompt link",
+      icon: <LinkIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const prompt =
+          useComposerDraftStore.getState().draftsByThreadId[routeThreadId]?.prompt ?? "";
+        const project = projects.find((entry) => entry.id === currentProjectId);
+        const cwd = isScratchProject(project)
+          ? null
+          : threadWorkspaceCwd(activeThread ?? activeDraftThread, project);
+        const status = cwd
+          ? await ensureNativeApi()
+              .git.status({ cwd, includeRemote: false })
+              .catch(() => null)
+          : null;
+        await copyPromptLink(
+          promptLinkFor(prompt, { repository: promptLinkRepositoryOf(status?.sourceControl) }),
+        );
       },
     });
 

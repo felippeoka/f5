@@ -3,6 +3,7 @@ import { ThreadFindContext } from "./threadFindContext";
 import { highlightThreadFind } from "./threadFindHighlights";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
+import type { PromptLinkRepository } from "@t3tools/shared/promptLinks";
 import { NativeFilePreview } from "./NativeFilePreview";
 import { AttachmentFileChip } from "./AttachmentFileChip";
 import { ChatAssetImage } from "../ChatAssetImage";
@@ -82,6 +83,7 @@ import { CommandTranscriptCard } from "./CommandTranscriptCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { PromptLinkCopyButton } from "../promptLinks/PromptLinkCopyButton";
 import { UserMessageRevertPopover } from "./UserMessageRevertPopover";
 import { computeRevertImpact } from "./revertImpact";
 import { AssistantMessageActions } from "./AssistantMessageActions";
@@ -347,6 +349,8 @@ export interface RevertReopenRequest {
 export interface ChatDiffContext {
   threadId: ThreadId | null;
   isGitRepo: boolean;
+  /** The GitHub repository a copied prompt link names, when the thread's remote has one. */
+  promptLinkRepository?: PromptLinkRepository | null;
   inferredCheckpointTurnCountByTurnId: Record<TurnId, number>;
   expandedFileChangeDiffs: Record<string, boolean>;
   fileChangeSummariesById: Record<string, OrchestrationFileChangeSummary>;
@@ -368,6 +372,7 @@ function formatInlineDiffFileCountLabel(fileCount: number): string {
 const EMPTY_CHAT_DIFF_CONTEXT: ChatDiffContext = {
   threadId: null,
   isGitRepo: false,
+  promptLinkRepository: null,
   inferredCheckpointTurnCountByTurnId: {},
   expandedFileChangeDiffs: {},
   fileChangeSummariesById: {},
@@ -1039,6 +1044,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       markdownCwd,
       resolvedTheme,
       isGitRepo: chatDiffContext.isGitRepo,
+      promptLinkRepository: chatDiffContext.promptLinkRepository ?? null,
       canRestoreFiles,
       revertDisabledReason: effectiveRevertDisabledReason,
       revertPreferenceKey,
@@ -1055,6 +1061,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       allDirectoriesExpanded,
       canRestoreFiles,
       chatDiffContext.isGitRepo,
+      chatDiffContext.promptLinkRepository,
       effectiveRevertDisabledReason,
       isWorking,
       markdownCwd,
@@ -3485,6 +3492,7 @@ interface TimelineRowContextValue {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   isGitRepo: boolean;
+  promptLinkRepository: PromptLinkRepository | null;
   canRestoreFiles: boolean | undefined;
   revertDisabledReason: string | null;
   revertPreferenceKey: string | undefined;
@@ -3728,6 +3736,7 @@ function UserMessageRowContent(props: {
     hasImageActionMenu,
     isGitRepo,
     nativeSessionCapabilities,
+    promptLinkRepository,
     resolvedTheme,
     revertDisabledReason,
     revertPreferenceKey,
@@ -3850,6 +3859,12 @@ function UserMessageRowContent(props: {
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-(--duration-fast) focus-within:opacity-100 group-hover/user-message:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
           {displayedUserMessage.copyText && (
             <MessageCopyButton text={displayedUserMessage.copyText} />
+          )}
+          {displayedUserMessage.copyText && (
+            <PromptLinkCopyButton
+              prompt={displayedUserMessage.copyText}
+              repository={promptLinkRepository}
+            />
           )}
           {threadId &&
             row.message.turnId &&

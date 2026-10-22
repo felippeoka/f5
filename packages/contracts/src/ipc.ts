@@ -136,6 +136,8 @@ import type {
   ProjectEnsureScratchResult,
   ProjectCreateNewInput,
   ProjectCreateNewResult,
+  ProjectFindByRepositoryInput,
+  ProjectFindByRepositoryResult,
   ProjectListDirectoryInput,
   ProjectListEntriesResult,
   ProjectReadFileInput,
@@ -858,6 +860,9 @@ export interface NativeApi {
     cloneList: () => Promise<ReadonlyArray<ProjectCloneJob>>;
     ensureScratch: () => Promise<ProjectEnsureScratchResult>;
     createNew: (input: ProjectCreateNewInput) => Promise<ProjectCreateNewResult>;
+    findByRepository: (
+      input: ProjectFindByRepositoryInput,
+    ) => Promise<ProjectFindByRepositoryResult>;
     cloneCancel: (input: ProjectCloneCancelInput) => Promise<void>;
     listDirectory: (input: ProjectListDirectoryInput) => Promise<ProjectListEntriesResult>;
     listEntries: (input: ProjectListEntriesInput) => Promise<ProjectListEntriesResult>;

@@ -322,6 +322,7 @@ import {
   MessagesTimeline,
   type MessagesTimelineEmptyState,
 } from "./chat/MessagesTimeline";
+import { promptLinkRepositoryOf } from "./promptLinks/copyPromptLink";
 import { OlderActivityHistoryControl } from "./chat/OlderActivityHistoryControl";
 import { NewerMessageHistoryControl } from "./chat/NewerMessageHistoryControl";
 
@@ -2644,6 +2645,10 @@ export default memo(function ChatView({
       ),
     [repositoryStatus.data?.pr, repositoryStatus.data?.sourceControl],
   );
+  const promptLinkRepository = useMemo(
+    () => promptLinkRepositoryOf(repositoryStatus.data?.sourceControl),
+    [repositoryStatus.data?.sourceControl],
+  );
 
   const branchesQuery = useQuery(
     gitBranchesQueryOptions({
@@ -2850,6 +2855,7 @@ export default memo(function ChatView({
       threadId: activeThread?.id ?? null,
       isGitRepo:
         branchesQuery.data?.isRepo === true || branchesQuery.data?.worktreeMissing === true,
+      promptLinkRepository,
       inferredCheckpointTurnCountByTurnId,
       expandedFileChangeDiffs,
       fileChangeSummariesById,
@@ -2865,6 +2871,7 @@ export default memo(function ChatView({
       inferredCheckpointTurnCountByTurnId,
       onToggleFileChangeDiff,
       onOpenFileChangeDiff,
+      promptLinkRepository,
     ],
   );
   const splitTerminalShortcutLabel = useMemo(

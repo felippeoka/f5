@@ -6235,6 +6235,46 @@ describe("WebSocket Server", () => {
     ).toMatchObject({ title: "My App", workspaceRoot: result.workspaceRoot, kind: "standard" });
   });
 
+  it("finds the projects whose GitHub remote names a repository", async () => {
+    const repo = (remote: string) => {
+      const folder = makeTempDir("f5-ws-find-repo-");
+      execFileSync("git", ["init", "-q"], { cwd: folder });
+      execFileSync("git", ["remote", "add", "origin", remote], { cwd: folder });
+      return folder;
+    };
+    const matching = repo("git@github.com:Lopes-Felipe/F5.git");
+    const other = repo("https://github.com/lopes-felipe/f5-docs.git");
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    for (const [projectId, workspaceRoot] of [
+      ["project-find-match", matching],
+      ["project-find-other", other],
+    ] as const) {
+      const created = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+        type: "project.create",
+        commandId: `cmd-${projectId}`,
+        projectId,
+        title: projectId,
+        workspaceRoot,
+        defaultModel: "gpt-5-codex",
+        createdAt: new Date().toISOString(),
+      });
+      expect(created.error).toBeUndefined();
+    }
+
+    const response = await sendRequest(ws, WS_METHODS.projectsFindByRepository, {
+      owner: "lopes-felipe",
+      name: "f5",
+    });
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual([
+      { projectId: "project-find-match", title: "project-find-match", workspaceRoot: matching },
+    ]);
+  });
+
   it("keeps file and Git requests below the scratch root inside one thread folder", async () => {
     const stateDir = makeTempDir("f5-ws-scratch-state-");
     const folder = path.join(stateDir, "scratch", "2026-10-22-notes-abc12345");

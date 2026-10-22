@@ -296,6 +296,17 @@ export const ProjectCreateNewResult = Schema.Struct({
   warning: Schema.NullOr(Schema.String),
 });
 export type ProjectCreateNewResult = typeof ProjectCreateNewResult.Type;
+
+/** Projects whose Git remotes point at one GitHub repository, for prompt links. */
+export const ProjectFindByRepositoryInput = Schema.Struct({
+  owner: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
+});
+export type ProjectFindByRepositoryInput = typeof ProjectFindByRepositoryInput.Type;
+export const ProjectFindByRepositoryResult = Schema.Array(
+  Schema.Struct({ projectId: ProjectId, title: Schema.String, workspaceRoot: Schema.String }),
+);
+export type ProjectFindByRepositoryResult = typeof ProjectFindByRepositoryResult.Type;
 export const ProjectCloneJob = Schema.Struct({
   ...ProjectCloneInput.fields,
   destination: Schema.String,

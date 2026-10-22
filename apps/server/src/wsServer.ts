@@ -26,6 +26,7 @@ import {
   type GitWorkspaceSwitchHandler,
 } from "./git/workspaceSwitch.ts";
 import { inspectAttachableWorkspace } from "./project/workspaceAttachment.ts";
+import { discoverSourceControlProviderIdentities } from "./sourceControl/discovery.ts";
 import {
   initializeNewProject,
   projectFolderSlug,
@@ -4855,6 +4856,36 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             ),
           );
         return { projectId, workspaceRoot: created.folder, warning: created.warning };
+      }
+      case WS_METHODS.projectsFindByRepository: {
+        const body = stripRequestTag(request.body);
+        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+        const model = yield* orchestrationEngine.getReadModel();
+        const owner = body.owner.toLowerCase();
+        const name = body.name.toLowerCase().replace(/\.git$/, "");
+        const matches = [];
+        for (const project of model.projects) {
+          if (project.deletedAt !== null || isScratchProject(project)) continue;
+          const remotes = yield* git
+            .listRemotes(project.workspaceRoot)
+            .pipe(Effect.orElseSucceed(() => []));
+          const matched = discoverSourceControlProviderIdentities(remotes, {
+            githubHosts: ["github.com"],
+          }).some(
+            (identity) =>
+              identity.kind === "github" &&
+              identity.host?.toLowerCase() === "github.com" &&
+              identity.owner?.toLowerCase() === owner &&
+              identity.repository?.toLowerCase() === name,
+          );
+          if (matched)
+            matches.push({
+              projectId: project.id,
+              title: project.title,
+              workspaceRoot: project.workspaceRoot,
+            });
+        }
+        return matches;
       }
       case WS_METHODS.projectsCloneCancel: {
         yield* projectClones.cancel(request.body.operationId);
