@@ -28,6 +28,16 @@ describe("PromptLinkInbox", () => {
     expect(inbox.take()).toEqual([]);
   });
 
+  it("gives a link only to the profile it was sent to", () => {
+    const inbox = new PromptLinkInbox("f5");
+    inbox.receive("f5://new?prompt=work", "work");
+    inbox.receive("f5://new?prompt=any", null);
+    // A background window of another profile loading meanwhile takes only the unaddressed link.
+    expect(inbox.take("personal")).toEqual(["f5://new?prompt=any"]);
+    expect(inbox.take("work")).toEqual(["f5://new?prompt=work"]);
+    expect(inbox.take("work")).toEqual([]);
+  });
+
   it("keeps only the most recent links", () => {
     const inbox = new PromptLinkInbox("f5");
     for (let index = 0; index < 12; index++) inbox.receive(`f5://new?prompt=${index}`);

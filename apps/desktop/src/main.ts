@@ -3207,7 +3207,9 @@ function registerPromptLinkProtocol(): void {
  * F5. Renderers take queued links when they load, when told, and when their window gains focus.
  */
 function receivePromptLink(url: string): void {
-  if (!promptLinks.receive(url)) {
+  // Before the app is ready no profile window exists, so the first one to load takes the link.
+  const profileId = app.isReady() ? reopenTargetProfileId() : null;
+  if (!promptLinks.receive(url, profileId)) {
     writeDesktopLogHeader("prompt link ignored: not a link this build opens");
     return;
   }
@@ -3217,11 +3219,15 @@ function receivePromptLink(url: string): void {
     if (!window.isDestroyed()) window.webContents.send(PROMPT_LINKS_AVAILABLE_CHANNEL);
 }
 
+/** The profile a reopen brings forward: the focused window's, else the last one opened. */
+function reopenTargetProfileId(): string {
+  const window = BrowserWindow.getFocusedWindow();
+  return (window && profileByWebContentsId.get(window.webContents.id)) ?? lastOpenedProfileId;
+}
+
 function reopenApplication(): void {
   if (!app.isReady() || isQuitting) return;
-  const window = BrowserWindow.getFocusedWindow();
-  const profileId =
-    (window && profileByWebContentsId.get(window.webContents.id)) ?? lastOpenedProfileId;
+  const profileId = reopenTargetProfileId();
   void openProfile(profileId).catch((error) => {
     writeDesktopLogHeader(
       `profile reopen failed profile=${profileId}: ${formatErrorMessage(error)}`,
@@ -3275,7 +3281,7 @@ function registerIpcHandlers(): void {
   }
   ipcMain.handle("desktop:take-prompt-links", (event) => {
     const runtime = runtimeForRenderer(event.sender.id);
-    const links = promptLinks.take();
+    const links = promptLinks.take(runtime.profile.id);
     let profileCount = 1;
     try {
       profileCount = readDesktopProfiles(STATE_DIR).length;

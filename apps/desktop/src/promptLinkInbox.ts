@@ -31,25 +31,35 @@ const MAX_PENDING_LINKS = 10;
 
 /**
  * Prompt links wait here until a renderer takes them, so a link that arrives before the window
- * has loaded (a cold start opened by the link) is not lost.
+ * has loaded (a cold start opened by the link) is not lost. Each link records the profile it
+ * was sent to, so a window of another profile that loads or reloads meanwhile cannot take it.
  */
 export class PromptLinkInbox {
-  #pending: string[] = [];
+  #pending: Array<{ readonly url: string; readonly profileId: string | null }> = [];
 
   constructor(private readonly scheme: string) {}
 
-  /** Queues a link this build opens. Returns false for anything that is not one. */
-  receive(url: string): boolean {
+  /**
+   * Queues a link this build opens for `profileId`, or for whichever profile takes it first
+   * when null. Returns false for anything that is not a link this build opens.
+   */
+  receive(url: string, profileId: string | null = null): boolean {
     if (!url.toLowerCase().startsWith(`${this.scheme}:`)) return false;
     if (promptLinkAppPath(url) === null) return false;
-    this.#pending.push(url);
+    this.#pending.push({ url, profileId });
     if (this.#pending.length > MAX_PENDING_LINKS) this.#pending.shift();
     return true;
   }
 
-  take(): readonly string[] {
-    const pending = this.#pending;
-    this.#pending = [];
-    return pending;
+  /** Removes and returns the links `profileId` may open; others stay queued. */
+  take(profileId?: string): readonly string[] {
+    const taken: string[] = [];
+    this.#pending = this.#pending.filter((link) => {
+      if (profileId !== undefined && link.profileId !== null && link.profileId !== profileId)
+        return true;
+      taken.push(link.url);
+      return false;
+    });
+    return taken;
   }
 }
