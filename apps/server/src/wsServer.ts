@@ -4923,29 +4923,39 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const model = yield* orchestrationEngine.getReadModel();
         const owner = body.owner.toLowerCase();
         const name = body.name.toLowerCase().replace(/\.git$/, "");
-        const matches = [];
-        for (const project of model.projects) {
-          if (project.deletedAt !== null || isScratchProject(project)) continue;
-          const remotes = yield* git
-            .listRemotes(project.workspaceRoot)
-            .pipe(Effect.orElseSucceed(() => []));
-          const matched = discoverSourceControlProviderIdentities(remotes, {
-            githubHosts: ["github.com"],
-          }).some(
-            (identity) =>
-              identity.kind === "github" &&
-              identity.host?.toLowerCase() === "github.com" &&
-              identity.owner?.toLowerCase() === owner &&
-              identity.repository?.toLowerCase() === name,
-          );
-          if (matched)
-            matches.push({
-              projectId: project.id,
-              title: project.title,
-              workspaceRoot: project.workspaceRoot,
-            });
-        }
-        return matches;
+        // Bounded concurrency and a per-project deadline keep one slow or unmounted
+        // volume from stalling the link; such a project simply does not match.
+        const candidates = model.projects.filter(
+          (project) => project.deletedAt === null && !isScratchProject(project),
+        );
+        const matched = yield* Effect.forEach(
+          candidates,
+          (project) =>
+            git.listRemotes(project.workspaceRoot).pipe(
+              Effect.timeoutOption("5 seconds"),
+              Effect.map(Option.getOrElse(() => [])),
+              Effect.orElseSucceed(() => []),
+              Effect.map((remotes) =>
+                discoverSourceControlProviderIdentities(remotes, {
+                  githubHosts: ["github.com"],
+                }).some(
+                  (identity) =>
+                    identity.kind === "github" &&
+                    identity.host?.toLowerCase() === "github.com" &&
+                    identity.owner?.toLowerCase() === owner &&
+                    identity.repository?.toLowerCase() === name,
+                ),
+              ),
+            ),
+          { concurrency: 6 },
+        );
+        return candidates
+          .filter((_, index) => matched[index])
+          .map((project) => ({
+            projectId: project.id,
+            title: project.title,
+            workspaceRoot: project.workspaceRoot,
+          }));
       }
       case WS_METHODS.projectsCloneCancel: {
         yield* projectClones.cancel(request.body.operationId);
