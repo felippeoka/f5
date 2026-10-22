@@ -22,6 +22,13 @@ describe("scratch project helpers", () => {
     expect(long.length).toBeLessThanOrEqual(10 + 1 + 48 + 1 + 8);
   });
 
+  it("keeps a creation time that is not a date out of the folder name", () => {
+    for (const createdAt of ["../../evil", "2026/10/22", "..\\..\\x", ""])
+      expect(scratchThreadFolderName({ threadId: "abc", createdAt, text: "Fix it" })).toBe(
+        "fix-it-abc",
+      );
+  });
+
   it("accepts only one folder level directly under the root", () => {
     expect(isScratchThreadFolder("/state/scratch", "/state/scratch/2026-10-22-x-id")).toBe(true);
     expect(isScratchThreadFolder("/state/scratch/", "/state/scratch/2026-10-22-x-id")).toBe(true);

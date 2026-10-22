@@ -1246,6 +1246,36 @@ describe("OrchestrationEngine", () => {
     expect(model.threads.find((thread) => thread.id === threadId)?.scratchPath).toBe(folder);
     expect(fs.statSync(folder).isDirectory()).toBe(true);
     expect(fs.readdirSync(scratchRoot)).toEqual([path.basename(folder)]);
+    // A rejected create leaves no folder behind, and one the decider would refuse is never made.
+    for (const rejected of [
+      { commandId: "cmd-scratch-duplicate", scratchFolderWords: "Another folder" },
+      { commandId: "cmd-scratch-branch", threadId: "other-thread", branch: "feature" },
+    ])
+      await expect(
+        system.run(
+          system.engine.dispatch({
+            ...create,
+            ...rejected,
+            commandId: CommandId.makeUnsafe(rejected.commandId),
+            threadId: ThreadId.makeUnsafe(rejected.threadId ?? threadId),
+          }),
+        ),
+      ).rejects.toThrow();
+    expect(fs.readdirSync(scratchRoot)).toEqual([path.basename(folder)]);
+    // A creation time that is not a date stays out of the name, so it cannot leave the root.
+    await system.run(
+      system.engine.dispatch({
+        ...create,
+        commandId: CommandId.makeUnsafe("cmd-scratch-escape"),
+        threadId: ThreadId.makeUnsafe("escape-thread"),
+        scratchFolderWords: "Escape",
+        createdAt: "../../evil",
+      }),
+    );
+    expect(fs.readdirSync(scratchRoot).sort()).toEqual(
+      [path.basename(folder), "escape-escapeth"].sort(),
+    );
+    expect(fs.existsSync(path.join(tempDir, "evil"))).toBe(false);
     await system.dispose();
 
     const restarted = await createPersistentOrchestrationSystem({ dbPath });

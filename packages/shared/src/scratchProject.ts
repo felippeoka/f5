@@ -23,8 +23,9 @@ export function withoutScratchProjects<T extends { readonly kind?: string | unde
 
 /**
  * A scratch thread's folder name. Only `[a-z0-9-]` reaches it, so it is always one path
- * segment, and the words are capped so a pasted prompt cannot outgrow a file name. It depends
- * only on its inputs, so allocating it twice for the same thread gives the same folder.
+ * segment: the date is kept only when `createdAt` starts with one, and the words are capped so
+ * a pasted prompt cannot outgrow a file name. It depends only on its inputs, so allocating it
+ * twice for the same thread gives the same folder.
  */
 export function scratchThreadFolderName(input: {
   readonly threadId: string;
@@ -44,7 +45,8 @@ export function scratchThreadFolderName(input: {
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "")
       .slice(0, 8) || "thread";
-  return [input.createdAt.slice(0, 10), words, id].filter(Boolean).join("-");
+  const date = /^\d{4}-\d{2}-\d{2}/.exec(input.createdAt)?.[0];
+  return [date, words, id].filter(Boolean).join("-");
 }
 
 /** Whether `path` is a single folder directly inside the scratch root. */

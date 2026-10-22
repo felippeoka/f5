@@ -43,7 +43,11 @@ import {
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeFS from "node:fs/promises";
 import * as NodePath from "node:path";
-import { isScratchProject, scratchThreadFolderName } from "@t3tools/shared/scratchProject";
+import {
+  isScratchProject,
+  isScratchThreadFolder,
+  scratchThreadFolderName,
+} from "@t3tools/shared/scratchProject";
 
 import {
   PerformanceStageProbe,
@@ -955,7 +959,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   // Every thread of the scratch project gets its own folder before it is created, whichever
   // path creates it. The name depends only on the command, so a retried create reuses it.
-  const withScratchFolder = (command: OrchestrationCommand) =>
+  // A folder the decider would refuse is never created, and one created for a command that is
+  // then rejected is removed again while it is still empty.
+  const withScratchFolder = (
+    command: OrchestrationCommand,
+    created: { folder: string | undefined },
+  ) =>
     Effect.gen(function* () {
       if (command.type !== "thread.create") return command;
       const project = readModel.projects.find(
@@ -971,6 +980,18 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           text: scratchFolderWords ?? command.title,
         }),
       );
+      if (
+        !isScratchThreadFolder(project.workspaceRoot, folder) ||
+        command.worktreePath !== null ||
+        command.branch !== null
+      )
+        return { ...rest, scratchPath: folder };
+      const existed = yield* Effect.promise(() =>
+        NodeFS.stat(folder).then(
+          () => true,
+          () => false,
+        ),
+      );
       yield* Effect.tryPromise({
         try: () => NodeFS.mkdir(folder, { recursive: true }),
         catch: () =>
@@ -979,12 +1000,18 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             detail: "Failed to create the folder for this thread.",
           }),
       });
+      if (!existed) created.folder = folder;
       return { ...rest, scratchPath: folder };
     });
+  const removeEmptyScratchFolder = (created: { folder: string | undefined }) =>
+    created.folder === undefined
+      ? Effect.void
+      : Effect.promise(() => NodeFS.rmdir(created.folder!).catch(() => undefined));
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (incoming) =>
     Effect.gen(function* () {
-      const command = yield* withScratchFolder(incoming);
+      const created: { folder: string | undefined } = { folder: undefined };
+      const command = yield* withScratchFolder(incoming, created);
       // Git I/O must not occupy the serialized projection worker. The worker
       // revalidates this metadata fingerprint before accepting the command.
       let workspace: CommandEnvelope["workspace"];
@@ -1156,7 +1183,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           return result;
         }),
       );
-      return yield* Deferred.await(admittedResult);
+      return yield* Deferred.await(admittedResult).pipe(
+        Effect.tapError(() => removeEmptyScratchFolder(created)),
+      );
     });
 
   // PubSub is intentionally not replayed. Detect a missing/dead consumer without
