@@ -20,6 +20,12 @@ const startScratchThread = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn(async () => {}));
 const openClone = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => ({ add: vi.fn(() => "toast"), close: vi.fn() }));
+const readiness = vi.hoisted(() => ({ startup: true, mutations: true }));
+vi.mock("~/lib/startupReady", () => ({ useStartupReady: () => readiness.startup }));
+vi.mock("~/wsConnectionState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/wsConnectionState")>()),
+  useServerMutationsAvailable: () => readiness.mutations,
+}));
 vi.mock("~/nativeApi", () => ({ ensureNativeApi: () => api }));
 vi.mock("~/hooks/useCreateProjectBackedDraftThread", () => ({
   useCreateProjectBackedDraftThread: () => createDraftThread,
@@ -35,6 +41,8 @@ vi.mock("../ProjectCloneController", () => ({ openProjectCloneDialog: openClone 
 vi.mock("../ui/toast", () => ({ toastManager: toast }));
 afterEach(() => {
   vi.clearAllMocks();
+  readiness.startup = true;
+  readiness.mutations = true;
   useComposerDraftStore.setState({ draftsByThreadId: {} });
 });
 
@@ -59,6 +67,28 @@ it("puts a link without a repository in a new thread without a project and never
   );
   expect(api.orchestration.dispatchCommand).not.toHaveBeenCalled();
   expect(api.nextTurnQueue.submit).not.toHaveBeenCalled();
+});
+
+it("waits for the server connection before opening a link on a cold start", async () => {
+  readiness.mutations = false;
+  const threadId = ThreadId.makeUnsafe("cold-start-draft");
+  startScratchThread.mockResolvedValueOnce({ threadId, projectId: "scratch" });
+  const screen = await render(<NewThreadLinkView search={search({ prompt: "After sync" })} />);
+  await expect.element(screen.getByText("Opening the link…")).toBeInTheDocument();
+  expect(startScratchThread).not.toHaveBeenCalled();
+
+  readiness.mutations = true;
+  await screen.rerender(<NewThreadLinkView search={search({ prompt: "After sync" })} />);
+  await vi.waitFor(() => expect(draftPrompt(threadId)).toBe("After sync"));
+  expect(startScratchThread).toHaveBeenCalledTimes(1);
+});
+
+it("explains a link whose thread could not be created instead of waiting forever", async () => {
+  startScratchThread.mockResolvedValueOnce(null);
+  const screen = await render(<NewThreadLinkView search={search({ prompt: "Fix it" })} />);
+  await expect
+    .element(screen.getByRole("alert"))
+    .toHaveTextContent("F5 could not create a thread for this prompt.");
 });
 
 it("still places the prompt when the link names a malformed provider", async () => {

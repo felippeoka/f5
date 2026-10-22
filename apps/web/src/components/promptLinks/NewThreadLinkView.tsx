@@ -12,11 +12,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useCreateProjectBackedDraftThread } from "~/hooks/useCreateProjectBackedDraftThread";
 import { useStartScratchThread } from "~/hooks/useStartScratchThread";
+import { useStartupReady } from "~/lib/startupReady";
 import { getMostRecentProject } from "~/lib/threadOrdering";
 import { newCommandId, newThreadId } from "~/lib/utils";
 import { ensureNativeApi } from "~/nativeApi";
 import { useStore } from "~/store";
 import { useThreadSummaries } from "~/threadSelectors";
+import { useServerMutationsAvailable } from "~/wsConnectionState";
 
 import { openProjectCloneDialog } from "../ProjectCloneController";
 import { resolvePrF5ModelSelection } from "../prHub/prF5Thread";
@@ -151,7 +153,10 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
     async (link: NewLink, projectId: ProjectId | null) => {
       const created =
         projectId === null ? await startScratchThread() : await createDraftThread(projectId);
-      if (!created) return;
+      if (!created) {
+        setState({ kind: "failed", message: "F5 could not create a thread for this prompt." });
+        return;
+      }
       const note = applyLinkedModel(created.threadId, link);
       placeLinkedPrompt(created.threadId, link.prompt, note ? [note] : []);
     },
@@ -192,8 +197,14 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
     [openDraft, openInProject],
   );
 
+  // A cold start opened by the link renders this before the server connection has synchronized,
+  // and the server refuses changes until then.
+  const startupReady = useStartupReady();
+  const mutationsAvailable = useServerMutationsAvailable();
+  const ready = startupReady && mutationsAvailable;
   const handled = useRef<string | null>(null);
   useEffect(() => {
+    if (!ready) return;
     // Refs survive StrictMode's repeated effects, so one link opens one thread.
     if (handled.current === search) return;
     handled.current = search;
@@ -220,7 +231,7 @@ export function NewThreadLinkView({ search }: { readonly search: string }) {
       }
       await resolveProject(link);
     })().catch((error: unknown) => setState({ kind: "failed", message: errorMessage(error) }));
-  }, [resolveProject, search, showThread]);
+  }, [ready, resolveProject, search, showThread]);
 
   const run = (task: () => Promise<unknown>) => {
     setBusy(true);
