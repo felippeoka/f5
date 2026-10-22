@@ -3113,3 +3113,87 @@ SnapShots as ordinary image attachments, with no SnapShot frame to widen
 `13d` members stay deferred, as planned. The `2`, `10` and `14` records with
 September implementation notes stay held by the open performance and
 distribution release gates.
+
+## 15m triage log: threads without a project and new projects
+
+All 14 records are closed. Six are ported and eight are not applicable.
+
+Threads without a project
+([t3code#13612](https://github.com/pingdotgg/t3code/pull/13612)) are ported in
+four commits:
+
+- A reserved `scratch` project kind. Each profile has one, with a
+  deterministic id, created by the idempotent `projects.ensureScratch`. It
+  lives at `<stateDir>/scratch` and is refused when that folder is inside a
+  Git checkout. Each thread gets its own `scratchPath` folder, named
+  `<date>-<first words>-<id8>`, when it is created. The decider rejects
+  deleting the scratch project, changing its folder, actions, memories or
+  skills, and giving its threads a branch or worktree.
+- One resolver, `threadWorkspaceCwd` in
+  `packages/shared/src/threadWorkspace.ts`. It returns the scratch folder,
+  then the worktree, then the project root. A scratch thread without a folder
+  resolves to nothing, never to the shared root. Every server and web workspace
+  decision now goes through it. `scripts/thread-workspace-guard.test.ts` parses
+  the sources and fails on a new fallback from a worktree path to anything
+  else, with each remaining fallback allowlisted and given a reason.
+- Containment. A request naming a folder below the scratch root must stay
+  inside one thread folder, and Git methods are refused there. Project-scoped
+  workspace assets do not resolve for the scratch project. This scopes access
+  that goes through F5. It does not sandbox a provider's shell. Git consumers
+  skip scratch threads: steer readiness, default-branch auto-pull, PR checkout
+  discovery, and the chat view's status, branch, diff and branch toolbar
+  queries. Checkpoints already stop at folders that are not repositories.
+- Entry points. The empty sidebar and home offer "or start without a
+  project", the command palette has "New thread without a project", its "New
+  thread in..." picker leads with "No project"
+  ([t3code#16628](https://github.com/pingdotgg/t3code/pull/16628)), and
+  `chat.newScratch` ships unbound. The scratch project still holds its threads
+  in the sidebar, with only "Settle idle threads" in its menu. It is left out
+  of project pickers, Settings, provider inventory overrides and workflows.
+  Usage groups its threads under its title, "No project".
+
+Also ported:
+
+- Without a git binary, the scratch root counts as outside any checkout, so
+  these threads need no Git
+  ([t3code#17959](https://github.com/pingdotgg/t3code/pull/17959)).
+- F5's PR hub has no project filter. Its local checkout candidates now skip
+  the scratch project
+  ([t3code#19179](https://github.com/pingdotgg/t3code/pull/19179)).
+- A new project can be created from just a name
+  ([t3code#14527](https://github.com/pingdotgg/t3code/pull/14527)).
+  `projects.createNew` reserves `<projectsRoot>/<slug>`, adding `-2`, `-3` and
+  so on with a non-recursive mkdir when the name is taken. `projectsRoot`
+  defaults to `~/f5-projects`, or `~/f5-projects-<profile>` outside the default
+  profile, and can be changed in Settings > Projects. The new folder gets a
+  README and a `.gitignore`, then `git init` and a first commit with the Git
+  author from Settings. If Git fails, the folder is kept and the user sees a
+  warning. The first thread opens in the main checkout
+  ([t3code#17371](https://github.com/pingdotgg/t3code/pull/17371)).
+
+Not applicable:
+
+- Two React Compiler refactors
+  ([t3code#20673](https://github.com/pingdotgg/t3code/pull/20673),
+  [t3code#20589](https://github.com/pingdotgg/t3code/pull/20589)).
+- Four multi-environment follow-ups
+  ([t3code#14759](https://github.com/pingdotgg/t3code/pull/14759),
+  [t3code#17050](https://github.com/pingdotgg/t3code/pull/17050),
+  [t3code#15356](https://github.com/pingdotgg/t3code/pull/15356),
+  [t3code#17022](https://github.com/pingdotgg/t3code/pull/17022)), because F5
+  runs one environment.
+- A contributor list change
+  ([t3code#13353](https://github.com/pingdotgg/t3code/pull/13353)).
+- Publishing a new project to a forge
+  ([t3code#17860](https://github.com/pingdotgg/t3code/pull/17860)), because F5
+  has no repository publishing flow.
+
+Validation:
+
+- The server, web and contracts typechecks pass.
+- Server suites pass for orchestration, project, nextTurnQueue, git, provider,
+  checkpointing, prHub and wsServer.
+- The web unit suite passes, as do the ThreadSidebar, ChatView, DiffPanel,
+  FileViewPanel, Settings, Home and new-project dialog browser suites.
+- The workspace guard and the shared resolver tests pass.
+- The slug test failed on accented names until combining marks were stripped.
