@@ -126,7 +126,9 @@ import { toastManager } from "./ui/toast";
 import { useNextTurnQueueStore } from "../nextTurnQueueStore";
 import { HighlightedText } from "./HighlightedText";
 import { ProjectIcon } from "./ProjectIcon";
+import { isScratchProject, withoutScratchProjects } from "@t3tools/shared/scratchProject";
 import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
+import { useStartScratchThread } from "../hooks/useStartScratchThread";
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const BROWSE_STALE_TIME_MS = 30_000;
@@ -290,6 +292,8 @@ function OpenCommandPaletteDialog(props: {
   const { theme, setTheme } = useTheme();
   const { activeDraftThread, activeThread, handleNewThread, routeThreadId } = useHandleNewThread();
   const projects = useStore((store) => store.projects);
+  const listedProjects = useMemo(() => withoutScratchProjects(projects), [projects]);
+  const startScratchThread = useStartScratchThread();
   const threads = useThreadSummaries();
   const planningWorkflows = useStore((store) => store.planningWorkflows);
   const codeReviewWorkflows = useStore((store) => store.codeReviewWorkflows);
@@ -356,25 +360,28 @@ function OpenCommandPaletteDialog(props: {
         activeDraftProjectId: activeDraftThread?.projectId,
         mostRecentProjectId:
           getMostRecentProject(
-            projects,
+            listedProjects,
             threads,
             planningWorkflows,
             codeReviewWorkflows,
             investigationWorkflows,
           )?.id ?? null,
-        firstProjectId: projects[0]?.id ?? null,
+        firstProjectId: listedProjects[0]?.id ?? null,
       }),
     [
       activeDraftThread?.projectId,
       activeThread?.projectId,
       codeReviewWorkflows,
       investigationWorkflows,
+      listedProjects,
       planningWorkflows,
-      projects,
       threads,
     ],
   );
-  const workflowProjectId = newThreadProjectId;
+  const newThreadProjectIsScratch = isScratchProject(
+    projects.find((project) => project.id === newThreadProjectId),
+  );
+  const workflowProjectId = newThreadProjectIsScratch ? null : newThreadProjectId;
   const [requestedSearchProjectId, setRequestedSearchProjectId] = useState<ProjectId | null>(null);
   const currentProjectCwd = currentProjectId
     ? (projectCwdById.get(currentProjectId) ?? null)
@@ -384,7 +391,7 @@ function OpenCommandPaletteDialog(props: {
       ? projects.find((project) => project.id === requestedSearchProjectId)
       : null) ??
     (currentProjectId ? projects.find((project) => project.id === currentProjectId) : null) ??
-    projects[0] ??
+    listedProjects[0] ??
     null;
   const activeThreadInSearchProject =
     activeThread?.projectId === searchProject?.id ? activeThread : null;
@@ -582,25 +589,36 @@ function OpenCommandPaletteDialog(props: {
   const projectSearchItems = useMemo(
     () =>
       buildProjectActionItems({
-        projects,
+        projects: listedProjects,
         valuePrefix: "project",
         icon: projectIcon,
         runProject: openProjectFromSearch,
       }),
-    [openProjectFromSearch, projectIcon, projects],
+    [listedProjects, openProjectFromSearch, projectIcon],
   );
 
   const projectThreadItems = useMemo(
-    () =>
-      buildProjectActionItems({
-        projects,
+    () => [
+      ...buildProjectActionItems({
+        projects: listedProjects,
         valuePrefix: "new-thread-in",
         icon: projectIcon,
         runProject: async (project) => {
           await handleNewThread(project.id);
         },
       }),
-    [handleNewThread, projectIcon, projects],
+      {
+        kind: "action" as const,
+        value: "new-thread-in:no-project",
+        searchTerms: ["no project", "scratch", "without a project"],
+        title: "No project",
+        icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await startScratchThread();
+        },
+      },
+    ],
+    [handleNewThread, listedProjects, projectIcon, startScratchThread],
   );
 
   const sortedActiveThreads = useMemo(
@@ -833,7 +851,9 @@ function OpenCommandPaletteDialog(props: {
         kind: "action",
         value: "action:new-thread",
         searchTerms: ["new thread", "chat", "create", "draft"],
-        title: (
+        title: newThreadProjectIsScratch ? (
+          "New thread without a project"
+        ) : (
           <>
             New thread in <span className="font-semibold">{activeProjectTitle}</span>
           </>
@@ -890,6 +910,19 @@ function OpenCommandPaletteDialog(props: {
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
     });
   }
+
+  if (!newThreadProjectIsScratch)
+    actionItems.push({
+      kind: "action",
+      value: "action:new-scratch-thread",
+      searchTerms: ["new thread", "no project", "without a project", "scratch"],
+      title: "New thread without a project",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.newScratch",
+      run: async () => {
+        await startScratchThread();
+      },
+    });
 
   actionItems.push({
     kind: "action",
@@ -1583,7 +1616,10 @@ function OpenCommandPaletteDialog(props: {
                   <SelectValue>{searchProject.name}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end">
-                  {projects.map((project) => (
+                  {(isScratchProject(searchProject)
+                    ? [searchProject, ...listedProjects]
+                    : listedProjects
+                  ).map((project) => (
                     <SelectItem key={project.id} value={project.id}>
                       {project.name}
                     </SelectItem>

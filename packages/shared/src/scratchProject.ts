@@ -14,6 +14,13 @@ export function isScratchProject(
   return project?.kind === "scratch";
 }
 
+/** Projects a user picks from. The scratch project is a home for threads, not a choice. */
+export function withoutScratchProjects<T extends { readonly kind?: string | undefined }>(
+  projects: ReadonlyArray<T>,
+): T[] {
+  return projects.filter((project) => !isScratchProject(project));
+}
+
 /**
  * A scratch thread's folder name. Only `[a-z0-9-]` reaches it, so it is always one path
  * segment, and the words are capped so a pasted prompt cannot outgrow a file name. It depends

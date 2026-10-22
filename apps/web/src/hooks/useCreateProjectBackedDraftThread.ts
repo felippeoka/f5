@@ -1,6 +1,7 @@
 import { resolveProjectProviderInstanceEnabled } from "@t3tools/shared/serverSettings";
 import { providerSelectionsToModelOptions } from "../providerModelOptions";
 import { inferProviderForModel } from "@t3tools/shared/model";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
 import {
   cachedGlobalDraftSettings,
   defaultDraftRuntimeMode,
@@ -279,6 +280,21 @@ export function useCreateProjectBackedDraftThread() {
   return useCallback(
     async (projectId: ProjectId, options?: CreateProjectBackedDraftThreadOptions) => {
       const { forceNonDefaultEnvMode = false, ...draftOptions } = options ?? {};
+      // A thread without a project gets its own folder from the server: no branch, no worktree.
+      if (isScratchProject(useStore.getState().projects.find((entry) => entry.id === projectId)))
+        return createProjectBackedDraftThread({
+          navigate,
+          onboardingLiteStatus,
+          projectId,
+          routeThreadId,
+          updateSettings: updateAppSettings,
+          options: {
+            ...draftOptions,
+            branch: null,
+            worktreePath: null,
+            envMode: "local",
+          },
+        });
       const requested =
         draftOptions.envMode ?? (draftOptions.worktreePath ? "worktree" : undefined);
       const envMode = await resolveProjectThreadEnvMode(projectId, {

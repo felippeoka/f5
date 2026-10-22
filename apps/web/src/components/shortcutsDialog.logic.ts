@@ -97,6 +97,7 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
     commands: [
       "chat.new",
       "chat.newLocal",
+      "chat.newScratch",
       "chat.newBackground",
       "chat.sendAndNew",
       "workflow.new",

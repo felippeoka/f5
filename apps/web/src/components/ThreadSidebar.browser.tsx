@@ -1154,6 +1154,70 @@ describe("Thread sidebar", () => {
     }
   });
 
+  it("starts a thread without a project from the empty sidebar", async () => {
+    seedAppSettings({ onboardingLiteStatus: "dismissed" });
+    const scratchProjectId = "5c7a0e3b-0d2f-5a51-8f00-000000000001" as ProjectId;
+    let ensureCalls = 0;
+    const mounted = await mountApp({
+      width: 1_400,
+      initialEntries: ["/"],
+      configureFixture: (nextFixture) => {
+        nextFixture.snapshot = createEmptySnapshot();
+        nextFixture.resolveWsRequest = (body) => {
+          if (body._tag !== WS_METHODS.projectsEnsureScratch) return null;
+          ensureCalls += 1;
+          // The project.created event lands after the reply, as it would over the socket.
+          setTimeout(() =>
+            useStore.setState((state) => ({
+              projects: [
+                ...state.projects,
+                {
+                  id: scratchProjectId,
+                  kind: "scratch",
+                  name: "No project",
+                  cwd: "/state/scratch",
+                  model: "gpt-5",
+                  createdAt: NOW_ISO,
+                  expanded: true,
+                  scripts: [],
+                  memories: [],
+                },
+              ],
+            })),
+          );
+          return { type: "result", result: { projectId: scratchProjectId } };
+        };
+      },
+    });
+
+    try {
+      const start = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            '[data-testid="sidebar-start-without-project"]',
+          ),
+        "The empty sidebar offers a thread without a project.",
+      );
+      start.click();
+      await vi.waitFor(() => {
+        const drafts = Object.values(useComposerDraftStore.getState().draftThreadsByThreadId);
+        expect(drafts).toEqual([
+          expect.objectContaining({
+            projectId: scratchProjectId,
+            branch: null,
+            worktreePath: null,
+            envMode: "local",
+          }),
+        ]);
+      });
+      expect(ensureCalls).toBe(1);
+      // The scratch project is a home for threads, not one more project to pick.
+      expect(document.body.textContent).toContain("No projects yet");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("renders live project rows instead of the sidebar skeleton before startup hydration", async () => {
     const startupResponse = createDeferred<WsRequestResolution>();
     useStore.setState({

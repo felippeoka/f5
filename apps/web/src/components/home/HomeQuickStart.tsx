@@ -6,6 +6,7 @@ import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { requestComposerFocus } from "../../composerFocusRequestStore";
 import { useCreateProjectBackedDraftThread } from "../../hooks/useCreateProjectBackedDraftThread";
+import { useStartScratchThread } from "../../hooks/useStartScratchThread";
 import { isKeyboardEventComposing } from "../../lib/keyboardComposition";
 import type { Project } from "../../types";
 import { useWorkflowCreateDialogStore } from "../../workflowCreateDialogStore";
@@ -42,6 +43,7 @@ export function HomeQuickStart(props: {
   readonly defaultProjectId: ProjectId | null;
 }) {
   const createProjectBackedDraftThread = useCreateProjectBackedDraftThread();
+  const startScratchThread = useStartScratchThread();
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | null>(null);
   const [text, setText] = useState("");
   const [starting, setStarting] = useState(false);
@@ -106,10 +108,19 @@ export function HomeQuickStart(props: {
           <p className="text-sm text-muted-foreground">
             Add a project to start a thread or a workflow.
           </p>
-          <Button onClick={() => useCommandPaletteStore.getState().openAddProject()}>
-            <FolderPlusIcon />
-            Add a project
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={() => useCommandPaletteStore.getState().openAddProject()}>
+              <FolderPlusIcon />
+              Add a project
+            </Button>
+            <Button
+              variant="link"
+              data-testid="home-start-without-project"
+              onClick={() => void startScratchThread()}
+            >
+              or start without a project
+            </Button>
+          </div>
         </div>
       </div>
     );

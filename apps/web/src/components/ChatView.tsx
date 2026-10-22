@@ -2786,7 +2786,9 @@ export default memo(function ChatView({
     });
   }, [activeProjectCwd, activeThreadWorktreePath]);
   // Default true while loading to avoid toolbar flicker.
-  const isGitRepo = branchesQuery.data?.worktreeMissing || (branchesQuery.data?.isRepo ?? true);
+  const isGitRepo =
+    !isScratchProject(activeProject) &&
+    (branchesQuery.data?.worktreeMissing || (branchesQuery.data?.isRepo ?? true));
   const worktreeSetup = useWorktreeSetup(
     isServerThread && activeThread ? activeThread.id : null,
     activeThread?.activities,

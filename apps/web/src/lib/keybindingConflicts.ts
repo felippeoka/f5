@@ -225,6 +225,8 @@ export function formatKeybindingCommandLabel(
       return "New thread";
     case "chat.newLocal":
       return "Reuse project draft";
+    case "chat.newScratch":
+      return "New thread without a project";
     case "workflow.new":
       return "New workflow";
     case "chat.scrollToBottom":
