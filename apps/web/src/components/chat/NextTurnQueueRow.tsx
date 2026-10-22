@@ -120,7 +120,9 @@ export function NextTurnQueueRow({
       : Math.max(0, Math.ceil((Date.parse(item.notBefore) - nowMs) / 1_000));
 
   const statusText = admitted
-    ? "Delivery unconfirmed. Use Recheck, Retry or Discard above."
+    ? snapshot.unresolvedDelivery
+      ? "Delivery unconfirmed. Use Recheck, Retry or Discard above."
+      : "Checking delivery…"
     : item.status === "dispatching"
       ? "Sending this turn now."
       : retrySeconds > 0

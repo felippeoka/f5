@@ -1857,6 +1857,13 @@ export const makeWorkflowService = Effect.gen(function* () {
           ? workflow.branchA
           : workflow.branchB
         : null;
+      // Format repair may create a new turn only for a currently running stage.
+      if (
+        branch
+          ? branch.status !== "authoring" && branch.status !== "revising"
+          : workflow.merge.status !== "in_progress"
+      )
+        return;
       const provider = branch?.authorSlot.provider ?? workflow.merge.mergeSlot.provider;
       const validation = validateCapturedPlanForTurn({
         workflow: workflow,
@@ -1878,13 +1885,7 @@ export const makeWorkflowService = Effect.gen(function* () {
       }
 
       const error = `${isDocumentWorkflow(workflow) ? "Invalid document" : "Invalid proposed-plan capture"}: ${validation.error}`;
-      const branchStage =
-        branch?.status === "error"
-          ? planningWorkflowBranchFailureStage(branch)
-          : branch?.status === "revising"
-            ? "revision"
-            : "authoring";
-      if (branchStage === "reviews") return;
+      const branchStage = branch?.status === "revising" ? "revision" : "authoring";
       const budgetError = workflowBudgetError(workflow);
       if (
         budgetError &&
@@ -1898,7 +1899,7 @@ export const makeWorkflowService = Effect.gen(function* () {
           branch && input.branchId
             ? markBranchError(workflow, input.branchId, {
                 error: budgetError.message,
-                stage: branchStage ?? "authoring",
+                stage: branchStage,
                 updatedAt: input.createdAt,
               })
             : markMergeError(workflow, budgetError.message, input.createdAt),
@@ -1906,7 +1907,7 @@ export const makeWorkflowService = Effect.gen(function* () {
         return;
       }
       if (branch && input.branchId) {
-        const stage = branchStage ?? "authoring";
+        const stage = branchStage;
         const formatRepairAttempts =
           stage === "revision"
             ? (branch.revisionFormatRepairAttempts ?? 0)
@@ -2950,9 +2951,6 @@ export const makeWorkflowService = Effect.gen(function* () {
           turnId,
         }).valid;
         if (!hasPlan) {
-          // A watchdog failure stays retryable until the user retries it. Late
-          // output must not repair the failed turn or resend the original brief.
-          if (branch.status === "error") return workflow;
           const synthesized = yield* maybeSynthesizeProposedPlan({
             workflow,
             provider: branch.authorSlot.provider,
@@ -2961,6 +2959,9 @@ export const makeWorkflowService = Effect.gen(function* () {
             createdAt: updatedAt,
           });
           if (!synthesized) {
+            // Valid late output can still be captured; a failed turn must not
+            // trigger another provider turn to repair invalid output.
+            if (branch.status === "error") return workflow;
             yield* retryOrFailInvalidPlanCapture({
               workflow,
               snapshot,
@@ -3054,6 +3055,7 @@ export const makeWorkflowService = Effect.gen(function* () {
           createdAt: updatedAt,
         });
         if (!synthesized) {
+          if (workflow.merge.status === "error") return workflow;
           yield* retryOrFailInvalidPlanCapture({
             workflow,
             snapshot,

@@ -2678,28 +2678,50 @@ const make = Effect.gen(function* () {
     },
   );
 
-  const refreshSessionForThread = (
-    threadId: ThreadId,
-    createdAt: string,
-    preferredInstanceId?: ProviderInstanceId,
-  ) =>
-    withThreadTurnGate(
-      threadId,
-      ensureSessionForThread(threadId, createdAt, {
-        keepWorkflowExecutionProfile: true,
-        ...(preferredInstanceId !== undefined ? { preferredInstanceId } : {}),
-      }),
-    ).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("provider command reactor failed to refresh session", {
-              threadId,
-              cause: Cause.pretty(cause),
-            }),
-      ),
-      Effect.forkIn(reactorScope),
-    );
+  /** Refresh the current live generation without reviving a stopped or replaced session. */
+  const refreshSessionForThread = (thread: OrchestrationThread, createdAt: string) =>
+    Effect.gen(function* () {
+      const threadId = thread.id;
+      const generation = thread.session?.capabilities?.generation;
+      const binding = yield* providerSessionDirectory.getBinding(threadId);
+      const persistedGeneration = readPersistedSessionGeneration(
+        Option.getOrUndefined(binding)?.runtimePayload,
+      );
+      return yield* withThreadTurnGate(
+        threadId,
+        Effect.gen(function* () {
+          const current = yield* resolveThread(threadId);
+          const currentBinding = yield* providerSessionDirectory.getBinding(threadId);
+          if (
+            !current ||
+            current.deletedAt !== null ||
+            current.archivedAt !== null ||
+            !current.session ||
+            current.session.status === "stopped" ||
+            current.session.capabilities?.generation !== generation ||
+            readPersistedSessionGeneration(
+              Option.getOrUndefined(currentBinding)?.runtimePayload,
+            ) !== persistedGeneration ||
+            current.session.providerName !== thread.session?.providerName ||
+            current.session.providerInstanceId !== thread.session?.providerInstanceId
+          )
+            return;
+          yield* ensureSessionForThread(threadId, createdAt, {
+            keepWorkflowExecutionProfile: true,
+          });
+        }),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("provider command reactor failed to refresh session", {
+                threadId,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+        Effect.forkIn(reactorScope),
+      );
+    });
 
   const processDomainEvent = (event: ProviderIntentEvent) =>
     Effect.gen(function* () {
@@ -2773,7 +2795,7 @@ const make = Effect.gen(function* () {
           if (!thread?.session || thread.session.status === "stopped") {
             return;
           }
-          yield* refreshSessionForThread(event.payload.threadId, event.occurredAt);
+          yield* refreshSessionForThread(thread, event.occurredAt);
           break;
         }
         case "thread.meta-updated": {
@@ -2795,19 +2817,7 @@ const make = Effect.gen(function* () {
           if (!thread?.session || thread.session.status === "stopped") {
             return;
           }
-          const currentProvider = providerFromSessionName(thread.session.providerName);
-          const selectedProvider = event.payload.modelSelection?.model
-            ? inferProviderForModel(event.payload.modelSelection.model)
-            : undefined;
-          const preferredInstanceId =
-            selectedProvider !== undefined && selectedProvider === currentProvider
-              ? event.payload.modelSelection?.instanceId
-              : undefined;
-          yield* refreshSessionForThread(
-            event.payload.threadId,
-            event.occurredAt,
-            preferredInstanceId,
-          );
+          yield* refreshSessionForThread(thread, event.occurredAt);
           break;
         }
         case "thread.deleted":

@@ -572,7 +572,7 @@ describe("ProviderCommandReactor", () => {
         }),
       getProvider: (threadId: ThreadId) =>
         Effect.sync(() => persistedBindings.get(threadId)?.provider ?? "codex"),
-      getBinding: (threadId: ThreadId) =>
+      getBinding: vi.fn((threadId: ThreadId) =>
         Effect.sync(() =>
           persistedBindings.has(threadId)
             ? Option.some({
@@ -581,6 +581,7 @@ describe("ProviderCommandReactor", () => {
               })
             : Option.none(),
         ),
+      ),
       listThreadIds: () => Effect.sync(() => [...persistedBindings.keys()]),
       listBindings: () =>
         Effect.sync(() =>
@@ -895,6 +896,7 @@ describe("ProviderCommandReactor", () => {
         upsertPersistedBinding(binding);
       },
       getBinding: (threadId: ThreadId) => persistedBindings.get(threadId),
+      readBinding: providerSessionDirectory.getBinding,
       removeLiveSession: (threadId: ThreadId) => {
         const index = runtimeSessions.findIndex((session) => session.threadId === threadId);
         if (index >= 0) runtimeSessions.splice(index, 1);
@@ -1244,6 +1246,155 @@ describe("ProviderCommandReactor", () => {
       }
     },
   );
+
+  it.each(["stop", "archive", "delete", "generation"] as const)(
+    "drops a deferred refresh after %s while delivery holds the gate",
+    async (change) => {
+      const harness = await createHarness();
+      const threadId = ThreadId.makeUnsafe("thread-1");
+      const createdAt = new Date().toISOString();
+      const send = (index: number) =>
+        Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.makeUnsafe(`refresh-fence-${index}`),
+            threadId,
+            message: {
+              messageId: asMessageId(`refresh-fence-${index}`),
+              role: "user",
+              text: "Continue",
+              attachments: [],
+            },
+            provider: "codex",
+            model: "gpt-5-codex",
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            createdAt,
+          }),
+        );
+      await send(1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.waitForDeliveries();
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      harness.sendTurn.mockImplementationOnce(() =>
+        Effect.promise(async () => {
+          await blocked;
+          return { threadId, turnId: asTurnId("blocked-delivery") };
+        }),
+      );
+      try {
+        await send(2);
+        await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.runtime-mode.set",
+            commandId: CommandId.makeUnsafe("deferred-refresh"),
+            threadId,
+            runtimeMode: "full-access",
+            createdAt,
+          }),
+        );
+        await harness.drain();
+        if (change === "generation") {
+          const binding = harness.getBinding(threadId)!;
+          harness.upsertBinding({
+            ...binding,
+            runtimePayload: {
+              ...(binding.runtimePayload as Record<string, unknown>),
+              sessionGeneration: 100,
+            },
+          });
+        } else {
+          await Effect.runPromise(
+            harness.engine.dispatch({
+              type:
+                change === "stop"
+                  ? "thread.session.stop"
+                  : change === "archive"
+                    ? "thread.archive"
+                    : "thread.delete",
+              commandId: CommandId.makeUnsafe("supersede-refresh"),
+              threadId,
+              createdAt,
+            }),
+          );
+          if (change === "stop") await waitFor(() => harness.stopSession.mock.calls.length === 1);
+        }
+        const readsBefore = harness.readBinding.mock.calls.length;
+        release();
+        await harness.waitForDeliveries();
+        await waitFor(() => harness.readBinding.mock.calls.length > readsBefore);
+        await harness.drain();
+        expect(harness.startSession).toHaveBeenCalledTimes(1);
+      } finally {
+        release();
+      }
+    },
+  );
+
+  it("coalesces model-instance selections made while a delivery holds the gate", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const createdAt = new Date().toISOString();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    harness.sendTurn.mockImplementationOnce(() =>
+      Effect.promise(async () => {
+        await blocked;
+        return { threadId, turnId: asTurnId("selected-delivery") };
+      }),
+    );
+    try {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("selections-send"),
+          threadId,
+          message: {
+            messageId: asMessageId("selections-message"),
+            role: "user",
+            text: "Continue",
+            attachments: [],
+          },
+          provider: "codex",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          createdAt,
+        }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      for (const instanceId of ["obsolete-codex", "codex"]) {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe(`selection-${instanceId}`),
+            threadId,
+            model: "gpt-5-codex",
+            modelSelection: {
+              model: "gpt-5-codex",
+              instanceId: ProviderInstanceId.makeUnsafe(instanceId),
+            },
+          }),
+        );
+        await harness.drain();
+      }
+      const readsBefore = harness.readEffectiveRuntimeConfig.mock.calls.length;
+      release();
+      await harness.waitForDeliveries();
+      await waitFor(() => harness.readEffectiveRuntimeConfig.mock.calls.length >= readsBefore + 2);
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.stopSession).not.toHaveBeenCalled();
+      expect(harness.getBinding(threadId)?.resumeCursor).toEqual({ opaque: "cursor-1" });
+    } finally {
+      release();
+    }
+  });
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();

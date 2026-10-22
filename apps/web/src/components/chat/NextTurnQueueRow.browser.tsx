@@ -92,6 +92,13 @@ describe("NextTurnQueueRow usage limit timing", () => {
       active = await render(
         <NextTurnQueueRow
           {...props}
+          snapshot={{
+            ...snapshot,
+            unresolvedDelivery: {
+              deliveryId: CommandId.makeUnsafe("failed-delivery"),
+              state: "ambiguous",
+            },
+          }}
           canSteer
           onSteer={async () => {}}
           item={item({
@@ -122,6 +129,19 @@ describe("NextTurnQueueRow usage limit timing", () => {
       await expect.element(page.getByRole("button", { name: "Cancel queued turn" })).toBeDisabled();
     },
   );
+  it("does not direct a pending delivery to missing recovery buttons", async () => {
+    active = await render(
+      <NextTurnQueueRow
+        {...props}
+        item={item({ status: "failed", lastErrorCode: "delivery_ambiguous", notBefore: null })}
+      />,
+    );
+    await expect.element(page.getByText(/^Checking delivery…/)).toBeVisible();
+    await expect
+      .element(page.getByText(/Use Recheck, Retry or Discard above/))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Cancel queued turn" })).toBeDisabled();
+  });
   it("uses an absolute date and one deadline timer instead of an interval", async () => {
     const interval = vi.spyOn(window, "setInterval");
     const timeout = vi.spyOn(window, "setTimeout");

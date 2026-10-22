@@ -1792,6 +1792,104 @@ describe("WorkflowService", () => {
     },
   );
 
+  it.each(["authoring", "revision", "merge"] as const)(
+    "captures valid late %s documents without starting another turn",
+    async (stage) => {
+      const base = documentWorkflow({ readerReviewEnabled: false });
+      const failedAt = new Date(Date.now() + 1_000).toISOString();
+      const completedAt = new Date(Date.now() + 2_000).toISOString();
+      const mergeId = ThreadId.makeUnsafe("late-merge");
+      const target = stage === "merge" ? mergeId : base.branchA.authorThreadId;
+      const workflow = {
+        ...base,
+        branchA:
+          stage === "merge"
+            ? base.branchA
+            : {
+                ...base.branchA,
+                status: "error" as const,
+                errorStage: stage,
+                error: "Read-only turn timed out",
+                updatedAt: failedAt,
+              },
+        branchB: {
+          ...base.branchB,
+          status: "error" as const,
+          errorStage: "authoring" as const,
+          error: "Paused for test",
+        },
+        merge:
+          stage === "merge"
+            ? {
+                ...base.merge,
+                threadId: mergeId,
+                status: "error" as const,
+                error: "Read-only turn timed out",
+                updatedAt: failedAt,
+              }
+            : base.merge,
+      };
+      harness = await createHarness(
+        makeReadModel({
+          workflow,
+          threads: [
+            completedDocumentThread(target, "late-valid", documentMarkdown, completedAt, false),
+          ],
+        }),
+      );
+      await harness.start();
+      await waitFor(() => {
+        const current = harness!.getSnapshot().planningWorkflows[0]!;
+        return stage === "merge"
+          ? current.merge.status === "manual_review"
+          : current.branchA.status === (stage === "revision" ? "revised" : "plan_saved");
+      });
+      expect(turnStartsForThread(harness.dispatched, target)).toHaveLength(0);
+      expect(
+        harness.getSnapshot().threads.find((thread) => thread.id === target)?.proposedPlans[0]
+          ?.planMarkdown,
+      ).toContain("# Retry safety");
+    },
+  );
+  it("preserves an errored merge when late output cannot be captured", async () => {
+    const base = documentWorkflow({ readerReviewEnabled: false });
+    const mergeId = ThreadId.makeUnsafe("late-invalid-merge");
+    const failedAt = new Date(Date.now() + 1_000).toISOString();
+    const completedAt = new Date(Date.now() + 2_000).toISOString();
+    const merge = {
+      ...base.merge,
+      threadId: mergeId,
+      status: "error" as const,
+      error: "Read-only turn timed out",
+      updatedAt: failedAt,
+    };
+    harness = await createHarness(
+      makeReadModel({
+        workflow: { ...base, merge },
+        threads: [
+          completedDocumentThread(mergeId, "late-invalid", "Still working.", completedAt, false),
+        ],
+      }),
+    );
+    await harness.start();
+    const readsBefore = harness.getReadModel.mock.calls.length;
+    await harness.emit(
+      makeEvent(
+        "thread.turn-processing-quiesced",
+        {
+          threadId: mergeId,
+          turnId: TurnId.makeUnsafe("late-invalid"),
+          processingQuiescedAt: completedAt,
+        },
+        completedAt,
+      ),
+    );
+    await waitFor(() => harness!.getReadModel.mock.calls.length > readsBefore);
+    await harness.drain();
+    expect(turnStartsForThread(harness.dispatched, mergeId)).toHaveLength(0);
+    expect(harness.getSnapshot().planningWorkflows[0]!.merge).toEqual(merge);
+  });
+
   it("repairs an invalid document once with a precise reason, then errors", async () => {
     const base = makeWorkflow();
     const authorId = base.branchA.authorThreadId;

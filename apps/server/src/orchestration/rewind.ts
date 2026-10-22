@@ -480,15 +480,20 @@ export const makeConversationRewind = Effect.gen(function* () {
           }
           yield* update(op.operation_id, "files-confirmed");
         }
+        const retainedTurns = (yield* listHistory(thread.id)).slice(0, op.retained_count);
         yield* engine.dispatch({
           type: "thread.revert.complete",
           operationId: request.operationId,
           commandId: CommandId.makeUnsafe(`rewind-complete:${request.operationId}`),
           threadId: thread.id,
           turnCount: op.retained_count,
-          retainedTurnIds: (yield* listHistory(thread.id))
-            .slice(0, op.retained_count)
-            .flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
+          retainedTurnIds: retainedTurns.flatMap((turn) =>
+            turn.turnId === null ? [] : [turn.turnId],
+          ),
+          retainedMessageIds: retainedTurns.flatMap((turn) => [
+            ...(turn.pendingMessageId ? [turn.pendingMessageId] : []),
+            ...(turn.assistantMessageId ? [turn.assistantMessageId] : []),
+          ]),
           createdAt: new Date().toISOString(),
         });
         yield* sql`DELETE FROM rewind_requests WHERE operation_id = ${request.operationId}`;
@@ -560,7 +565,17 @@ export const makeConversationRewind = Effect.gen(function* () {
               },
               createdAt: new Date().toISOString(),
             })
-            .pipe(Effect.catchCause(() => Effect.void));
+            .pipe(
+              Effect.catchCause((activityCause) =>
+                Cause.hasInterruptsOnly(activityCause)
+                  ? Effect.failCause(activityCause)
+                  : Effect.logError("Could not publish conversation rewind failure", {
+                      threadId: request.threadId,
+                      operationId: request.operationId,
+                      cause: Cause.pretty(activityCause),
+                    }),
+              ),
+            );
           if (!op) {
             yield* Effect.logError("Conversation rewind preflight failed", {
               threadId: request.threadId,

@@ -1539,10 +1539,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
         }
         let data = yield* store.listByThread(item.threadId);
         if (item.status === "failed") {
-          if (
-            item.lastErrorCode === "delivery_rejected" ||
-            item.lastErrorCode === "delivery_ambiguous"
-          ) {
+          if (isAdmittedDeliveryQueueItem(item)) {
             return yield* new NextTurnQueueStorageError({
               message:
                 "Resolve this provider delivery with Recheck, Retry, or Discard before running it.",

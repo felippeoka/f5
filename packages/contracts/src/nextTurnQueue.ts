@@ -84,7 +84,10 @@ export const NextTurnQueueItem = Schema.Struct({
 });
 export type NextTurnQueueItem = typeof NextTurnQueueItem.Type;
 
-/** Admitted turns must be recovered through delivery actions rather than queue edits. */
+/**
+ * Failed queue rows marked for delivery-only recovery. Command receipts remain
+ * the server's authority for admission; this marker controls recovery presentation.
+ */
 export function isAdmittedDeliveryQueueItem(item: NextTurnQueueItem): boolean {
   return (
     item.status === "failed" &&
