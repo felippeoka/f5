@@ -11,7 +11,7 @@ import { ProjectionProjectRepository } from "../../persistence/Services/Projecti
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { CheckpointInvariantError, CheckpointUnavailableError } from "../Errors.ts";
 import { checkpointRefForThreadTurn } from "../Utils.ts";
-import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
+import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
   CheckpointDiffQuery,
@@ -79,10 +79,10 @@ const make = Effect.gen(function* () {
       const project = Option.getOrUndefined(
         yield* projectRepository.getById({ projectId: thread.projectId }),
       );
-      const workspaceCwd = resolveThreadWorkspaceCwd({
-        thread: { projectId: thread.projectId, worktreePath: thread.worktreePath },
-        projects: project ? [{ id: project.projectId, workspaceRoot: project.workspaceRoot }] : [],
-      });
+      const workspaceCwd = threadWorkspaceCwd(
+        thread,
+        project ? { kind: project.kind, workspaceRoot: project.workspaceRoot } : undefined,
+      );
       if (!workspaceCwd) {
         return yield* new CheckpointInvariantError({
           operation,

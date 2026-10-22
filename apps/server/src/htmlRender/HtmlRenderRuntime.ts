@@ -6,6 +6,8 @@ import {
   type HtmlPreviewInput,
   type ThreadId,
 } from "@t3tools/contracts";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
+import { threadWorkspaceCwd, type WorkspaceThread } from "@t3tools/shared/threadWorkspace";
 import { Effect, FileSystem, Path } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ingestActivityAttachment } from "../activityAttachments.ts";
@@ -13,6 +15,26 @@ import { ThreadToolError } from "../mcp/threadMcpTools.ts";
 import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
 import { prepareHtmlRender } from "./prepareHtmlRender.ts";
 import type { makeHtmlPreviewBroker } from "./HtmlPreviewBroker.ts";
+
+/**
+ * Folders whose absolute image paths a page may inline. A scratch thread gets
+ * only its own folder, never the shared scratch root its siblings live in.
+ */
+export const htmlRenderImageRoots = (
+  thread: WorkspaceThread,
+  project: { readonly kind?: string | undefined; readonly workspaceRoot: string },
+  attachmentsDir: string,
+): ReadonlyArray<string> => {
+  if (isScratchProject(project)) {
+    const workspace = threadWorkspaceCwd(thread, project);
+    return [...(workspace ? [workspace] : []), attachmentsDir];
+  }
+  return [
+    project.workspaceRoot,
+    ...(thread.worktreePath ? [thread.worktreePath] : []),
+    attachmentsDir,
+  ];
+};
 
 export const makeHtmlRenderRuntime = (input: {
   readonly engine: Pick<OrchestrationEngineShape, "getReadModel" | "dispatch">;
@@ -34,11 +56,7 @@ export const makeHtmlRenderRuntime = (input: {
           return yield* new ThreadToolError({ message: "This thread's project is unavailable." });
         return yield* Effect.tryPromise({
           try: () =>
-            prepareHtmlRender(html, [
-              project.workspaceRoot,
-              ...(thread.worktreePath ? [thread.worktreePath] : []),
-              input.attachmentsDir,
-            ]),
+            prepareHtmlRender(html, htmlRenderImageRoots(thread, project, input.attachmentsDir)),
           catch: () =>
             new ThreadToolError({
               message:
