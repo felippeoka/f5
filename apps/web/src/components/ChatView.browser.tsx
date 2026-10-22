@@ -5658,6 +5658,8 @@ describe("ChatView timeline (full app)", () => {
         () => document.querySelector<HTMLElement>('[data-slot="messages-scroll-container"]'),
         "Messages scroll container should render before testing scroll shortcuts.",
       );
+      // Scrolling up during the list's initial pin to the end gets undone.
+      await waitForTimelineScrollToSettle();
       scrollContainer.scrollTo({ top: 0, behavior: "auto" });
       scrollContainer.scrollTop = 0;
       scrollContainer.dispatchEvent(new Event("scroll"));

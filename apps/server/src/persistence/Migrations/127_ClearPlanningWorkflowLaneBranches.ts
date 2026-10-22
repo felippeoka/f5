@@ -20,6 +20,16 @@ export default Effect.gen(function* () {
     return;
   }
 
+  // Schema-repair paths can reach this migration with a minimal thread table.
+  const columns = yield* sql<{ readonly name: string }>`
+    SELECT name
+    FROM pragma_table_info('projection_threads')
+  `;
+  const existingColumns = new Set(columns.map((column) => column.name));
+  if (!existingColumns.has("branch") || !existingColumns.has("worktree_path")) {
+    return;
+  }
+
   yield* sql`
     UPDATE projection_threads
     SET branch = NULL
