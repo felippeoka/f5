@@ -57,6 +57,12 @@ import { capturePermissions, openComputerPermissionSettings } from "./computer/p
 import type { ProfileRecord } from "@t3tools/contracts";
 import { desktopDefaultProfile, readDesktopProfiles } from "./profileRegistryRead";
 import {
+  PromptLinkInbox,
+  promptLinkInArgv,
+  promptLinkSchemeFor,
+  protocolClientRegistration,
+} from "./promptLinkInbox";
+import {
   profilePartition,
   profileWindowArguments,
   singleProfileOpen,
@@ -3168,6 +3174,41 @@ async function openProfileOnce(profileId: string): Promise<boolean> {
   return true;
 }
 
+const PROMPT_LINK_SCHEME_FOR_BUILD = promptLinkSchemeFor(isDevelopment);
+const PROMPT_LINKS_AVAILABLE_CHANNEL = "desktop:prompt-links-available";
+const promptLinks = new PromptLinkInbox(PROMPT_LINK_SCHEME_FOR_BUILD);
+
+function registerPromptLinkProtocol(): void {
+  const registration = protocolClientRegistration({
+    defaultApp: Boolean(process.defaultApp),
+    execPath: process.execPath,
+    entryScript: process.argv[1] ? Path.resolve(process.argv[1]) : undefined,
+  });
+  const registered = registration
+    ? app.setAsDefaultProtocolClient(PROMPT_LINK_SCHEME_FOR_BUILD, registration.path, [
+        ...registration.args,
+      ])
+    : app.setAsDefaultProtocolClient(PROMPT_LINK_SCHEME_FOR_BUILD);
+  writeDesktopLogHeader(
+    `prompt link protocol ${PROMPT_LINK_SCHEME_FOR_BUILD} registered=${registered}`,
+  );
+}
+
+/**
+ * The running instance opens every link in the profile in use, so a link never starts a second
+ * F5. Renderers take queued links when they load, when told, and when their window gains focus.
+ */
+function receivePromptLink(url: string): void {
+  if (!promptLinks.receive(url)) {
+    writeDesktopLogHeader("prompt link ignored: not a link this build opens");
+    return;
+  }
+  if (!app.isReady() || isQuitting) return;
+  reopenApplication();
+  for (const window of BrowserWindow.getAllWindows())
+    if (!window.isDestroyed()) window.webContents.send(PROMPT_LINKS_AVAILABLE_CHANNEL);
+}
+
 function reopenApplication(): void {
   if (!app.isReady() || isQuitting) return;
   const window = BrowserWindow.getFocusedWindow();
@@ -3224,6 +3265,18 @@ function registerIpcHandlers(): void {
       return action();
     });
   }
+  ipcMain.handle("desktop:take-prompt-links", (event) => {
+    const runtime = runtimeForRenderer(event.sender.id);
+    const links = promptLinks.take();
+    let profileCount = 1;
+    try {
+      profileCount = readDesktopProfiles(STATE_DIR).length;
+    } catch {
+      // Without a readable registry there is only the default profile to name.
+    }
+    // With several profiles, the user is told which one the link opened in.
+    return { links, profileName: profileCount > 1 ? runtime.profile.name : null };
+  });
   ipcMain.handle("desktop:switch-profile", async (event, id: unknown) => {
     runtimeForRenderer(event.sender.id);
     if (typeof id !== "string") return false;
@@ -3927,7 +3980,21 @@ function createWindow(
 app.setPath("userData", resolveUserDataPath());
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
-app.on("second-instance", reopenApplication);
+app.on("second-instance", (_event, argv) => {
+  const link = promptLinkInArgv(argv, PROMPT_LINK_SCHEME_FOR_BUILD);
+  if (link) receivePromptLink(link);
+  else reopenApplication();
+});
+// macOS delivers links as `open-url`, possibly before the app is ready; Windows and Linux pass
+// them on the command line, to this launch or to a second one.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  receivePromptLink(url);
+});
+{
+  const launchLink = promptLinkInArgv(process.argv, PROMPT_LINK_SCHEME_FOR_BUILD);
+  if (launchLink) promptLinks.receive(launchLink);
+}
 configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
@@ -4069,6 +4136,7 @@ app
     }
     configureApplicationMenu();
     registerDesktopProtocol();
+    registerPromptLinkProtocol();
     configureAutoUpdater();
     const bootstrapReady = bootstrapGate.start(bootstrap);
     void bootstrapReady.catch((error) => {

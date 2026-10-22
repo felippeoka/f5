@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { DESKTOP_MAC_EXTEND_INFO } from "./lib/desktop-mac-info.ts";
+import { DESKTOP_PROTOCOLS } from "./lib/desktop-protocols.ts";
 import { withoutSigningCredentials } from "./lib/signing-environment.ts";
 
 import { spawnSync } from "node:child_process";
@@ -460,6 +461,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       onlyLoadAppFromAsar: true,
     },
     productName,
+    protocols: DESKTOP_PROTOCOLS,
     artifactName: "F5-${version}-${arch}.${ext}",
     asarUnpack: DESKTOP_ASAR_UNPACK,
     ...(platform !== "linux"

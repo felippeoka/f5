@@ -116,6 +116,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener("desktop:profiles-changed", wrapped);
     };
   },
+  takePromptLinks: () => ipcRenderer.invoke("desktop:take-prompt-links"),
+  onPromptLinksAvailable: (listener) => {
+    const wrapped = () => listener();
+    ipcRenderer.on("desktop:prompt-links-available", wrapped);
+    return () => {
+      ipcRenderer.removeListener("desktop:prompt-links-available", wrapped);
+    };
+  },
   getPathForFile: (file) => {
     const resolvedPath = webUtils.getPathForFile(file);
     return resolvedPath.length > 0 ? resolvedPath : null;

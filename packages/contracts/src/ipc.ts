@@ -626,6 +626,13 @@ export interface DesktopBridge {
   switchProfile?: (profileId: string) => Promise<boolean>;
   stopProfile?: (profileId: string) => Promise<boolean>;
   onProfilesChanged?: (listener: () => void) => () => void;
+  /** Takes the prompt links the OS opened F5 with, oldest first. */
+  takePromptLinks?: () => Promise<{
+    readonly links: readonly string[];
+    /** The profile the links opened in, when there is more than one to choose from. */
+    readonly profileName: string | null;
+  }>;
+  onPromptLinksAvailable?: (listener: () => void) => () => void;
   getWsUrl: () => string | null;
   getPathForFile?: (file: File) => string | null;
   resolveRealPath?: (pathValue: string) => string | null;
