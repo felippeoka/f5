@@ -13,6 +13,54 @@ const layer = it.layer(
 const at = "2026-01-01T00:00:00.000Z";
 
 layer("accepted pending turn reconciliation", (it) => {
+  for (const pendingMessageId of [null, MessageId.makeUnsafe("original-boundary")]) {
+    it.effect(
+      `lists a retried delivery boundary with ${pendingMessageId ? "existing" : "missing"} pending metadata`,
+      () =>
+        Effect.gen(function* () {
+          const turns = yield* ProjectionTurnRepository;
+          const sql = yield* SqlClient.SqlClient;
+          const threadId = ThreadId.makeUnsafe(`retry-boundary-${pendingMessageId}`);
+          const turnId = TurnId.makeUnsafe("retried-turn");
+          yield* turns.upsertByTurnId({
+            threadId,
+            turnId,
+            pendingMessageId,
+            assistantMessageId: null,
+            state: "completed",
+            requestedAt: at,
+            startedAt: at,
+            completedAt: at,
+            processingQuiescedAt: at,
+            checkpointTurnCount: null,
+            checkpointRef: null,
+            checkpointStatus: null,
+            checkpointFiles: [],
+          });
+          // Neither an unresolved delivery, an accepted steer, nor another thread
+          // may supply (or multiply) this turn's conversation boundary.
+          for (const [id, state, owner, type] of [
+            ["unresolved", "ambiguous", threadId, "thread.turn-start-requested"],
+            ["other", "accepted", "other-thread", "thread.turn-start-requested"],
+            ["steer", "accepted", threadId, "thread.turn-steer-requested"],
+            ["retry", "accepted", threadId, "thread.turn-start-requested"],
+          ]) {
+            yield* sql`INSERT INTO provider_turn_deliveries
+            (delivery_id, thread_id, command_id, message_id, state, provider_turn_id, event_json, created_at, updated_at)
+            VALUES (${`${threadId}-${id}`}, ${owner}, ${`${threadId}-${id}`}, ${id}, ${state}, ${turnId}, ${JSON.stringify({ type })}, ${at}, ${at})`;
+          }
+          const listed = yield* turns.listByThreadId({ threadId });
+          assert.equal(listed.length, 1);
+          assert.equal(listed[0]!.pendingMessageId, pendingMessageId ?? "retry");
+          // This read-time repair leaves the stored turn untouched.
+          assert.equal(
+            Option.getOrThrow(yield* turns.getByTurnId({ threadId, turnId })).pendingMessageId,
+            pendingMessageId,
+          );
+        }),
+    );
+  }
+
   for (const terminal of [false, true]) {
     it.effect(
       `clears accepted feedback without changing its ${terminal ? "completed" : "running"} turn`,

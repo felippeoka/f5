@@ -86,6 +86,42 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 describe("NextTurnQueueRow usage limit timing", () => {
+  it.each(["delivery_rejected", "delivery_ambiguous"])(
+    "reserves %s recovery for the banner",
+    async (lastErrorCode) => {
+      active = await render(
+        <NextTurnQueueRow
+          {...props}
+          canSteer
+          onSteer={async () => {}}
+          item={item({
+            status: "failed",
+            lastErrorCode,
+            lastErrorDetail: "Detailed provider error",
+            notBefore: null,
+          })}
+        />,
+      );
+      await expect
+        .element(page.getByText(/^Delivery unconfirmed\. Use Recheck, Retry or Discard above\./))
+        .toBeVisible();
+      for (const name of [
+        "Retry queued turn",
+        "Run queued turn now",
+        "Steer now",
+        "Edit queued turn",
+        "Duplicate queued turn",
+        "Move queued turn to top",
+      ]) {
+        await expect.element(page.getByRole("button", { name })).not.toBeInTheDocument();
+      }
+      await expect.element(page.getByText("Detailed provider error")).not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole("button", { name: "Drag to reorder queued turn" }))
+        .toBeDisabled();
+      await expect.element(page.getByRole("button", { name: "Cancel queued turn" })).toBeDisabled();
+    },
+  );
   it("uses an absolute date and one deadline timer instead of an interval", async () => {
     const interval = vi.spyOn(window, "setInterval");
     const timeout = vi.spyOn(window, "setTimeout");

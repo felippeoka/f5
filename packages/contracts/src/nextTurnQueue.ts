@@ -84,6 +84,14 @@ export const NextTurnQueueItem = Schema.Struct({
 });
 export type NextTurnQueueItem = typeof NextTurnQueueItem.Type;
 
+/** Admitted turns must be recovered through delivery actions rather than queue edits. */
+export function isAdmittedDeliveryQueueItem(item: NextTurnQueueItem): boolean {
+  return (
+    item.status === "failed" &&
+    (item.lastErrorCode === "delivery_rejected" || item.lastErrorCode === "delivery_ambiguous")
+  );
+}
+
 export const NextTurnQueueSnapshot = Schema.Struct({
   workspaceTransition: Schema.optional(Schema.NullOr(WorkspaceTransitionSnapshot)),
   threadId: ThreadId,

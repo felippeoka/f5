@@ -1,3 +1,4 @@
+import { isAdmittedDeliveryQueueItem } from "@t3tools/contracts";
 import { WorkspaceTransitionSummary } from "./WorkspaceTransitionBanner";
 import type {
   CommandId,
@@ -174,6 +175,14 @@ export function NextTurnQueuePanel({
       ),
     [foldedItemId, snapshot?.items],
   );
+  const clearKeepIds = new Set([
+    ...hiddenIds,
+    ...(snapshot?.items.filter(isAdmittedDeliveryQueueItem).map((item) => item.itemId) ?? []),
+  ]);
+  const handleMutationError = (error: unknown) => {
+    toastManager.add({ type: "error", title: errorMessage(error) });
+    void load();
+  };
   const visibleOrder = order.filter((itemId) => !hiddenIds.has(itemId));
   const orderedItems = visibleOrder.flatMap((itemId) => {
     const item = itemsById.get(itemId);
@@ -342,7 +351,7 @@ export function NextTurnQueuePanel({
           >
             {snapshot.paused ? <PlayIcon /> : <PauseIcon />}
           </Button>
-          {snapshot.items.length > hiddenIds.size ? (
+          {snapshot.items.length > clearKeepIds.size ? (
             <Button
               type="button"
               variant="ghost"
@@ -355,8 +364,8 @@ export function NextTurnQueuePanel({
                     threadId,
                     scope: "all",
                     expectedRevision: snapshot.revision,
-                    // The card owns a folded continue; Clear only removes the listed turns.
-                    ...(hiddenIds.size > 0 ? { keepItemIds: [...hiddenIds] } : {}),
+                    // Folded continuations and admitted deliveries have their own recovery actions.
+                    ...(clearKeepIds.size > 0 ? { keepItemIds: [...clearKeepIds] } : {}),
                   })
                   .then((result) => {
                     applySnapshot(result.snapshot);
@@ -376,12 +385,14 @@ export function NextTurnQueuePanel({
                                 itemIds: result.removed.map((item) => item.itemId),
                                 expectedRevision: current.revision,
                               })
-                              .then((restored) => applySnapshot(restored.snapshot));
+                              .then((restored) => applySnapshot(restored.snapshot))
+                              .catch(handleMutationError);
                           },
                         },
                       });
                     }
-                  });
+                  })
+                  .catch(handleMutationError);
               }}
             >
               Clear
@@ -519,7 +530,8 @@ export function NextTurnQueuePanel({
                                 itemIds: [candidate.itemId],
                                 expectedRevision: current.revision,
                               })
-                              .then((restored) => applySnapshot(restored.snapshot));
+                              .then((restored) => applySnapshot(restored.snapshot))
+                              .catch(handleMutationError);
                           },
                         },
                       });

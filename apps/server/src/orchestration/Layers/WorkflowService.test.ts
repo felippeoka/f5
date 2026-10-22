@@ -1729,6 +1729,69 @@ describe("WorkflowService", () => {
       Effect.runPromise(harness.service.skipDocumentReaderPass({ workflowId: workflow.id })),
     ).rejects.toThrow("Only a failed");
   });
+  it.each(["authoring", "revision"] as const)(
+    "preserves a watchdog %s error when the late document turn completes without a document",
+    async (stage) => {
+      const base = documentWorkflow();
+      const authorId = base.branchA.authorThreadId;
+      const workflow = documentWorkflow({
+        branchA: {
+          ...base.branchA,
+          status: stage === "revision" ? "revising" : "authoring",
+          planTurnId: "original",
+        },
+        branchB: {
+          ...base.branchB,
+          status: "error",
+          errorStage: "authoring",
+          error: "Paused for test",
+        },
+      });
+      harness = await createHarness(
+        makeReadModel({ workflow, threads: [makeThread({ id: authorId })] }),
+      );
+      await harness.start();
+      const failedAt = new Date(Date.now() + 1_000).toISOString();
+      const completedAt = new Date(Date.now() + 2_000).toISOString();
+      const failedBranch = {
+        ...workflow.branchA,
+        status: "error" as const,
+        errorStage: stage,
+        error: "Read-only workflow turn exceeded its time limit.",
+        updatedAt: failedAt,
+      };
+      harness.setSnapshot({
+        ...harness.getSnapshot(),
+        planningWorkflows: [{ ...workflow, branchA: failedBranch }],
+        threads: [
+          completedDocumentThread(
+            authorId,
+            "late-watchdog-turn",
+            "Still working on the document.",
+            completedAt,
+            false,
+          ),
+        ],
+      });
+      const readsBefore = harness.getReadModel.mock.calls.length;
+      await harness.emit(
+        makeEvent(
+          "thread.turn-processing-quiesced",
+          {
+            threadId: authorId,
+            turnId: TurnId.makeUnsafe("late-watchdog-turn"),
+            processingQuiescedAt: completedAt,
+          },
+          completedAt,
+        ),
+      );
+      await waitFor(() => harness!.getReadModel.mock.calls.length > readsBefore);
+      await harness.drain();
+      expect(turnStartsForThread(harness.dispatched, authorId)).toHaveLength(0);
+      expect(harness.getSnapshot().planningWorkflows[0]!.branchA).toEqual(failedBranch);
+    },
+  );
+
   it("repairs an invalid document once with a precise reason, then errors", async () => {
     const base = makeWorkflow();
     const authorId = base.branchA.authorThreadId;

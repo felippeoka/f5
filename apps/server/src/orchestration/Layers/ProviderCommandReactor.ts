@@ -51,7 +51,7 @@ import {
   type TurnId,
   type WorkflowTurnExecutionProfile,
 } from "@t3tools/contracts";
-import { Cause, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Layer, Option, Schema, Scope, Stream } from "effect";
 import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { estimateMessageContextCharacters, inferProviderForModel } from "@t3tools/shared/model";
 import { getProviderTurnInputLengthIssue } from "@t3tools/shared/providerInput";
@@ -367,6 +367,7 @@ export function toProviderTurnDeliveryError(error: unknown): ProviderTurnDeliver
 }
 
 const make = Effect.gen(function* () {
+  const reactorScope = yield* Scope.Scope;
   // Serializes turn delivery with archive stops and MCP-apply restarts per thread, so Apply
   // never stops a session between its idle check and a new turn. Separate
   // from `withProviderThreadAccess`, which startSession takes itself.
@@ -646,6 +647,7 @@ const make = Effect.gen(function* () {
       readonly modelOptions?: ProviderModelOptions;
       readonly providerOptions?: ProviderStartOptions;
       readonly workflowExecutionProfile?: WorkflowTurnExecutionProfile;
+      readonly keepWorkflowExecutionProfile?: boolean;
     },
   ) {
     return yield* Effect.gen(function* () {
@@ -674,10 +676,16 @@ const make = Effect.gen(function* () {
             branch: thread.branch,
           });
       }
+      const activeWorkflowExecutionProfile = readPersistedInstructionContext(
+        persistedBinding?.runtimePayload,
+      )?.workflowExecutionProfile;
+      const desiredWorkflowExecutionProfile = options?.keepWorkflowExecutionProfile
+        ? activeWorkflowExecutionProfile
+        : options?.workflowExecutionProfile;
       const instructionContext: Partial<SharedInstructionInput> = {
         ...baseInstructionContext,
-        ...(options?.workflowExecutionProfile
-          ? { workflowExecutionProfile: options.workflowExecutionProfile }
+        ...(desiredWorkflowExecutionProfile
+          ? { workflowExecutionProfile: desiredWorkflowExecutionProfile }
           : {}),
       };
       let recoveredPriorWorkSummary: string | undefined;
@@ -1056,11 +1064,8 @@ const make = Effect.gen(function* () {
           currentSessionCwd !== null &&
           desiredSessionCwd !== null &&
           currentSessionCwd !== desiredSessionCwd;
-        const activeWorkflowExecutionProfile = readPersistedInstructionContext(
-          persistedBinding?.runtimePayload,
-        )?.workflowExecutionProfile;
         const shouldRestartForWorkflowExecutionProfileChange =
-          activeWorkflowExecutionProfile !== options?.workflowExecutionProfile;
+          activeWorkflowExecutionProfile !== desiredWorkflowExecutionProfile;
 
         if (
           !runtimeModeChanged &&
@@ -1137,7 +1142,7 @@ const make = Effect.gen(function* () {
           shouldRestartForCwdChange,
           shouldRestartForWorkflowExecutionProfileChange,
           activeWorkflowExecutionProfile: activeWorkflowExecutionProfile ?? null,
-          desiredWorkflowExecutionProfile: options?.workflowExecutionProfile ?? null,
+          desiredWorkflowExecutionProfile: desiredWorkflowExecutionProfile ?? null,
           currentSessionCwd,
           desiredSessionCwd,
           persistedMcpEffectiveConfigVersion: persistedBinding?.mcpEffectiveConfigVersion ?? null,
@@ -2673,6 +2678,29 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const refreshSessionForThread = (
+    threadId: ThreadId,
+    createdAt: string,
+    preferredInstanceId?: ProviderInstanceId,
+  ) =>
+    withThreadTurnGate(
+      threadId,
+      ensureSessionForThread(threadId, createdAt, {
+        keepWorkflowExecutionProfile: true,
+        ...(preferredInstanceId !== undefined ? { preferredInstanceId } : {}),
+      }),
+    ).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("provider command reactor failed to refresh session", {
+              threadId,
+              cause: Cause.pretty(cause),
+            }),
+      ),
+      Effect.forkIn(reactorScope),
+    );
+
   const processDomainEvent = (event: ProviderIntentEvent) =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({
@@ -2745,7 +2773,7 @@ const make = Effect.gen(function* () {
           if (!thread?.session || thread.session.status === "stopped") {
             return;
           }
-          yield* ensureSessionForThread(event.payload.threadId, event.occurredAt);
+          yield* refreshSessionForThread(event.payload.threadId, event.occurredAt);
           break;
         }
         case "thread.meta-updated": {
@@ -2775,10 +2803,10 @@ const make = Effect.gen(function* () {
             selectedProvider !== undefined && selectedProvider === currentProvider
               ? event.payload.modelSelection?.instanceId
               : undefined;
-          yield* ensureSessionForThread(
+          yield* refreshSessionForThread(
             event.payload.threadId,
             event.occurredAt,
-            preferredInstanceId !== undefined ? { preferredInstanceId } : undefined,
+            preferredInstanceId,
           );
           break;
         }

@@ -1878,11 +1878,18 @@ export const makeWorkflowService = Effect.gen(function* () {
       }
 
       const error = `${isDocumentWorkflow(workflow) ? "Invalid document" : "Invalid proposed-plan capture"}: ${validation.error}`;
+      const branchStage =
+        branch?.status === "error"
+          ? planningWorkflowBranchFailureStage(branch)
+          : branch?.status === "revising"
+            ? "revision"
+            : "authoring";
+      if (branchStage === "reviews") return;
       const budgetError = workflowBudgetError(workflow);
       if (
         budgetError &&
         (branch
-          ? branch.status === "revising"
+          ? branchStage === "revision"
             ? (branch.revisionFormatRepairAttempts ?? 0)
             : (branch.authorFormatRepairAttempts ?? 0)
           : (workflow.merge.formatRepairAttempts ?? 0)) < 1
@@ -1891,7 +1898,7 @@ export const makeWorkflowService = Effect.gen(function* () {
           branch && input.branchId
             ? markBranchError(workflow, input.branchId, {
                 error: budgetError.message,
-                stage: branch.status === "revising" ? "revision" : "authoring",
+                stage: branchStage ?? "authoring",
                 updatedAt: input.createdAt,
               })
             : markMergeError(workflow, budgetError.message, input.createdAt),
@@ -1899,7 +1906,7 @@ export const makeWorkflowService = Effect.gen(function* () {
         return;
       }
       if (branch && input.branchId) {
-        const stage = branch.status === "revising" ? ("revision" as const) : ("authoring" as const);
+        const stage = branchStage ?? "authoring";
         const formatRepairAttempts =
           stage === "revision"
             ? (branch.revisionFormatRepairAttempts ?? 0)
@@ -2943,6 +2950,9 @@ export const makeWorkflowService = Effect.gen(function* () {
           turnId,
         }).valid;
         if (!hasPlan) {
+          // A watchdog failure stays retryable until the user retries it. Late
+          // output must not repair the failed turn or resend the original brief.
+          if (branch.status === "error") return workflow;
           const synthesized = yield* maybeSynthesizeProposedPlan({
             workflow,
             provider: branch.authorSlot.provider,

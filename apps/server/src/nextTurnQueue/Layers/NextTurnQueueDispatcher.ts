@@ -38,6 +38,7 @@ import { WorktreeSetupGate } from "../../project/Services/WorktreeSetupGate.ts";
 import {
   CommandId,
   MAX_QUEUED_TURNS_PER_THREAD,
+  isAdmittedDeliveryQueueItem,
   ThreadId,
   type NextTurnQueueBlockedKind,
   type NextTurnQueueItem,
@@ -123,9 +124,7 @@ function isDeliveryFailureCode(code: string | null | undefined): boolean {
   return code === "delivery_rejected" || code === "delivery_ambiguous";
 }
 
-function isFailedDeliveryItem(item: NextTurnQueueItem): boolean {
-  return item.status === "failed" && isDeliveryFailureCode(item.lastErrorCode);
-}
+const isFailedDeliveryItem = isAdmittedDeliveryQueueItem;
 
 function storageError(cause: unknown): NextTurnQueueStorageError {
   return new NextTurnQueueStorageError({
@@ -1034,6 +1033,9 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
       const threadId = event.aggregateKind === "thread" ? (event.aggregateId as ThreadId) : null;
       if (threadId === null) return;
       switch (event.type) {
+        case "thread.activity-appended":
+          if (event.payload.activity.kind === "conversation.rewind.failed") yield* notify(threadId);
+          return;
         case "thread.session-stop-requested":
           yield* cancelUnsentResume(threadId);
           yield* notify(threadId);

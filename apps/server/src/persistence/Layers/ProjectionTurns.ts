@@ -200,29 +200,43 @@ export const makeProjectionTurnRepository = Effect.gen(function* () {
     execute: ({ threadId }) =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          pending_message_id AS "pendingMessageId",
-          assistant_message_id AS "assistantMessageId",
-          state,
-          requested_at AS "requestedAt",
-          started_at AS "startedAt",
-          completed_at AS "completedAt",
-          processing_quiesced_at AS "processingQuiescedAt",
-          checkpoint_turn_count AS "checkpointTurnCount",
-          checkpoint_ref AS "checkpointRef",
-          checkpoint_status AS "checkpointStatus",
-          checkpoint_files_json AS "checkpointFiles"
-        FROM projection_turns
-        WHERE thread_id = ${threadId}
+          t.thread_id AS "threadId",
+          t.turn_id AS "turnId",
+          COALESCE(t.pending_message_id, d.message_id) AS "pendingMessageId",
+          t.assistant_message_id AS "assistantMessageId",
+          t.state,
+          t.requested_at AS "requestedAt",
+          t.started_at AS "startedAt",
+          t.completed_at AS "completedAt",
+          t.processing_quiesced_at AS "processingQuiescedAt",
+          t.checkpoint_turn_count AS "checkpointTurnCount",
+          t.checkpoint_ref AS "checkpointRef",
+          t.checkpoint_status AS "checkpointStatus",
+          t.checkpoint_files_json AS "checkpointFiles"
+        FROM projection_turns t
+        LEFT JOIN provider_turn_deliveries d
+          ON t.pending_message_id IS NULL
+          AND d.thread_id = t.thread_id
+          AND d.provider_turn_id = t.turn_id
+          AND d.state = 'accepted'
+          -- Steers share a provider turn but do not define its rewind boundary.
+          AND d.rowid = (
+            SELECT first.rowid FROM provider_turn_deliveries first
+            WHERE first.thread_id = t.thread_id AND first.provider_turn_id = t.turn_id
+              AND first.state = 'accepted'
+              AND json_extract(first.event_json, '$.type') IS NOT 'thread.turn-steer-requested'
+            ORDER BY first.created_at, first.rowid
+            LIMIT 1
+          )
+        WHERE t.thread_id = ${threadId}
         ORDER BY
           CASE
-            WHEN checkpoint_turn_count IS NULL THEN 1
+            WHEN t.checkpoint_turn_count IS NULL THEN 1
             ELSE 0
           END ASC,
-          checkpoint_turn_count ASC,
-          requested_at ASC,
-          turn_id ASC
+          t.checkpoint_turn_count ASC,
+          t.requested_at ASC,
+          t.turn_id ASC
       `,
   });
 
