@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  isScratchProject,
-  isScratchThreadFolder,
-  scratchThreadFolderName,
-} from "./scratchProject";
+import { isScratchProject, isScratchThreadFolder, scratchThreadFolderName } from "./scratchProject";
 
 describe("scratch project helpers", () => {
   it("names a thread folder from its date, first words and id", () => {
