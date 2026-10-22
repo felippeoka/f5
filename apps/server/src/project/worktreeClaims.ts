@@ -270,9 +270,8 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
  * Why ignored files make removing `worktreePath` unsafe, or null when they do
  * not. `git worktree remove` refuses on tracked changes and untracked files but
  * silently deletes ignored ones. Manual removal requires explicit approval of
- * every ignored entry. Automatic settlement cleanup protects environment files
- * and audits the remaining ignored paths; storage maintenance uses its own
- * conservative build-output policy.
+ * every ignored entry. Automatic cleanup and storage maintenance may delete
+ * only well-known build and cache output.
  */
 export const ignoredFilesBlockRemoval = (
   git: GitCoreShape,
@@ -297,11 +296,9 @@ export const ignoredFilesBlockRemoval = (
           ? policy.approvedEntries === undefined
             ? "Ignored files and folders require explicit deletion confirmation."
             : "Ignored files changed since review. Inspect this checkout again."
-          : policy.kind === "automatic"
-            ? `protected ignored environment files (${blocking.slice(0, 3).join(", ")})`
-            : policy.kind === "rebuildable"
-              ? `ignored files that are not build output (${blocking.slice(0, 3).join(", ")})`
-              : `ignored files other than node_modules/ (${blocking.slice(0, 3).join(", ")})`
+          : policy.kind === "rebuildable"
+            ? `ignored files that are not build output (${blocking.slice(0, 3).join(", ")})`
+            : `ignored files other than node_modules/ (${blocking.slice(0, 3).join(", ")})`
         : null;
     }),
     Effect.orElseSucceed(() => "ignored files could not be listed"),
@@ -374,11 +371,11 @@ const isStorageCleanupPolicy = (
 const ignoredRemovalPolicy = (policy: WorktreeRemovalPolicy): IgnoredFilesRemovalPolicy =>
   policy.kind === "manual"
     ? { kind: "manual", approvedEntries: policy.approvedIgnoredEntries }
-    : policy.kind === "autoCleanup"
-      ? { kind: "automatic" }
-      : isStorageCleanupPolicy(policy)
-        ? { kind: "rebuildable" }
-        : { kind: "protect" };
+    : // Automatic cleanup may run unattended on rules users enabled long ago, so
+      // it gets no wider an ignored-file exception than storage maintenance.
+      policy.kind === "autoCleanup" || isStorageCleanupPolicy(policy)
+      ? { kind: "rebuildable" }
+      : { kind: "protect" };
 
 /** Reviewed uncommitted changes Storage cleanup may discard. */
 export interface DiscardableChanges {

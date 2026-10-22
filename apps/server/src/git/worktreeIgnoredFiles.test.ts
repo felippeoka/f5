@@ -62,7 +62,7 @@ it("ignores approval data in protection mode and retains the node_modules exempt
   expect(blockingIgnoredEntries([".env", "node_modules/"], policy)).toEqual([".env"]);
 });
 
-it("limits the relaxed ignored-file policy to an explicit automatic cleanup", () => {
+it("lets automatic cleanup delete build output but never local files", () => {
   const entries = [
     "dist/",
     "private.db",
@@ -71,9 +71,15 @@ it("limits the relaxed ignored-file policy to an explicit automatic cleanup", ()
     ".env",
     "nested/.env.production",
   ];
-  expect(blockingIgnoredEntries(entries, { kind: "automatic" })).toEqual([
+  expect(
+    blockingIgnoredEntries([...entries, "id_rsa", "terraform.tfstate"], { kind: "rebuildable" }),
+  ).toEqual([
+    "private.db",
+    ".envrc",
     ".env",
     "nested/.env.production",
+    "id_rsa",
+    "terraform.tfstate",
   ]);
   expect(blockingIgnoredEntries(entries, { kind: "manual" })).toEqual(entries);
   expect(blockingIgnoredEntries(entries, { kind: "protect" })).toEqual(

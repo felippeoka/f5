@@ -53,9 +53,7 @@ describe("effective workspace claims and removal gate", () => {
             policy,
           });
           expect(result.blockedReasons.join(" ")).toContain(
-            kind === "autoCleanup"
-              ? "protected ignored environment files"
-              : "ignored files that are not build output",
+            "ignored files that are not build output",
           );
           expect(result.ignoredFiles?.requiresApproval).toBe(false);
           expect(result.ignoredFiles?.canRemoveAfterApproval).toBe(false);

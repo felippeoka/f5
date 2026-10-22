@@ -155,12 +155,13 @@ describe("worktree cleanup rules", () => {
     expect(newerInteraction("not a date", newer)).toBe("not a date");
   });
 
-  it("protects environment-file path segments while allowing other ignored content", () => {
+  it("lets automatic cleanup delete build output but keeps local ignored files", () => {
     expect(
-      blockingIgnoredEntries(["node_modules/", "packages/web/node_modules/", ".env", "dist/"], {
-        kind: "automatic",
-      }),
-    ).toEqual([".env"]);
+      blockingIgnoredEntries(
+        ["node_modules/", "packages/web/node_modules/", ".env", "dist/", ".envrc", "id_rsa"],
+        { kind: "rebuildable" },
+      ),
+    ).toEqual([".env", ".envrc", "id_rsa"]);
   });
 
   it("bounds ignored-path audit previews in UTF-8 bytes and reports omitted paths", () => {
@@ -396,7 +397,7 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
           yield* Effect.promise(() => fs.writeFile(path.join(worktreePath, ".env"), "SECRET=1\n"));
           const ignored = yield* worker.runOnce;
           expect(ignored[0]).toMatchObject({ action: "skip" });
-          expect(ignored[0]!.reason).toContain("protected ignored environment files (.env)");
+          expect(ignored[0]!.reason).toContain("ignored files that are not build output (.env)");
 
           yield* Effect.promise(() => fs.rm(path.join(worktreePath, ".env")));
           yield* Effect.promise(() => fs.writeFile(path.join(worktreePath, "new.txt"), "x\n"));
@@ -447,6 +448,24 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
     );
   });
 
+  it("keeps ignored local files such as .envrc and private keys", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, worktreePath, root }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            fs.appendFile(path.join(root, ".git", "info", "exclude"), "\n.envrc\nid_rsa\n"),
+          );
+          yield* Effect.promise(() => fs.writeFile(path.join(worktreePath, ".envrc"), "keep"));
+          yield* Effect.promise(() => fs.writeFile(path.join(worktreePath, "id_rsa"), "keep"));
+          const result = yield* worker.runOnce;
+          expect(result[0]).toMatchObject({ action: "skip" });
+          expect(result[0]!.reason).toContain(".envrc");
+          expect(yield* Effect.promise(() => exists(path.join(worktreePath, "id_rsa")))).toBe(true);
+        }),
+      ),
+    );
+  });
+
   it("allows ignored build output and lists it in the removal audit", async () => {
     await Effect.runPromise(
       withWorktree(unchangedRule, ({ worker, worktreePath, root }) =>
@@ -478,7 +497,7 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
             fs.writeFile(path.join(directory, ".env.local"), "keep this credential"),
           );
           const protectedResult = yield* worker.runOnce;
-          expect(protectedResult[0]!.reason).toContain("protected ignored environment files");
+          expect(protectedResult[0]!.reason).toContain(".env.local");
           expect(
             yield* Effect.promise(() => fs.readFile(path.join(directory, ".env.local"), "utf8")),
           ).toBe("keep this credential");

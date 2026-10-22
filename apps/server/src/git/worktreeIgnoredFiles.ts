@@ -1,9 +1,7 @@
-import { isProtectedIgnoredPath, isManualRemovalIgnoredBlocker } from "./cleanupSafety.ts";
+import { isManualRemovalIgnoredBlocker } from "./cleanupSafety.ts";
 export type IgnoredFilesRemovalPolicy =
   | { readonly kind: "protect" }
-  /** Opt-in automatic settlement cleanup audits ordinary ignored output and protects environment files. */
-  | { readonly kind: "automatic" }
-  /** Storage cleanup: well-known build and cache outputs may be deleted too. */
+  /** Storage and automatic cleanup: well-known build and cache outputs may be deleted too. */
   | { readonly kind: "rebuildable" }
   | {
       readonly kind: "manual";
@@ -54,7 +52,6 @@ export function blockingIgnoredEntries(
   const approved = new Set(policy.kind === "manual" ? policy.approvedEntries : []);
   return entries.filter((entry) => {
     if (policy.kind === "manual") return !approved.has(entry);
-    if (policy.kind === "automatic") return isProtectedIgnoredPath(entry);
     if (policy.kind === "rebuildable") return !isRebuildableIgnoredEntry(entry);
     return isManualRemovalIgnoredBlocker(entry);
   });
