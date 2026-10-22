@@ -3100,3 +3100,16 @@ pull request URLs open the in-app preview, so issue links cannot strand it
 Validation: the GitHub CLI import, forge source control and PR hub composer
 and review thread suites pass, and each new test failed before its fix. The
 server and web typechecks pass.
+
+## September sets 13a, 3e and 13d: single carried records
+
+The three single records carried by 15s and 15o are not applicable. F5 preview
+tabs have no selectable browser profiles
+([t3code#9279](https://github.com/pingdotgg/t3code/pull/9279)), F5 has no Codex
+citation renderer whose links could lose backslashes
+([t3code#12243](https://github.com/pingdotgg/t3code/pull/12243)), and F5 shows
+SnapShots as ordinary image attachments, with no SnapShot frame to widen
+([t3code#11429](https://github.com/pingdotgg/t3code/pull/11429)). The other two
+`13d` members stay deferred, as planned. The `2`, `10` and `14` records with
+September implementation notes stay held by the open performance and
+distribution release gates.

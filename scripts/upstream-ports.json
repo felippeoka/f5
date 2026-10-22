@@ -802,9 +802,9 @@
     {
       "upstreamSha": "064392ffc7fc58fcc3018fd2ba2df33fbb21f1de",
       "subject": "fix(web): offer browser profiles from the empty-panel launcher (#9279)",
-      "reason": "Phase 13a (preview profiles): fix(web): offer browser profiles from the empty-panel launcher. Reimplement in f5; not yet delivered.",
+      "reason": "Not applicable: upstream offers its browser profiles from the empty right-panel launcher. F5 preview tabs use the one session partition the desktop assigns to the F5 profile (apps/web/src/components/PreviewPanel.tsx:552); there are no browser profiles to choose. Upstream change: fix(web): offer browser profiles from the empty-panel launcher (#9279)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "13a"
     },
     {
@@ -6665,9 +6665,9 @@
     {
       "upstreamSha": "2efb8178d83f4f7c4ccc3ae1165f2a2ded0b2742",
       "subject": "fix(clients): keep backslashes in copied Codex citations (#12243)",
-      "reason": "Backslash citation paths depend on the Codex directive/citation renderer absent from f5. Retain this compatibility case for Phase 3e citation rendering.",
+      "reason": "Not applicable: upstream escapes backslashes in its client-runtime Codex citation links. F5 has no Codex citation directive renderer. Upstream change: fix(clients): keep backslashes in copied Codex citations (#12243)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "3e",
       "evidence": ["docs/reviews/phase-one-claude-safety-validation.md:1"]
     },
@@ -22638,9 +22638,9 @@
     {
       "upstreamSha": "a43f9b45ae85caf37e0be8270ad3d27365ece2bd",
       "subject": "fix(web): preserve snapshot preview size in sent messages (#11429)",
-      "reason": "Phase 13d (SnapShots): fix(web): preserve snapshot preview size in sent messages. Reimplement in f5; not yet delivered.",
+      "reason": "Not applicable: upstream widens its SnapShot attachment frame in sent messages. F5 shows SnapShots as ordinary image attachments in the sent-message image grid (apps/web/src/components/chat/MessagesTimeline.tsx:3769), with no SnapShot frame to resize. Upstream change: fix(web): preserve snapshot preview size in sent messages (#11429)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
+      "disposition": "not-applicable",
       "plannedWorkstream": "13d"
     },
     {
