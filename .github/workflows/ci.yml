@@ -98,6 +98,11 @@ jobs:
           fi
           git remote set-url --push upstream DISABLED
           git fetch --no-prune --no-tags upstream refs/heads/main:refs/remotes/upstream/main
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            # The full-history checkout already has the PR base; enforce immutability and ledger-only PRs.
+            git rev-parse --verify --quiet "refs/remotes/origin/${GITHUB_BASE_REF}" >/dev/null
+            export F5_LEDGER_BASE_REF="origin/${GITHUB_BASE_REF}"
+          fi
           bun run upstream-ports:check
       - uses: ./.github/actions/assert-clean-worktree
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}

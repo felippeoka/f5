@@ -14,6 +14,7 @@ describe("parseCheckedInProjectFile", () => {
       defaultThreadEnvMode: "worktree",
       settings: { defaultThreadEnvMode: "worktree" },
       iconPath: null,
+      upstream: null,
       diagnostics: [
         {
           field: "iconPath",
@@ -44,6 +45,36 @@ describe("parseCheckedInProjectFile", () => {
     expect(parseCheckedInProjectFile("{ nope").diagnostics).toEqual([
       { field: "file", message: "Project configuration is not a valid JSON object." },
     ]);
+  });
+
+  it("ignores unknown top-level keys without diagnostics", () => {
+    const result = parseCheckedInProjectFile(
+      JSON.stringify({ defaultThreadEnvMode: "local", futureFeature: { enabled: true } }),
+    );
+    expect(result.defaultThreadEnvMode).toBe("local");
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("decodes the upstream block with defaults and reports invalid values", () => {
+    expect(
+      parseCheckedInProjectFile(
+        JSON.stringify({ upstream: { repository: "https://github.com/pingdotgg/t3code.git" } }),
+      ).upstream,
+    ).toEqual({
+      repository: "https://github.com/pingdotgg/t3code.git",
+      remote: "upstream",
+      branch: "main",
+      ledgerDir: "upstream",
+    });
+    for (const upstream of [
+      { repository: "https://gitlab.com/a/b" },
+      { repository: "https://github.com/a/b", remote: "bad remote" },
+      { repository: "https://github.com/a/b", ledgerDir: "../outside" },
+    ]) {
+      const result = parseCheckedInProjectFile(JSON.stringify({ upstream }));
+      expect(result.upstream).toBeNull();
+      expect(result.diagnostics.map((diagnostic) => diagnostic.field)).toEqual(["upstream"]);
+    }
   });
 
   it("treats schema metadata as inert and bounds it without fetching", () => {

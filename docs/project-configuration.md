@@ -25,6 +25,10 @@ who opens the project in F5 then starts from the same defaults.
 
 - `iconPath`: a relative path to a PNG, JPEG, GIF, WebP, ICO or SVG image inside the project.
 - `defaultThreadEnvMode`: `"local"` or `"worktree"`.
+- `upstream`: the repository this project was forked from, for upstream port tracking.
+  `repository` is the upstream GitHub URL; `remote`
+  (default `"upstream"`), `branch` (default `"main"`) and `ledgerDir` (default `"upstream"`) are
+  optional. The schedule and triage model are personal settings and are never read from here.
 - Most project-scoped settings, such as `defaultRuntimeMode`, `worktreeSubmodules`,
   `enableAssistantStreaming`, `textGenerationModelSelection`, `sourceControlWriting` and
   `prHubDefaultMergeMethod`. [Project settings](user/project-settings.md) lists them with their
