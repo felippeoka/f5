@@ -4,6 +4,7 @@ import {
   installAppFramePermissionPolicy,
 } from "./appFramePolicy";
 import { createDesktopCliInstaller } from "./cliCommand";
+import { compileCachePreloadArgs } from "./compileCachePreload";
 import { offerApplicationsMove, createBootstrapGate } from "./startupInstallation";
 import { createUpdatePoller } from "./updatePoller";
 import { getUpdateErrorMessage } from "./updateErrors";
@@ -2912,7 +2913,7 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
     process.platform,
     process.execPath,
     backendEntry,
-    app.isPackaged ? ["--require", Path.join(__dirname, "compileCache.js")] : [],
+    app.isPackaged ? compileCachePreloadArgs(__dirname) : [],
   );
   const child = ChildProcess.spawn(isolated.executable, isolated.args, {
     cwd: resolveBackendCwd(),
