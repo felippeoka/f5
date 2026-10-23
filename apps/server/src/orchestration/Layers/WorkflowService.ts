@@ -1156,6 +1156,32 @@ function hasProposedPlanForTurn(
   return thread.proposedPlans.some((plan) => plan.turnId === turnId);
 }
 
+// Review thread ids are derived from the draft turn they reviewed, so the
+// reviewed draft stays recoverable even if `planTurnId` was later overwritten.
+function reviewedPlanTurnIdForBranch(
+  workflow: PlanningWorkflow,
+  branchId: "a" | "b",
+  branch: PlanningWorkflow["branchA"],
+  snapshot: OrchestrationReadModel,
+): TurnId | null {
+  if (branch.reviews.length === 0) return null;
+  const thread = snapshot.threads.find((entry) => entry.id === branch.authorThreadId);
+  if (!thread) return null;
+  for (const plan of thread.proposedPlans) {
+    const turnId = plan.turnId;
+    if (
+      turnId &&
+      branch.reviews.every(
+        (review) =>
+          review.threadId ===
+          stableWorkflowUuid("plan-review-thread", workflow.id, branchId, review.slot, turnId),
+      )
+    )
+      return turnId;
+  }
+  return null;
+}
+
 function validateCapturedPlanForTurn(input: {
   readonly workflow: PlanningWorkflow;
   readonly provider: PlanningWorkflow["branchA"]["authorSlot"]["provider"];
@@ -2927,8 +2953,19 @@ export const makeWorkflowService = Effect.gen(function* () {
           return workflow;
         }
         const failureStage = planningWorkflowBranchFailureStage(branch);
-        const isRevisionCompletion = branch.status === "revising" || failureStage === "revision";
-        const isAuthoringCompletion = branch.status === "authoring" || failureStage === "authoring";
+        // Once the current draft has been fully reviewed, the next author turn
+        // is a revision even if a stale failure stage says otherwise.
+        const currentDraftReviewed =
+          branch.reviews.length > 0 &&
+          branch.reviews.every((review) => review.status === "completed") &&
+          reviewedPlanTurnIdForBranch(workflow, authorBranchId, branch, snapshot) ===
+            branch.planTurnId;
+        const authoringStage = branch.status === "authoring" || failureStage === "authoring";
+        const isRevisionCompletion =
+          branch.status === "revising" ||
+          failureStage === "revision" ||
+          (authoringStage && currentDraftReviewed);
+        const isAuthoringCompletion = authoringStage && !currentDraftReviewed;
         if (!isAuthoringCompletion && !isRevisionCompletion) {
           return workflow;
         }
@@ -3900,6 +3937,55 @@ export const makeWorkflowService = Effect.gen(function* () {
         const repairedBranch: PlanningWorkflow["branchA"] = {
           ...branch,
           errorStage: legacyStage === "revision" ? "revision" : "authoring",
+          updatedAt,
+        };
+        reconciledWorkflow = {
+          ...reconciledWorkflow,
+          branchA: branchId === "a" ? repairedBranch : reconciledWorkflow.branchA,
+          branchB: branchId === "b" ? repairedBranch : reconciledWorkflow.branchB,
+          updatedAt,
+        };
+      }
+      // A revision recorded as a fresh draft leaves `plan_saved` with completed
+      // reviews of an earlier draft, which no lifecycle step can advance.
+      for (const branchId of ["a", "b"] as const) {
+        const branch = branchId === "a" ? reconciledWorkflow.branchA : reconciledWorkflow.branchB;
+        if (
+          branch.status !== "plan_saved" ||
+          branch.reviews.length === 0 ||
+          !branch.reviews.every((review) => review.status === "completed")
+        ) {
+          continue;
+        }
+        const reviewedTurnId = reviewedPlanTurnIdForBranch(
+          reconciledWorkflow,
+          branchId,
+          branch,
+          snapshot,
+        );
+        if (!reviewedTurnId || reviewedTurnId === branch.planTurnId) {
+          continue;
+        }
+        const authorThread = snapshot.threads.find((entry) => entry.id === branch.authorThreadId);
+        if (
+          !branch.planTurnId ||
+          !authorThread?.proposedPlans.some((plan) => plan.turnId === branch.planTurnId)
+        ) {
+          yield* Effect.logWarning("workflow revision recorded as draft could not be repaired", {
+            workflowId: workflow.id,
+            branchId,
+            reviewedTurnId,
+            planTurnId: branch.planTurnId,
+          });
+          continue;
+        }
+        const repairedBranch: PlanningWorkflow["branchA"] = {
+          ...branch,
+          status: "revised",
+          planTurnId: reviewedTurnId,
+          revisionTurnId: branch.planTurnId,
+          error: null,
+          errorStage: null,
           updatedAt,
         };
         reconciledWorkflow = {
