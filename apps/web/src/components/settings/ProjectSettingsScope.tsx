@@ -681,14 +681,13 @@ export function ProjectGitOverrides() {
           searchTarget="git.worktree-disposable-paths"
           source={badge("worktreeDisposablePaths")}
           description="Uncommitted changes Storage cleanup may discard, such as regenerated files."
-          control={
-            <WorktreeDisposablePathsEditor
-              value={settings.worktreeDisposablePaths}
-              disabled={saving}
-              onSave={(paths) => set("worktreeDisposablePaths", paths)}
-            />
-          }
-        />
+        >
+          <WorktreeDisposablePathsEditor
+            value={settings.worktreeDisposablePaths}
+            disabled={saving}
+            onSave={(paths) => set("worktreeDisposablePaths", paths)}
+          />
+        </ProjectSettingRow>
       </SettingsCard>
       <SettingsCard title="Thread settlement">
         <ThreadSettlementFields
