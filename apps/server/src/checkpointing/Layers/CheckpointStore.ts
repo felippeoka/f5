@@ -25,6 +25,10 @@ import { batchLiteralPathspecs, isGitImport, parseNumstatPaths } from "../Diffs.
 
 // Path lists are small next to patches; a bound keeps a pathological history from hanging diffs.
 const AUTHORED_PATHS_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+/** Commits either side of a HEAD move that the git-import filter replays before giving up. */
+export const AUTHORED_PATHS_MAX_COMMITS = 200;
+const AUTHORED_PATHS_TIMEOUT_MS = 5_000;
+const AUTHORED_PATHS_CACHE_SIZE = 64;
 
 function isSafeCheckpointRef(ref: string): boolean {
   if (!ref.startsWith("refs/") || /\s/.test(ref)) return false;
@@ -39,6 +43,8 @@ const makeCheckpointStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const git = yield* GitService;
+  /** The git-import filter's answer per checkpoint pair, oldest first. */
+  const authoredPathsCache = new Map<string, ReadonlyArray<ReadonlyArray<string>> | null>();
 
   const durableWrite = gitConfigArgs([
     ["core.fsync", "objects,reference"],
@@ -552,13 +558,21 @@ const makeCheckpointStore = Effect.gen(function* () {
           .pipe(Effect.map((result) => result.stdout));
 
       if (input.options?.excludeGitImports !== true) return yield* patch([]);
-      // Filtering is best effort: when it cannot run, the complete diff still loads.
-      const retained = yield* authoredDiffPaths({
-        cwd: input.cwd,
-        fromCommitOid,
-        toCommitOid,
-        whitespace,
-      }).pipe(Effect.orElseSucceed(() => null));
+      // Filtering is best effort: when it cannot run, the complete diff still loads. Commits
+      // never change, so each pair's answer, fallback included, is kept for the next open.
+      const cacheKey = JSON.stringify([input.cwd, fromCommitOid, toCommitOid, whitespace]);
+      const retained = authoredPathsCache.has(cacheKey)
+        ? authoredPathsCache.get(cacheKey)!
+        : yield* authoredDiffPaths({ cwd: input.cwd, fromCommitOid, toCommitOid, whitespace }).pipe(
+            Effect.orElseSucceed(() => null),
+            Effect.tap((value) =>
+              Effect.sync(() => {
+                authoredPathsCache.set(cacheKey, value);
+                if (authoredPathsCache.size > AUTHORED_PATHS_CACHE_SIZE)
+                  authoredPathsCache.delete(authoredPathsCache.keys().next().value!);
+              }),
+            ),
+          );
       if (retained === null) return yield* patch([]);
       // Select paths before building the patch, so imported bulk cannot exhaust its output.
       const patches = yield* Effect.forEach(
@@ -595,12 +609,39 @@ const makeCheckpointStore = Effect.gen(function* () {
           input.fromCommitOid,
           input.toCommitOid,
         ],
+        timeoutMs: AUTHORED_PATHS_TIMEOUT_MS,
       });
       // Each line is "<parent> <committer time>"; the parent is HEAD at capture.
       const [fromLine = "", toLine = ""] = heads.stdout.trimEnd().split("\n");
       const [startHead = "", capturedAt = ""] = fromLine.split(" ");
       const [endHead = ""] = toLine.split(" ");
       if (startHead === "" || endHead === "" || startHead === endHead) return null;
+
+      // Remerge replays every merge in a range, so a long one (a reset across a busy branch)
+      // would hold the diff panel. Past the cap the whole diff is shown instead.
+      const ranges = [
+        [`${endHead}..${startHead}`],
+        [`--since=@${capturedAt}`, `${startHead}..${endHead}`],
+      ];
+      const counts = yield* Effect.forEach(
+        ranges,
+        (range) =>
+          git
+            .execute({
+              operation,
+              cwd: input.cwd,
+              args: [
+                "rev-list",
+                "--count",
+                `--max-count=${AUTHORED_PATHS_MAX_COMMITS + 1}`,
+                ...range,
+              ],
+              timeoutMs: AUTHORED_PATHS_TIMEOUT_MS,
+            })
+            .pipe(Effect.map((result) => Number(result.stdout.trim()))),
+        { concurrency: "unbounded" },
+      );
+      if (counts.some((count) => !(count <= AUTHORED_PATHS_MAX_COMMITS))) return null;
 
       const listPaths = (args: ReadonlyArray<string>) =>
         git
@@ -609,6 +650,7 @@ const makeCheckpointStore = Effect.gen(function* () {
             cwd: input.cwd,
             args: [...args, "--relative", "--name-only", "-z", "--no-renames", "--no-ext-diff"],
             maxOutputBytes: AUTHORED_PATHS_MAX_OUTPUT_BYTES,
+            timeoutMs: AUTHORED_PATHS_TIMEOUT_MS,
           })
           .pipe(Effect.map((result) => result.stdout.split("\0")));
       const [authoredLists, changed] = yield* Effect.all(
@@ -617,14 +659,9 @@ const makeCheckpointStore = Effect.gen(function* () {
             [
               listPaths(["diff", startHead, input.fromCommitOid]),
               listPaths(["diff", endHead, input.toCommitOid]),
-              listPaths(["log", "--format=", "--diff-merges=remerge", `${endHead}..${startHead}`]),
-              listPaths([
-                "log",
-                "--format=",
-                "--diff-merges=remerge",
-                `--since=@${capturedAt}`,
-                `${startHead}..${endHead}`,
-              ]),
+              ...ranges.map((range) =>
+                listPaths(["log", "--format=", "--diff-merges=remerge", ...range]),
+              ),
             ],
             { concurrency: "unbounded" },
           ),
@@ -643,6 +680,7 @@ const makeCheckpointStore = Effect.gen(function* () {
               "--",
             ],
             maxOutputBytes: AUTHORED_PATHS_MAX_OUTPUT_BYTES,
+            timeoutMs: AUTHORED_PATHS_TIMEOUT_MS,
           }),
         ],
         { concurrency: "unbounded" },

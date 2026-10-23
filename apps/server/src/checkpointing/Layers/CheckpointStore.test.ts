@@ -14,6 +14,7 @@ import { GitService, type ExecuteGitInput } from "../../git/Services/GitService.
 import { copiedIndexTimestampSeconds } from "../../git/copiedIndex.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
+  AUTHORED_PATHS_MAX_COMMITS,
   CheckpointStoreLiveWithGitService,
   CheckpointStoreLiveWithoutCredentials,
 } from "./CheckpointStore.ts";
@@ -304,7 +305,7 @@ describe("CheckpointStoreLive", () => {
     const changedFiles = (diff: string) =>
       [...diff.matchAll(/^diff --git a\/(\S+) b\//gm)].map((match) => match[1]);
 
-    async function scenario(turn: (cwd: string) => void) {
+    async function scenario(turn: (cwd: string) => void, before?: (cwd: string) => void) {
       const cwd = mkdtempSync(path.join(os.tmpdir(), "f5-checkpoint-imports-"));
       try {
         run(cwd, "init", "-q", "-b", "main");
@@ -318,6 +319,7 @@ describe("CheckpointStoreLive", () => {
         run(cwd, "add", ".");
         run(cwd, "commit", "-q", "-m", "upstream work");
         run(cwd, "checkout", "-q", "main");
+        before?.(cwd);
 
         const from = CheckpointRef.makeUnsafe("refs/t3/checkpoints/imports/0");
         const to = CheckpointRef.makeUnsafe("refs/t3/checkpoints/imports/1");
@@ -354,6 +356,30 @@ describe("CheckpointStoreLive", () => {
       expect(changedFiles(full)).toEqual(["mine.txt", "upstream.txt"]);
       expect(changedFiles(filtered)).toEqual(["mine.txt"]);
       expect(filtered).toContain("+two");
+    });
+
+    it("shows the whole diff instead of replaying a long range HEAD left", async () => {
+      const { filtered, full } = await scenario(
+        (cwd) => {
+          // Leaving the busy branch for upstream makes HEAD leave every busy commit.
+          run(cwd, "checkout", "-q", "main");
+          run(cwd, "merge", "-q", "--ff-only", "upstream");
+        },
+        (cwd) => {
+          // More commits than the filter replays, in one fast-import instead of a Git per commit.
+          const base = run(cwd, "rev-parse", "HEAD").trim();
+          const commits = Array.from(
+            { length: AUTHORED_PATHS_MAX_COMMITS + 1 },
+            (_, index) =>
+              `commit refs/heads/busy\ncommitter Test <test@example.com> 1577836800 +0000\ndata 1\n${index % 10}\n${index === 0 ? `from ${base}\n` : ""}M 644 inline busy.txt\ndata ${String(index).length}\n${index}\n`,
+          );
+          execFileSync("git", ["fast-import", "--quiet"], { cwd, input: commits.join("") });
+          run(cwd, "checkout", "-q", "busy");
+        },
+      );
+      // Within the cap, upstream.txt would be left out as brought in by the merge.
+      expect(changedFiles(full)).toContain("upstream.txt");
+      expect(changedFiles(filtered)).toEqual(changedFiles(full));
     });
 
     it("keeps an imported file the turn also edited", async () => {
