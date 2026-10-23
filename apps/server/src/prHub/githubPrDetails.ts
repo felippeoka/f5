@@ -38,13 +38,13 @@ query F5PrTimeline($owner:String!,$repo:String!,$number:Int!,$issueLimit:Int!,$i
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
       comments(last:$issueLimit,before:$issueCursor,orderBy:{field:UPDATED_AT,direction:ASC}){
-        nodes { id databaseId body createdAt updatedAt url viewerDidAuthor viewerCanUpdate author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } }
+        nodes { id databaseId body createdAt updatedAt url viewerDidAuthor viewerCanUpdate authorAssociation author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } }
         pageInfo { hasPreviousPage startCursor }
       }
       reviews(last:$reviewLimit,before:$reviewCursor){
         nodes {
-          id body state submittedAt lastEditedAt url author { login avatarUrl ... on User { name } }
-          comments(first:25){ totalCount nodes { id databaseId body createdAt updatedAt url path line originalLine viewerDidAuthor viewerCanUpdate author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } } }
+          id body state submittedAt lastEditedAt url authorAssociation author { login avatarUrl ... on User { name } }
+          comments(first:25){ totalCount nodes { id databaseId body createdAt updatedAt url path line originalLine viewerDidAuthor viewerCanUpdate authorAssociation author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } } }
         }
         pageInfo { hasPreviousPage startCursor }
       }
@@ -127,6 +127,12 @@ function actorOf(value: unknown): PrHubActor | null {
     name: nullableString(actor.name),
     avatarUrl: nullableString(actor.avatarUrl),
   };
+}
+
+function associationOf(node: Record<string, unknown>): { authorAssociation?: string } {
+  return typeof node.authorAssociation === "string"
+    ? { authorAssociation: node.authorAssociation }
+    : {};
 }
 
 const REACTION_FROM_GITHUB: Readonly<Record<string, PrHubReactionContent | undefined>> = {
@@ -443,6 +449,7 @@ export function decodeGitHubPrTimeline(
             : nullableString(comment.databaseId),
         kind: "issue-comment",
         author: actorOf(comment.author),
+        ...associationOf(comment),
         body: stringOf(comment.body),
         createdAt: stringOf(comment.createdAt),
         updatedAt: nullableString(comment.updatedAt),
@@ -468,6 +475,7 @@ export function decodeGitHubPrTimeline(
         databaseId: null,
         kind: "review",
         author: actorOf(review.author),
+        ...associationOf(review),
         body: stringOf(review.body),
         createdAt: submittedAt,
         updatedAt: nullableString(review.lastEditedAt),
@@ -489,6 +497,7 @@ export function decodeGitHubPrTimeline(
               : nullableString(comment.databaseId),
           kind: "review-comment",
           author: actorOf(comment.author),
+          ...associationOf(comment),
           body: stringOf(comment.body),
           createdAt: stringOf(comment.createdAt, submittedAt),
           updatedAt: nullableString(comment.updatedAt),

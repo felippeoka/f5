@@ -8,6 +8,13 @@ import { Effect } from "effect";
 import type { PrHubServiceShape } from "../prHub/Services/PrHubService.ts";
 import type { PullRequestComment } from "./pullRequestWatch.ts";
 
+/**
+ * Authors whose comment text a watch passes to the agent. Anyone can comment on a public pull
+ * request, and a watch wakes the agent without a person in the loop, so other comments are
+ * reported by author and link only. A host that does not report the relation trusts no one.
+ */
+const TRUSTED_ASSOCIATIONS: ReadonlySet<string> = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
 /** A partial comment read never advances a watch's global remark watermark. */
 export function readPullRequestWatchRemarks(input: {
   readonly hub: Pick<PrHubServiceShape, "getTimeline" | "getReviewThreads">;
@@ -32,6 +39,7 @@ export function readPullRequestWatchRemarks(input: {
         id: comment.id,
         kind: threaded ? "review-comment" : comment.kind,
         author,
+        trusted: TRUSTED_ASSOCIATIONS.has(comment.authorAssociation ?? ""),
         body: (threaded ? comment.bodyText : comment.body).slice(0, 1000),
         createdAt,
         editedAt:

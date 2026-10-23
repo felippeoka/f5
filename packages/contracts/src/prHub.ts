@@ -717,6 +717,8 @@ export const PrHubTimelineComment = Schema.Struct({
   databaseId: Schema.NullOr(Schema.String),
   kind: PrHubTimelineCommentKind,
   author: Schema.NullOr(PrHubActor),
+  /** GitHub's relation of the author to the repository, such as `OWNER` or `NONE`. */
+  authorAssociation: Schema.optionalKey(Schema.String),
   body: Schema.String,
   createdAt: IsoDateTime,
   updatedAt: Schema.NullOr(IsoDateTime),
@@ -789,6 +791,8 @@ export const PrHubReviewComment = Schema.Struct({
   id: Schema.String,
   url: Schema.String,
   author: Schema.NullOr(Schema.String),
+  /** GitHub's relation of the author to the repository, such as `OWNER` or `NONE`. */
+  authorAssociation: Schema.optionalKey(Schema.String),
   bodyText: Schema.String,
   body: Schema.optional(Schema.String),
   createdAt: Schema.NullOr(Schema.String),

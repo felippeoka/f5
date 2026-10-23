@@ -119,6 +119,40 @@ it("retains edit times and bounds the text kept for a watch message", async () =
   expect(result?.[0]?.editedAt).toBe(editedAt);
   expect(result?.[0]?.body).toHaveLength(1000);
 });
+
+it("trusts only comments from the repository's owner, members and collaborators", async () => {
+  const result = await Effect.runPromise(
+    readPullRequestWatchRemarks({
+      key,
+      accountGeneration: "one",
+      github: true,
+      hub: {
+        getTimeline: () => Effect.succeed(timeline),
+        getReviewThreads: () =>
+          Effect.succeed(
+            threads([
+              thread({
+                comments: [
+                  { ...comment("owner"), authorAssociation: "OWNER" },
+                  { ...comment("collaborator"), authorAssociation: "COLLABORATOR" },
+                  { ...comment("contributor"), authorAssociation: "CONTRIBUTOR" },
+                  { ...comment("stranger"), authorAssociation: "NONE" },
+                  comment("unknown"),
+                ],
+              }),
+            ]),
+          ),
+      },
+    }),
+  );
+  expect(Object.fromEntries(result!.map((remark) => [remark.id, remark.trusted]))).toEqual({
+    owner: true,
+    collaborator: true,
+    contributor: false,
+    stranger: false,
+    unknown: false,
+  });
+});
 it("keeps the watermark when another forge reports a truncated activity list", async () => {
   const getReviewThreads = vi.fn(() => Effect.succeed(threads([])));
   const result = await Effect.runPromise(
