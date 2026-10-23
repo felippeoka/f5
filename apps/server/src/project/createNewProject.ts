@@ -32,7 +32,16 @@ export function resolveProjectsRoot(input: {
   readonly homeDir?: string;
 }): string {
   const setting = input.setting.trim();
-  if (setting.length > 0) return NodePath.resolve(expandHomePathSync(setting));
+  if (setting.length > 0) {
+    const expanded = expandHomePathSync(setting);
+    // Resolving a relative path would use the backend's working directory, which in a packaged
+    // app is not anything the user chose.
+    if (!NodePath.isAbsolute(expanded))
+      throw new Error(
+        `The projects folder setting must be an absolute path or start with ~, not "${setting}".`,
+      );
+    return NodePath.resolve(expanded);
+  }
   const home = input.homeDir ?? NodeOS.homedir();
   return NodePath.join(
     home,

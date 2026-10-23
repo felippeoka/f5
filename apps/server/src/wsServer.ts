@@ -4875,13 +4875,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             () => new RouteRequestError({ message: "Could not read the projects folder setting." }),
           ),
         );
-        const root = resolveProjectsRoot({
-          setting: settings.projectsRoot,
-          profileId: activeProfile.id,
-          isDefaultProfile: serverConfig.profile?.isDefault ?? true,
-        });
         const created = yield* Effect.tryPromise({
           try: async () => {
+            const root = resolveProjectsRoot({
+              setting: settings.projectsRoot,
+              profileId: activeProfile.id,
+              isDefaultProfile: serverConfig.profile?.isDefault ?? true,
+            });
             const folder = await reserveProjectFolder(root, projectFolderSlug(body.name));
             const { warning } = await initializeNewProject({
               folder,

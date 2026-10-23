@@ -57,6 +57,15 @@ describe("new project from a name", () => {
     ).toBe(Path.resolve("/srv/code"));
   });
 
+  it("refuses a relative projects folder instead of resolving it against the backend's cwd", () => {
+    expect(() =>
+      resolveProjectsRoot({ setting: "projects", profileId: "default", isDefaultProfile: true }),
+    ).toThrow("must be an absolute path or start with ~");
+    expect(
+      resolveProjectsRoot({ setting: "~/code", profileId: "default", isDefaultProfile: true }),
+    ).toBe(Path.join(OS.homedir(), "code"));
+  });
+
   it("gives a taken name the next free suffix", async () => {
     const root = Path.join(await tempDir(), "projects");
     const first = await reserveProjectFolder(root, "app");
