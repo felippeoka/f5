@@ -2909,7 +2909,12 @@ describe("ChatView timeline (full app)", () => {
               (request.command as { type?: string } | undefined)?.type === "thread.turn.start",
           ),
         ).toBe(false);
-        await page.elementLocator(editor).fill(answer);
+        // Clearing can remove a single character when fill's select-all lands before the editor
+        // settles its selection, so fill until the editor holds the answer.
+        await vi.waitFor(async () => {
+          await page.elementLocator(editor).fill(answer);
+          expect(editor.textContent).toBe(answer);
+        });
         await page.getByRole("button", { name: "Submit answers", exact: true }).click();
         await vi.waitFor(() =>
           expect(wsRequests).toContainEqual(
