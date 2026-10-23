@@ -17,6 +17,7 @@ const fixture = Effect.gen(function* () {
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
   const service = yield* ServerSettingsService;
+  // Scoped to the test, so the folder outlives the settings layer that may still write into it.
   const directory = yield* fs.makeTempDirectoryScoped({ prefix: "f5-dotfiles-" });
   const first = path.join(directory, "first", "settings.json");
   const second = path.join(directory, "second", "settings.json");
@@ -51,7 +52,7 @@ it.layer(NodeServices.layer)("symlinked server settings", (it) => {
       const changed = yield* Stream.runHead(changes).pipe(Effect.timeout("2 seconds"));
       assert.equal(Option.getOrUndefined(changed)?.gitAuthorName, "External edit");
       assert.equal((yield* service.getSettings).gitAuthorName, "External edit");
-    }).pipe(Effect.scoped, TestClock.withLive, Effect.provide(settingsLayer())),
+    }).pipe(TestClock.withLive, Effect.provide(settingsLayer())),
   );
 
   it.effect("moves its destination watch when the link is repointed", () =>
@@ -70,7 +71,7 @@ it.layer(NodeServices.layer)("symlinked server settings", (it) => {
       yield* write(second, "Moved edit");
       const edited = yield* Stream.runHead(edits).pipe(Effect.timeout("2 seconds"));
       assert.equal(Option.getOrUndefined(edited)?.gitAuthorName, "Moved edit");
-    }).pipe(Effect.scoped, TestClock.withLive, Effect.provide(settingsLayer())),
+    }).pipe(TestClock.withLive, Effect.provide(settingsLayer())),
   );
 
   it.effect("reloads a dangling link when its missing destination is created", () =>
@@ -82,6 +83,6 @@ it.layer(NodeServices.layer)("symlinked server settings", (it) => {
       yield* write(first, "Created");
       const created = yield* Stream.runHead(changes).pipe(Effect.timeout("2 seconds"));
       assert.equal(Option.getOrUndefined(created)?.gitAuthorName, "Created");
-    }).pipe(Effect.scoped, TestClock.withLive, Effect.provide(settingsLayer())),
+    }).pipe(TestClock.withLive, Effect.provide(settingsLayer())),
   );
 });
