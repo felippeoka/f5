@@ -14,7 +14,7 @@ import {
   serializeLedgerFiles,
   type UpstreamLedger,
 } from "@t3tools/shared/upstreamPorts";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { TextGenerationError } from "../git/Errors.ts";
@@ -230,17 +230,23 @@ layer("upstream ports service", (it) => {
   it.effect("starts one run when two starts race, and the database allows one running row", () =>
     Effect.gen(function* () {
       const fixture = yield* setup();
+      // Hold the first run in triage so it is still active when the second start runs.
+      const gate = yield* Deferred.make<void>();
+      const triage = triageAll(() => ({}));
+      fixture.host.triage = (prompt) => Deferred.await(gate).pipe(Effect.andThen(triage(prompt)));
       const service = yield* fixture.make();
       const start = service
-        .run({ projectId: PROJECT_ID, kind: "upstream", triage: "rules-only" })
+        .run({ projectId: PROJECT_ID, kind: "upstream", triage: "llm" })
         .pipe(Effect.result);
       const results = yield* Effect.all([start, start], { concurrency: "unbounded" });
+      yield* Deferred.succeed(gate, undefined);
       yield* service.testing.awaitIdle;
-      assert.deepStrictEqual(
-        results.map((result) => result._tag),
-        ["Success", "Failure"],
-      );
-      const failure = results[1]!;
+      // Either start may win; exactly one must, and the other is busy.
+      assert.deepStrictEqual(results.map((result) => result._tag).toSorted(), [
+        "Failure",
+        "Success",
+      ]);
+      const failure = results.find((result) => result._tag === "Failure")!;
       assert.strictEqual(failure._tag === "Failure" ? failure.failure.code : null, "busy");
       const sql = yield* SqlClient.SqlClient;
       const runs = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM upstream_port_runs`;
