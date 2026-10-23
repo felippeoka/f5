@@ -6,7 +6,6 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import {
-  isIntegrationCertified,
   PROVIDER_INTEGRATION_RECORDS,
   type ClaudeChromeRecord,
 } from "@t3tools/shared/providerIntegrationCertification";
@@ -58,7 +57,9 @@ const check = (patch: Partial<Parameters<typeof claudeChromeAvailability>[0]> = 
 
 describe("Claude in Chrome executable identity", () => {
   it("stays off while no record carries evidence", async () => {
-    expect(await check({ records: PROVIDER_INTEGRATION_RECORDS["claude-chrome"] })).toMatchObject({
+    // Built locally, so stamping the shipped record never breaks this test.
+    const { evidenceId: _evidence, artifactSha256: _artifact, ...uncertified } = certified;
+    expect(await check({ records: [uncertified] })).toMatchObject({
       unavailable: { reason: "not-certified" },
     });
     expect(await check({ platform: "linux" })).toMatchObject({
@@ -109,7 +110,7 @@ async function copy(name: string) {
 
 describe("storage-only restore", () => {
   it("restores while the desktop reports every record uncertified, and reports a real refusal", async () => {
-    expect(isIntegrationCertified("claude-chrome", "darwin", "arm64")).toBe(false);
+    // The broker mock below refuses launch ownership, as an uncertified desktop does.
     const browser = base.browsers.find((entry) => entry.id === "chrome")!;
     const providerHome = join(root, "claude");
     const manifestPath = join(

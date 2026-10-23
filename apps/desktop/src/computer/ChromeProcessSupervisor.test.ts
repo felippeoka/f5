@@ -175,6 +175,63 @@ describe("ChromeProcessSupervisor", () => {
     await supervisor.register(registration({ pid: 400, pgid: 400 }), BACKEND);
   });
 
+  /** Snapshots taken now but answered only when released, like a slow `ps`. */
+  const deferSnapshots = (h: ReturnType<typeof fakeIo>) => {
+    const held: Array<() => void> = [];
+    const state = { defer: false };
+    const io: ChromeProcessIo = {
+      ...h.io,
+      snapshot: async () => {
+        const rows = await h.io.snapshot();
+        if (!state.defer) return rows;
+        return new Promise((resolve) => held.push(() => resolve(rows)));
+      },
+    };
+    const release = async () => {
+      for (const resolve of held.splice(0)) resolve();
+      await new Promise((resolve) => setImmediate(resolve));
+    };
+    return { io, state, release };
+  };
+
+  it("stops a process whose registration was being verified when ⌃⌘Esc was pressed", async () => {
+    const h = fakeIo();
+    const slow = deferSnapshots(h);
+    const supervisor = new ChromeProcessSupervisor({ io: slow.io });
+    slow.state.defer = true;
+    const registering = supervisor.register(registration(), BACKEND);
+    const outcome = registering.then(
+      () => "accepted",
+      (error: Error) => error.message,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    supervisor.stop(() => true, "emergency");
+    slow.state.defer = false;
+    await slow.release();
+    expect(await outcome).toContain("stopped");
+    // Main signals the verified group itself and keeps the generation stopped.
+    await h.advance(0);
+    expect(h.signals).toContainEqual([100, "SIGTERM"]);
+    expect(supervisor.invalidated("p", "t", "g")).toBe(true);
+  });
+
+  it("never judges a registration by a listing taken before it was registered", async () => {
+    const h = fakeIo();
+    const slow = deferSnapshots(h);
+    const exited = vi.fn();
+    const supervisor = new ChromeProcessSupervisor({ io: slow.io, exited });
+    await supervisor.register(registration(), BACKEND);
+    // The idle poll starts `ps` before the second child exists.
+    slow.state.defer = true;
+    await h.advance(2_000);
+    slow.state.defer = false;
+    h.processes.set(200, { ppid: BACKEND, pgid: 200, startTime: 1_000, zombie: false });
+    await supervisor.register(registration({ pid: 200, pgid: 200, launchToken: "b" }), BACKEND);
+    await slow.release();
+    expect(exited).not.toHaveBeenCalled();
+    expect(supervisor.registrations().map((entry) => entry.launchToken)).toEqual(["token", "b"]);
+  });
+
   it("lets the host veto a registration", async () => {
     const h = fakeIo();
     const supervisor = new ChromeProcessSupervisor({

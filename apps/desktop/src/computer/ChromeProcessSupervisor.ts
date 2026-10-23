@@ -117,6 +117,8 @@ interface Entry {
   readonly registration: ChromeProcessRegistration;
   /** Start time main observed at registration; every signal re-checks it. */
   readonly observedStart: number;
+  /** Registration order; a listing started before it can't speak for this entry. */
+  readonly seq: number;
   exited: boolean;
   timers: unknown[];
   /** `stopAndWait` callers, resolved on exit or on entering recovery. */
@@ -151,6 +153,12 @@ export class ChromeProcessSupervisor {
   private recovery: PersistedRecovery[] = [];
   /** Generations stopped by the emergency shortcut, refused until the user resumes. */
   private readonly invalidatedGenerations = new Set<string>();
+  /** Registrations still being verified, with the stop that reached them meanwhile. */
+  private readonly pending = new Map<
+    string,
+    { readonly registration: ChromeProcessRegistration; stoppedBy?: ChromeStopReason }
+  >();
+  private registrationSeq = 0;
   private polling: unknown;
   constructor(
     private readonly options: {
@@ -182,8 +190,21 @@ export class ChromeProcessSupervisor {
       throw new Error("Computer control was stopped for this session. Resume it first.");
     if (registration.pgid !== registration.pid)
       throw new Error("Integration processes must lead their own process group.");
-    if (this.entries.has(registration.launchToken)) throw new Error("Duplicate launch token.");
-    const rows = await this.io.snapshot();
+    const token = registration.launchToken;
+    if (this.entries.has(token) || this.pending.has(token))
+      throw new Error("Duplicate launch token.");
+    // A stop that runs while `ps` is read must still reach this process.
+    const pending: {
+      readonly registration: ChromeProcessRegistration;
+      stoppedBy?: ChromeStopReason;
+    } = { registration };
+    this.pending.set(token, pending);
+    let rows: ReadonlyArray<ChromeProcessRow> | null;
+    try {
+      rows = await this.io.snapshot();
+    } finally {
+      this.pending.delete(token);
+    }
     const leader = rows?.find((row) => row.pid === registration.pid);
     if (
       !rows ||
@@ -196,13 +217,24 @@ export class ChromeProcessSupervisor {
       !descendsFrom(rows, registration.pid, ancestorPid)
     )
       throw new Error("The integration process could not be verified.");
-    this.entries.set(registration.launchToken, {
+    this.entries.set(token, {
       registration,
       observedStart: leader.startTime,
+      seq: ++this.registrationSeq,
       exited: false,
       timers: [],
       waiters: [],
     });
+    if (pending.stoppedBy) {
+      // Verified, so main stops it itself rather than relying on the server to.
+      this.persist();
+      this.stop((entry) => entry.launchToken === token, pending.stoppedBy);
+      throw new Error("Computer control was stopped for this session. Resume it first.");
+    }
+    if (this.recoveryRequired()) {
+      this.entries.delete(token);
+      throw new Error("A previous browser-control process has not exited yet.");
+    }
     try {
       // The host may veto (for example when the emergency shortcut is unavailable).
       this.options.registered?.(registration);
@@ -248,6 +280,19 @@ export class ChromeProcessSupervisor {
     const io = this.io;
     const grace = reason === "shutdown" || reason === "release" ? 2_000 : 0;
     const stopped: ChromeProcessRegistration[] = [];
+    for (const pending of this.pending.values()) {
+      if (!filter(pending.registration)) continue;
+      // Urgent stops win over graceful ones, as for registered entries.
+      if (!pending.stoppedBy || !grace) pending.stoppedBy = reason;
+      if (reason === "emergency")
+        this.invalidatedGenerations.add(
+          generationKey(
+            pending.registration.profileId,
+            pending.registration.threadId,
+            pending.registration.sessionGeneration,
+          ),
+        );
+    }
     for (const entry of this.entries.values()) {
       if (entry.exited || !filter(entry.registration)) continue;
       stopped.push(entry.registration);
@@ -377,9 +422,15 @@ export class ChromeProcessSupervisor {
     this.schedulePoll();
   }
   private async poll(): Promise<void> {
+    // A process registered while `ps` ran may be missing from its rows: that is no
+    // evidence of exit, so only entries registered before the listing started are judged.
+    const seen = this.registrationSeq;
     const rows = await this.io.snapshot();
-    for (const entry of [...this.entries.values()])
-      if (groupState(rows, entry.registration.pgid, entry.observedStart) === "gone")
+    for (const entry of this.entries.values())
+      if (
+        entry.seq <= seen &&
+        groupState(rows, entry.registration.pgid, entry.observedStart) === "gone"
+      )
         this.markExited(entry);
     // Recovery entries (including a previous run's orphans) are stopped by main itself:
     // SIGTERM first, then SIGKILL, and only while the start time still matches.

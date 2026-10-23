@@ -149,6 +149,13 @@ describe("integration proxy", () => {
     expect(text(await session.callTool("js", { code: "b" }))).toBe("ran b");
   });
 
+  it("stops an idle child even when no call ever took the lease", async () => {
+    const { session, acquireLease, exited } = setup({ idleStopMs: 100 });
+    expect(text(await session.callTool("extra", {}))).toContain("isn't allowed");
+    expect(acquireLease).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(exited).toHaveBeenCalledTimes(1));
+  });
+
   it("never forwards a call cancelled while consent is pending", async () => {
     let answer: (allowed: boolean) => void = () => undefined;
     const { session, spawn, acquireLease } = setup({

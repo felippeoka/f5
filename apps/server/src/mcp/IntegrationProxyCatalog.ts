@@ -333,7 +333,9 @@ export class IntegrationProxySession {
   private idle(): void {
     if (this.calls.size > 0) return;
     if (!this.child) return this.releaseLease();
-    if (this.idleTimer || !this.leaseHeld) return;
+    // Armed with or without a lease: a child spawned for a call that was then refused
+    // (disallowed tool, changed inventory, busy browser) must not live on unused.
+    if (this.idleTimer) return;
     const child = this.child;
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined;
