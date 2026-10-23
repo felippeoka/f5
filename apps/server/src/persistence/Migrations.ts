@@ -1,3 +1,4 @@
+import Migration0137 from "./Migrations/137_UpstreamPorts.ts";
 import Migration0136 from "./Migrations/136_ScratchProjects.ts";
 import Migration0135 from "./Migrations/135_RestartBackgroundWork.ts";
 import Migration0134 from "./Migrations/134_BackgroundWorkEffort.ts";
@@ -170,6 +171,7 @@ import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
   // 124 to 128 shipped on main first; the October migrations follow them.
+  "137_UpstreamPorts": Migration0137,
   "136_ScratchProjects": Migration0136,
   "135_RestartBackgroundWork": Migration0135,
   "131_ThreadSettlement": Migration0131,

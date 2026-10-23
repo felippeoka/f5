@@ -39,6 +39,7 @@ import {
   PreviewAutomationRequest,
 } from "./previewAutomation";
 import { PR_HUB_WS_CHANNELS, PrHubAdvisoriesChanged, PrHubChanged } from "./prHub";
+import { UPSTREAM_PORTS_WS_CHANNELS, UpstreamPortsChanged } from "./upstreamPortsWire";
 import { ProjectWatchedPathsChangedPayload } from "./project";
 import { ServerConfigUpdatedPayload, ServerProviderAdvisoriesUpdatedPayload } from "./server";
 import { DiskSpaceStatus, StorageStatus, StorageInvalidatedPayload } from "./storage";
@@ -151,6 +152,7 @@ export interface WsPushPayloadByChannel {
   readonly [ORCHESTRATION_WS_CHANNELS.domainEvent]: OrchestrationEvent;
   readonly [PR_HUB_WS_CHANNELS.changed]: typeof PrHubChanged.Type;
   readonly [PR_HUB_WS_CHANNELS.advisoriesUpdated]: typeof PrHubAdvisoriesChanged.Type;
+  readonly [UPSTREAM_PORTS_WS_CHANNELS.changed]: typeof UpstreamPortsChanged.Type;
 }
 
 export type WsPushChannel = keyof WsPushPayloadByChannel;
@@ -339,6 +341,10 @@ export const WsPushPrHubAdvisoriesUpdated = makeWsPushSchema(
   PR_HUB_WS_CHANNELS.advisoriesUpdated,
   PrHubAdvisoriesChanged,
 );
+export const WsPushUpstreamPortsChanged = makeWsPushSchema(
+  UPSTREAM_PORTS_WS_CHANNELS.changed,
+  UpstreamPortsChanged,
+);
 
 export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.profilesUpdated,
@@ -376,6 +382,7 @@ export const WsPushChannelSchema = Schema.Literals([
   ORCHESTRATION_WS_CHANNELS.domainEvent,
   PR_HUB_WS_CHANNELS.changed,
   PR_HUB_WS_CHANNELS.advisoriesUpdated,
+  UPSTREAM_PORTS_WS_CHANNELS.changed,
 ]);
 export type WsPushChannelSchema = typeof WsPushChannelSchema.Type;
 
@@ -415,6 +422,7 @@ export const WsPush = Schema.Union([
   WsPushOrchestrationDomainEvent,
   WsPushPrHubChanged,
   WsPushPrHubAdvisoriesUpdated,
+  WsPushUpstreamPortsChanged,
 ]);
 export type WsPush = typeof WsPush.Type;
 

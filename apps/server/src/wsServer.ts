@@ -50,6 +50,13 @@ import { isScratchProject } from "@t3tools/shared/scratchProject";
 import { threadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { readWorktreeClaims } from "./project/worktreeClaims.ts";
 import { withRepositoryLifecycleLock } from "./project/Layers/WorktreeLifecycleCoordinator.ts";
+import { GitHubCli } from "./git/Services/GitHubCli.ts";
+import { GitService } from "./git/Services/GitService.ts";
+import { TextGeneration } from "./git/Services/TextGeneration.ts";
+import { makeUpstreamGit } from "./upstreamPorts/git.ts";
+import { makeUpstreamGitHub } from "./upstreamPorts/github.ts";
+import { makeUpstreamPortsService, UpstreamPortsError } from "./upstreamPorts/service.ts";
+import { makeUpstreamStore } from "./upstreamPorts/store.ts";
 import {
   assertExclusiveProfileCheckout,
   assertNotOtherProfileManagedCheckout,
@@ -168,6 +175,9 @@ import {
   AGENTS_WS_METHODS,
   AGENT_BRIDGE_WS_CHANNELS,
   AGENT_BRIDGE_WS_METHODS,
+  UPSTREAM_PORTS_WS_CHANNELS,
+  UPSTREAM_PORTS_WS_METHODS,
+  UpstreamTriageBatchResult,
   USAGE_WS_METHODS,
   ELICITATION_WS_METHODS,
   CommandId,
@@ -722,6 +732,9 @@ function deriveRpcGroup(method: string): string {
   }
   if (method.startsWith("prHub.")) {
     return "prHub";
+  }
+  if (method.startsWith("upstreamPorts.")) {
+    return "upstreamPorts";
   }
   if (method.startsWith("projects.")) {
     return "projects";
@@ -3596,6 +3609,85 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     publish: (payload) => pushBus.publishAll(AGENT_BRIDGE_WS_CHANNELS.stateChanged, payload),
   });
 
+  const upstreamGitService = yield* Effect.serviceOption(GitService);
+  const upstreamGitHubCli = yield* Effect.serviceOption(GitHubCli);
+  const upstreamTextGeneration = yield* Effect.serviceOption(TextGeneration);
+  const asHostError = (error: unknown) =>
+    error instanceof UpstreamPortsError
+      ? error
+      : new UpstreamPortsError({
+          code: "internal",
+          message: String((error as { message?: unknown })?.message ?? error),
+        });
+  const upstreamPorts = Option.isNone(upstreamGitService)
+    ? null
+    : yield* makeUpstreamPortsService({
+        host: {
+          readModel: awaitOrchestrationRuntimeForRoute.pipe(
+            Effect.flatMap(({ orchestrationEngine }) => orchestrationEngine.getReadModel()),
+            Effect.mapError(asHostError),
+          ),
+          checkedInConfig: (projectId) =>
+            Effect.tryPromise({
+              try: () => checkedInProjectFileService.load(projectId),
+              catch: asHostError,
+            }),
+          getSettings: serverSettings.getSettings.pipe(Effect.mapError(asHostError)),
+          listProviders: providerAdvisoryProjection.getProviders,
+          submitTurn: (body) =>
+            submitTurnSubmission(body, { submissionSource: "human" }).pipe(
+              Effect.mapError((error) => ({
+                message: error.message,
+                ...("code" in error && typeof error.code === "string" ? { code: error.code } : {}),
+              })),
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+              Effect.provideService(SqlClient.SqlClient, sql),
+            ),
+          publish: (payload) => pushBus.publishAll(UPSTREAM_PORTS_WS_CHANNELS.changed, payload),
+          generateTriageBatch: Option.isSome(upstreamTextGeneration)
+            ? (input) =>
+                upstreamTextGeneration.value.generateStructuredJson({
+                  ...input,
+                  outputSchema: UpstreamTriageBatchResult,
+                })
+            : null,
+          readDefaultBranch: (cwd) => git.readDefaultBranch(cwd),
+          resolveAvailableBranchName: (cwd, name) => git.resolveAvailableBranchName(cwd, name),
+          resolveCommonDir: (cwd) => git.resolveCommonDir(cwd),
+          withRepositoryLock: (commonDir, mode, effect) =>
+            withRepositoryLifecycleLock(serverConfig.baseDir, commonDir, effect, { mode }),
+        },
+        store: makeUpstreamStore(sql),
+        sql,
+        git: makeUpstreamGit(upstreamGitService.value.execute),
+        github: Option.isSome(upstreamGitHubCli)
+          ? makeUpstreamGitHub(upstreamGitHubCli.value)
+          : null,
+        baseDir: serverConfig.baseDir,
+        writer: {
+          profileId: serverConfig.profile?.id ?? "default",
+          stateDir: serverConfig.stateDir,
+        },
+      });
+  if (upstreamPorts !== null)
+    yield* Deferred.await(orchestrationRuntime).pipe(
+      Effect.andThen(Scope.provide(upstreamPorts.start, subscriptionsScope)),
+      Effect.ignoreCause({ log: true }),
+      Effect.forkIn(subscriptionsScope),
+    );
+  const requireUpstreamPorts = Effect.suspend(() =>
+    upstreamPorts === null
+      ? Effect.fail(new RouteRequestError({ message: "Upstream Ports is unavailable." }))
+      : Effect.succeed(upstreamPorts),
+  );
+  const upstreamRoute = <A>(effect: Effect.Effect<A, UpstreamPortsError>) =>
+    effect.pipe(
+      Effect.mapError(
+        (error) => new RouteRequestError({ message: error.message, code: error.code }),
+      ),
+    );
+
   const ownedPreviewUrls = new OwnedPreviewUrls();
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) => {
     if (event.type === "output")
@@ -3971,6 +4063,57 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const id = request.body.instanceId;
         return yield* profileCall(() => accountService.status(id));
       }
+
+      case UPSTREAM_PORTS_WS_METHODS.listProjects:
+        return yield* upstreamRoute((yield* requireUpstreamPorts).listProjects);
+      case UPSTREAM_PORTS_WS_METHODS.getOverview:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).getOverview(request.body.projectId),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.listTopics:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).listTopics(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.getTopic:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).getTopic(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.decide:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).decide(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.acceptSuggestions:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).acceptSuggestions(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.run:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).run(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.startPort:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).startPort(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.unlinkPort:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).unlinkPort(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.getPortPrompt:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).getPortPrompt(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.resolvePublication:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).resolvePublication(stripRequestTag(request.body)),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.addRemote:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).addRemote(request.body.projectId),
+        );
+      case UPSTREAM_PORTS_WS_METHODS.takeOverWriter:
+        return yield* upstreamRoute(
+          (yield* requireUpstreamPorts).takeOverWriter(request.body.projectId),
+        );
 
       case AGENT_BRIDGE_WS_METHODS.getState:
         return yield* agentBridge.getState;

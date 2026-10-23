@@ -65,6 +65,11 @@ export const threadPurgePolicy: Readonly<
     kind: "retain",
     reason: "Bridge idempotency receipts must survive thread deletion.",
   },
+  upstream_port_groups: {
+    kind: "retain",
+    reason: "Start-port idempotency receipts must survive thread deletion.",
+  },
+  upstream_port_links: { kind: "explicit" },
 };
 
 /** Static SQL handlers; schema introspection must never determine what gets deleted. */
@@ -115,6 +120,13 @@ export const threadPurgeHandlers = {
     sql`DELETE FROM native_operations WHERE rowid IN (SELECT rowid FROM native_operations WHERE thread_id = ${threadId} LIMIT 500) RETURNING rowid`,
   workspace_transitions: (sql: SqlClient.SqlClient, threadId: ThreadId) =>
     sql`DELETE FROM workspace_transitions WHERE rowid IN (SELECT rowid FROM workspace_transitions WHERE thread_id = ${threadId} LIMIT 500) RETURNING rowid`,
+  // A deleted port thread no longer holds its topics in progress; the version bump invalidates cursors.
+  upstream_port_links: (sql: SqlClient.SqlClient, threadId: ThreadId) =>
+    sql`UPDATE upstream_ledger_publication SET links_version = links_version + 1 WHERE project_id IN (SELECT project_id FROM upstream_port_links WHERE thread_id = ${threadId})`.pipe(
+      Effect.andThen(
+        sql`DELETE FROM upstream_port_links WHERE rowid IN (SELECT rowid FROM upstream_port_links WHERE thread_id = ${threadId} LIMIT 500) RETURNING rowid`,
+      ),
+    ),
 };
 export const purgeThreadRows = (
   sql: SqlClient.SqlClient,
