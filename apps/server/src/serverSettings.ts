@@ -294,7 +294,14 @@ const makeServerSettings = Effect.gen(function* () {
     ),
   );
 
+  // A file removed after the existence check, or a dangling link that Windows reports as
+  // present, reads as missing.
   const readRawConfig = fs.readFileString(settingsPath).pipe(
+    Effect.map(Option.some),
+    Effect.catchIf(
+      (cause) => cause.reason._tag === "NotFound",
+      () => Effect.succeed(Option.none<string>()),
+    ),
     Effect.mapError(
       (cause) =>
         new ServerSettingsError({
@@ -306,13 +313,14 @@ const makeServerSettings = Effect.gen(function* () {
   );
 
   const loadSettingsFromDisk = Effect.gen(function* () {
-    if (!(yield* readConfigExists)) {
+    const contents = (yield* readConfigExists) ? yield* readRawConfig : Option.none<string>();
+    if (Option.isNone(contents)) {
       yield* Ref.set(decodeFailureRef, null);
       yield* Ref.set(unknownFieldsRef, {});
       return DEFAULT_SERVER_SETTINGS;
     }
 
-    const raw = yield* readRawConfig;
+    const raw = contents.value;
     const decoded = Schema.decodeUnknownExit(ServerSettingsJson)(raw);
     if (decoded._tag === "Failure") {
       const failure = Cause.findErrorOption(decoded.cause);
