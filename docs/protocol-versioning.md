@@ -49,6 +49,12 @@ transitions. Recovery can also accept the inspected project checkout when recrea
 checkout to adopt. Workspace isolation failures have a stable error code. An active transition
 is independent of queue pauses and cannot be cleared by resume.
 
+October upstream ports use version 29 (main already includes protocol versions
+26–28 for worktree management, MCP and storage). Git commit results gain `context_changed`
+and retain a suggested message for inspection when HEAD, staging, or included
+content changes during generation. No commit, push or PR creation follows that result.
+This is the single protocol bump for this bundled catch-up release.
+
 The authenticated `GET /api/bootstrap` response and WebSocket welcome advertise
 current capabilities, upload support, and global send limits. Today
 image attachments retain the existing eight-image, 10 MiB/image and 120,000-character
@@ -98,3 +104,8 @@ optional move summaries on transition snapshots. Private move snapshots and clea
 progress extend the existing transition JSON record with optional fields, so older
 persisted transitions remain readable. An additive partial index bounds startup recovery
 to unfinished moves and pending private-ref cleanup.
+
+The October catch-up integrated with worktree move Release 5 uses version 30.
+It retains version 29's move methods alongside the October provider/settings
+contracts. Clients from either earlier branch must reload against this combined
+server before issuing mutations.

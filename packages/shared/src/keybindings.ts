@@ -18,6 +18,12 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+t", command: "rightPanel.tabMenu", when: "!terminalFocus && !dialogFocus" },
+  {
+    key: "mod+shift+t",
+    command: "rightPanel.reopenClosed",
+    when: "!terminalFocus && !dialogFocus",
+  },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus && !dialogFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus && !dialogFocus" },
   {
@@ -85,8 +91,13 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "workflow.new", when: "!terminalFocus" },
   { key: "mod+enter", command: "chat.scrollToBottom", when: "!dialogFocus" },
+  { key: "mod+f", command: "chat.find", when: "!terminalFocus && !dialogFocus" },
   { key: "mod+shift+enter", command: "chat.queueTurn", when: "!dialogFocus" },
-  { key: "mod+alt+enter", command: "chat.steerTurn", when: "!dialogFocus" },
+  {
+    key: "mod+alt+enter",
+    command: "chat.sendAndNew",
+    when: "composerFocus && !newThreadComposer && !terminalFocus && !dialogFocus",
+  },
   { key: "alt+enter", command: "chat.queueTurnNext", when: "!dialogFocus" },
   {
     key: "mod+shift+v",
@@ -110,6 +121,16 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   })),
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+/", command: "help.shortcuts", when: "!terminalFocus" },
+  { key: "mod+u", command: "usage.open", when: "!terminalFocus" },
+  // Usage page keys; the page ignores them while typing or in a popup.
+  { key: "t", command: "usage.tokens", when: "usagePageOpen" },
+  { key: "c", command: "usage.cost", when: "usagePageOpen" },
+  { key: "r", command: "usage.turns", when: "usagePageOpen" },
+  { key: "l", command: "usage.limits", when: "usagePageOpen" },
+  { key: "1", command: "usage.period.day", when: "usagePageOpen" },
+  { key: "2", command: "usage.period.week", when: "usagePageOpen" },
+  { key: "3", command: "usage.period.month", when: "usagePageOpen" },
+  { key: "4", command: "usage.period.quarter", when: "usagePageOpen" },
   { key: "mod+enter", command: "chat.newBackground", when: "newThreadComposer && !dialogFocus" },
 ];
 
