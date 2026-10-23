@@ -46,18 +46,23 @@ async function fixture() {
     },
   };
 }
-it("installs both commands idempotently, serializes calls and preserves arbitrary arguments", async () => {
-  const f = await fixture();
-  expect((await f.installer.state()).installedPaths).toEqual({ f5: null, t3: null });
-  const [one, two] = await Promise.all([f.installer.install(), f.installer.install()]);
-  expect(one).toEqual(two);
-  expect(one.onPath).toBe(true);
-  const command = path.join(f.systemBin, "f5");
-  expect(await fs.readlink(command)).toBe(path.join(f.launcherDirectory, "f5"));
-  expect(
-    (await execute(command, ["a b", "$(echo unexpected)", "c'd", "café"])).stdout.split("\n"),
-  ).toEqual(["1", f.entry, "a b", "$(echo unexpected)", "c'd", "café", ""]);
-});
+// The launcher is a /bin/sh script; Windows cannot execute it and never installs it.
+const itRunsLauncher = it.skipIf(process.platform === "win32");
+itRunsLauncher(
+  "installs both commands idempotently, serializes calls and preserves arbitrary arguments",
+  async () => {
+    const f = await fixture();
+    expect((await f.installer.state()).installedPaths).toEqual({ f5: null, t3: null });
+    const [one, two] = await Promise.all([f.installer.install(), f.installer.install()]);
+    expect(one).toEqual(two);
+    expect(one.onPath).toBe(true);
+    const command = path.join(f.systemBin, "f5");
+    expect(await fs.readlink(command)).toBe(path.join(f.launcherDirectory, "f5"));
+    expect(
+      (await execute(command, ["a b", "$(echo unexpected)", "c'd", "café"])).stdout.split("\n"),
+    ).toEqual(["1", f.entry, "a b", "$(echo unexpected)", "c'd", "café", ""]);
+  },
+);
 it("falls back to the user's local bin without privilege escalation", async () => {
   const f = await fixture();
   await fs.writeFile(f.systemBin, "occupied");
@@ -107,28 +112,31 @@ it("offers no CLI when the app runs from a temporary location, as an AppImage do
   expect((await appImage.state()).supported).toBe(false);
   await expect(appImage.install()).rejects.toThrow("AppImage");
 });
-it("stops reporting the commands as installed once the app they run has moved", async () => {
-  const f = await fixture();
-  await f.installer.install();
-  const moved = path.join(f.root, "moved runtime");
-  await fs.rename(f.options.executable, moved);
-  const relocated = createDesktopCliInstaller({ ...f.options, executable: moved });
-  const stale = await relocated.state();
-  expect(stale).toMatchObject({ onPath: false, installedPaths: { f5: null, t3: null } });
-  expect(stale.shadowedBy).toBeUndefined();
+itRunsLauncher(
+  "stops reporting the commands as installed once the app they run has moved",
+  async () => {
+    const f = await fixture();
+    await f.installer.install();
+    const moved = path.join(f.root, "moved runtime");
+    await fs.rename(f.options.executable, moved);
+    const relocated = createDesktopCliInstaller({ ...f.options, executable: moved });
+    const stale = await relocated.state();
+    expect(stale).toMatchObject({ onPath: false, installedPaths: { f5: null, t3: null } });
+    expect(stale.shadowedBy).toBeUndefined();
 
-  const repaired = await relocated.install();
-  expect(repaired).toMatchObject({
-    onPath: true,
-    installedPaths: { f5: path.join(f.systemBin, "f5") },
-  });
-  expect((await execute(path.join(f.systemBin, "f5"), ["x"])).stdout.split("\n")).toEqual([
-    "1",
-    f.entry,
-    "x",
-    "",
-  ]);
-});
+    const repaired = await relocated.install();
+    expect(repaired).toMatchObject({
+      onPath: true,
+      installedPaths: { f5: path.join(f.systemBin, "f5") },
+    });
+    expect((await execute(path.join(f.systemBin, "f5"), ["x"])).stdout.split("\n")).toEqual([
+      "1",
+      f.entry,
+      "x",
+      "",
+    ]);
+  },
+);
 it("refuses an unowned launcher and disables symlink installation on Windows", async () => {
   const f = await fixture();
   await fs.mkdir(f.launcherDirectory, { recursive: true });

@@ -143,7 +143,8 @@ describe("thread workspace guard", () => {
     expect(found.filter((entry) => !allowed.some((allow) => sameSite(allow, entry)))).toEqual([]);
     // A stale allowance would quietly permit the next fallback in that file.
     expect(allowed.filter((allow) => !found.some((entry) => sameSite(allow, entry)))).toEqual([]);
-  });
+    // Parses every server, web and shared source file; shared CI runners take several seconds.
+  }, 60_000);
 });
 
 function sameSite(
