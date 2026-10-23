@@ -16,12 +16,28 @@ export interface PlannedCommit {
   readonly reviewStatus: "reviewed";
   readonly evidence?: ReadonlyArray<string>;
   readonly f5Shas?: ReadonlyArray<string>;
+  /** Review artifacts only; delivery proof belongs to the ledger. */
+  readonly verification?: {
+    readonly scenarioIds: ReadonlyArray<string>;
+    readonly targetModules: ReadonlyArray<string>;
+    readonly perfTargets?: ReadonlyArray<string>;
+  };
 }
 export interface PortPlan {
   readonly schemaVersion: 1;
   readonly baseSha: string;
   readonly targetSha: string;
   readonly entries: ReadonlyArray<PlannedCommit>;
+  readonly septemberCarriers?: Readonly<
+    Record<
+      string,
+      {
+        readonly carrierWorkstream: string | null;
+        readonly upstreamShas: ReadonlyArray<string>;
+      }
+    >
+  >;
+  readonly priorIntervalOverrides?: ReadonlyArray<PlannedCommit>;
 }
 
 const phases = new Set([
@@ -67,6 +83,7 @@ const phases = new Set([
   "13c",
   "13d",
   "14",
+  ...Array.from({ length: 22 }, (_, index) => `15${String.fromCharCode(97 + index)}`),
 ]);
 const reasonKeys = new Set([
   "mobile",
@@ -180,6 +197,28 @@ export function applyPortPlan(
         ? previous
         : entry,
     );
+  }
+  const overrides = new Set<string>();
+  for (const decision of plan.priorIntervalOverrides ?? []) {
+    if (!SHA_PATTERN.test(decision.upstreamSha) || overrides.has(decision.upstreamSha))
+      throw new Error(`invalid or duplicate prior-interval override ${decision.upstreamSha}`);
+    overrides.add(decision.upstreamSha);
+    const previous = existing.get(decision.upstreamSha);
+    const intervalIndex = ledger.intervals.findIndex((interval) =>
+      interval.upstreamShas.includes(decision.upstreamSha),
+    );
+    const currentIndex = ledger.intervals.findIndex((interval) =>
+      interval.upstreamShas.includes(plan.targetSha),
+    );
+    if (!previous || intervalIndex < 0 || intervalIndex >= currentIndex)
+      throw new Error(`override ${decision.upstreamSha} must belong to a prior interval`);
+    const replacement = classify(
+      { sha: previous.upstreamSha, subject: previous.subject },
+      decision,
+    );
+    // Reapplying the old plan followed by this overlay is safe after delivery.
+    if (!["ported", "equivalent", "already-present"].includes(previous.disposition))
+      existing.set(previous.upstreamSha, replacement);
   }
   return { ...ledger, entries: sortEntries(existing.values()) };
 }

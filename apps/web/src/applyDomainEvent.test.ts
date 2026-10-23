@@ -1586,6 +1586,72 @@ it.each(["running", "interrupted"] as const)(
   },
 );
 
+it("removes only identified native rewind turns while preserving the active turn and unrelated history", () => {
+  const now = "2026-10-19T00:00:00.000Z";
+  const ids = ["other-provider", "kept-pi", "removed-pi", "native-command"].map((id) =>
+    TurnId.make(id),
+  );
+  const latestTurn = {
+    turnId: ids[3]!,
+    state: "running" as const,
+    requestedAt: now,
+    startedAt: now,
+    completedAt: null,
+    assistantMessageId: null,
+  };
+  const thread = makeThread({
+    latestTurn,
+    messages: ids.map((turnId, index) => ({
+      id: MessageId.make(`native-${index}`),
+      role: "assistant" as const,
+      text: turnId,
+      turnId,
+      streaming: false,
+      createdAt: now,
+    })),
+    activities: ids.map((turnId, index) => ({
+      id: EventId.make(`native-${index}`),
+      kind: "tool.completed",
+      tone: "tool" as const,
+      summary: turnId,
+      turnId,
+      payload: {},
+      createdAt: now,
+    })),
+  });
+  thread.messages.push({
+    id: MessageId.make("user-removed"),
+    role: "user",
+    text: "Removed prompt",
+    turnId: null,
+    streaming: false,
+    createdAt: now,
+  });
+  thread.messages.push({
+    id: MessageId.make("user-unlocated"),
+    role: "user",
+    text: "Preserve unlocated",
+    turnId: null,
+    streaming: false,
+    createdAt: now,
+  });
+  const event = makeEvent("thread.reverted", {
+    threadId: thread.id,
+    turnCount: 0,
+    nativeTurnId: ids[3]!,
+    removedTurnIds: [ids[2]!],
+    removedMessageIds: [MessageId.make("user-removed")],
+  });
+  const next = applyDomainEvent(makeState({ threads: [thread] }), event).threads[0]!;
+  expect(next.messages.map((message) => message.turnId)).toEqual([ids[0], ids[1], ids[3], null]);
+  expect(next.messages.at(-1)?.id).toBe("user-unlocated");
+  expect(next.activities.map((activity) => activity.turnId)).toEqual([ids[0], ids[1], ids[3]]);
+  expect(next.latestTurn).toBe(latestTurn);
+  expect(applyDomainEvent(makeState({ threads: [next] }), event).threads[0]?.messages).toEqual(
+    next.messages,
+  );
+});
+
 describe("streaming batch and timeline work", () => {
   it("copies the thread collection once and reuses timeline structure for text-only updates", () => {
     const fixed = {
