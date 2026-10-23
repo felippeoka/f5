@@ -365,3 +365,16 @@ it("saves metadata on an expired one-shot without changing or reconverting its t
     }),
   );
 });
+
+it("timestamps create requests when saving rather than when the dialog opens", async () => {
+  mocks.create.mockResolvedValue({ warnings: [] });
+  await setup();
+  const savedAt = Date.now() + 2 * 86400000;
+  vi.spyOn(Date, "now").mockReturnValue(savedAt);
+  await page.getByRole("textbox", { name: "Task name" }).fill("Long-open dialog");
+  await page.getByTestId("composer-editor").fill("Check for updates");
+  // Keep the preview's real wall clock: only the request timestamp uses Date.now.
+  await page.getByRole("button", { name: "Save task" }).click();
+  await vi.waitFor(() => expect(mocks.create).toHaveBeenCalled());
+  expect(mocks.create.mock.calls[0]![0].requestedAt).toBe(new Date(savedAt).toISOString());
+});

@@ -177,7 +177,7 @@ function Editor(
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const { resolvedTheme } = useTheme();
   const taskId = useRef(props.task?.id ?? ScheduledTaskId.makeUnsafe(crypto.randomUUID()));
-  const requestedAt = useRef(new Date().toISOString());
+  const requestedAt = useRef<string | null>(null);
   const key = JSON.stringify([props.projectId, value.timezone, mode, schedule]);
   const provider = props.providers.find((p) => p.instanceId === value.modelSelection.instanceId);
   const driver = provider?.driver ?? ProviderDriverKind.make("codex");
@@ -270,7 +270,7 @@ function Editor(
         : await api.create({
             id: taskId.current,
             projectId: props.projectId,
-            requestedAt: requestedAt.current,
+            requestedAt: (requestedAt.current ??= new Date(Date.now()).toISOString()),
             configuration,
           });
       for (const warning of result.warnings) toastManager.add({ type: "warning", title: warning });

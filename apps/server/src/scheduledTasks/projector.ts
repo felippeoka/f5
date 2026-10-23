@@ -12,13 +12,21 @@ export const SCHEDULED_RUN_EVENT_TYPES: ReadonlyArray<OrchestrationEvent["type"]
   "thread.user-input-resolved",
   "thread.deleted",
   "thread.archived",
-  "thread.message-sent",
 ];
+export const isScheduledRunEvent = (event: OrchestrationEvent) =>
+  SCHEDULED_RUN_EVENT_TYPES.includes(event.type) &&
+  (event.type !== "thread.activity-appended" ||
+    [
+      "approval.requested",
+      "approval.resolved",
+      "user-input.requested",
+      "user-input.resolved",
+    ].includes(event.payload.activity.kind));
 /** Filtered, checkpointed by ProjectionPipeline. Operational state is never rebuilt from unrelated turns. */
 export const makeScheduledRunProjector =
   (store: ScheduledTaskStoreShape) => (event: OrchestrationEvent) =>
     Effect.gen(function* () {
-      if (!SCHEDULED_RUN_EVENT_TYPES.includes(event.type)) return;
+      if (!isScheduledRunEvent(event)) return;
       const { sql } = store;
       const rows = yield* sql<{
         id: string;
@@ -46,6 +54,32 @@ export const makeScheduledRunProjector =
           const inputs =
             yield* sql`SELECT request_id FROM projection_pending_user_inputs WHERE thread_id=${event.aggregateId} AND resolution IS NULL AND (json_extract(payload_json,'$.turnId')=${turnId} OR json_extract(payload_json,'$.turnId') IS NULL) LIMIT 1`;
           return inputs.length ? ("user_input" as const) : null;
+        });
+      const resolvedAttentionState = (turnId: string) =>
+        Effect.gen(function* () {
+          const reason = yield* pendingAttention(turnId);
+          const outcome = (yield* sql<{
+            state: string;
+            processing_quiesced_at: string | null;
+          }>`SELECT state,processing_quiesced_at FROM projection_turns WHERE thread_id=${event.aggregateId} AND turn_id=${turnId}`)[0];
+          if (!reason && outcome?.state === "error")
+            return { status: "failed" as const, reason: "delivery_failed" as const };
+          if (!reason && outcome?.state === "interrupted")
+            return {
+              status: "needs_attention" as const,
+              reason:
+                current.run.reason === "usage_limit"
+                  ? ("usage_limit" as const)
+                  : ("interrupted" as const),
+            };
+          return {
+            reason,
+            status: reason
+              ? ("needs_attention" as const)
+              : outcome?.state === "completed" && outcome.processing_quiesced_at
+                ? ("succeeded" as const)
+                : ("running" as const),
+          };
         });
       let status: ScheduledTaskRun["status"] | null = null;
       let reason: ScheduledTaskRun["reason"] = null;
@@ -129,16 +163,7 @@ export const makeScheduledRunProjector =
             (yield* hasContinuation(current.turnId))
           )
             break;
-          reason = yield* pendingAttention(current.turnId);
-          const outcome = (yield* sql<{
-            state: string;
-            processing_quiesced_at: string | null;
-          }>`SELECT state,processing_quiesced_at FROM projection_turns WHERE thread_id=${event.aggregateId} AND turn_id=${current.turnId}`)[0];
-          status = reason
-            ? "needs_attention"
-            : outcome?.state === "completed" && outcome.processing_quiesced_at
-              ? "succeeded"
-              : "running";
+          ({ status, reason } = yield* resolvedAttentionState(current.turnId));
           break;
         }
         case "thread.activity-appended": {
@@ -154,8 +179,7 @@ export const makeScheduledRunProjector =
             reason = "user_input";
           }
           if (activity.kind === "approval.resolved" || activity.kind === "user-input.resolved") {
-            reason = yield* pendingAttention(current.turnId);
-            status = reason ? "needs_attention" : "running";
+            ({ status, reason } = yield* resolvedAttentionState(current.turnId));
           }
           break;
         }

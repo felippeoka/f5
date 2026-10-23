@@ -168,7 +168,7 @@ Tools: `list_scheduled_tasks`, `create_scheduled_task`, `update_scheduled_task`,
 `delete_scheduled_task`, `run_scheduled_task`, `list_scheduled_task_runs`. Agents provide cron
 plus an IANA timezone, and receive the normalized schedule, human summary and future fires.
 Create/update execution is always `approval-required`; explicitly requesting another mode is
-rejected. Other clients' tasks and nonsupervised tasks cannot be mutated. Run resolution and
+rejected. Only tasks owned by the calling agent client can be mutated. User-owned schedules, other clients' tasks, and nonsupervised tasks are read-only through MCP. Agents cannot adopt user-owned schedules; revoking an agent grant therefore cannot disable a user's schedule. A user can still explicitly adopt an agent-owned schedule in F5. Run resolution and
 approval/input responses are never exposed through these tools.
 
 Create accepts `projectId`, `name`, `prompt`, `cron`, `timezone`, and a `clientRequestId` for

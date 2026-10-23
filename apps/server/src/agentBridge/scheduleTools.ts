@@ -5,6 +5,7 @@ import {
   ScheduledTaskId,
   ScheduledTaskRunId,
   ProjectId,
+  ProviderInstanceId,
   ScheduledWorkspace,
   RuntimeMode,
   ProviderOptionSelection,
@@ -13,6 +14,7 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { previewCronSchedule } from "@t3tools/shared/cronSchedule";
+import { scheduledExecutionConfiguration } from "@t3tools/shared/scheduledTasks";
 import { canonicalJsonHash } from "../canonicalJsonHash.ts";
 import type { ScheduledTaskServiceShape, ScheduleActor } from "../scheduledTasks/Service.ts";
 import type { AgentBridgeStore } from "./AgentBridgeStore.ts";
@@ -105,6 +107,37 @@ export const makeScheduleTools = (deps: {
     Effect.gen(function* () {
       if (input.runtimeMode !== undefined && input.runtimeMode !== "approval-required")
         return yield* fail("Agent schedules require approval-required mode.");
+      if (previous) {
+        const kept =
+          !input.providerInstanceId ||
+          input.providerInstanceId === previous.modelSelection.instanceId;
+        const candidate: ScheduledTaskConfiguration = {
+          scheduleSource: previous.scheduleSource,
+          oneShotAt: previous.oneShotAt,
+          name: input.name,
+          prompt: input.prompt,
+          cron: input.cron,
+          timezone: input.timezone,
+          runtimeMode: input.runtimeMode ?? previous.runtimeMode,
+          workspace: input.workspace ?? previous.workspace,
+          modelSelection: createModelSelection(
+            ProviderInstanceId.makeUnsafe(
+              input.providerInstanceId ?? previous.modelSelection.instanceId,
+            ),
+            input.model ?? previous.modelSelection.model,
+            input.modelOptions ?? (kept ? previous.modelSelection.options : undefined),
+          ),
+          maxRuns: input.maxRuns === undefined ? previous.maxRuns : input.maxRuns,
+          enabled: input.enabled ?? previous.enabled,
+          notify: input.notify ?? previous.notify,
+        };
+        if (
+          !(candidate.enabled && !previous.enabled) &&
+          canonicalJsonHash(scheduledExecutionConfiguration(candidate)) ===
+            canonicalJsonHash(scheduledExecutionConfiguration(previous))
+        )
+          return candidate;
+      }
       const instanceId = input.providerInstanceId ?? previous?.modelSelection.instanceId;
       const keptInstance =
         !input.providerInstanceId ||

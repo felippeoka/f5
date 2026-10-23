@@ -16,7 +16,16 @@ Scheduled execution uses main's command admission, commit side effects, filtered
 
 The final delivery handoff rechecks scheduled authority, cancellation and capacity after asynchronous preparation, alongside the shutdown fence. Capacity wakeups query only pending deliveries in the affected thread. Scheduler subscriptions and timers stop during shutdown admission; already-admitted submission workers have a separate drain barrier. Durable reserved identities and the existing delivery recovery path remain authoritative after restart.
 
-Main's migrations 124–127 are unchanged; Scheduled Tasks is migration 128. Profiles from unreleased builds whose ledger identifies 124 or 127 specifically as `ScheduledTasks` receive the corresponding missing main migration transactionally with the ledger identity repair. The idempotent scheduled migration then runs at 128. Existing task definitions, runs, ownership, notifications, origin and projection cursors are retained, and interrupted upgrades remain retryable. Main's planning-workflow lane cleanup and missing-worktree branch-drift protections are preserved.
+Main's migrations 124–127 are unchanged; Scheduled Tasks is migration 128 and malformed-row quarantine is migration 129. Normal startup runs only the numbered migrations. Known migration-ledger identities from unreleased development builds are repaired only by the opt-in command below, with F5 stopped. The script inspects by default; `--apply` first creates a consistent SQLite backup, then transactionally applies missing main migrations and repairs those exact ledger identities. Existing task/run evidence, ownership, notifications, origin and projector cursors are retained.
+
+```sh
+bun apps/server/scripts/repair-unreleased-scheduled-tasks.ts /absolute/path/to/state.sqlite
+bun apps/server/scripts/repair-unreleased-scheduled-tasks.ts /absolute/path/to/state.sqlite --apply
+```
+
+Malformed task definitions and run payloads are retained in `scheduled_task_quarantine`, with the source task disabled and unsent work fenced. Unknown/in-flight execution keeps ownership and capacity until its evidence is recovered; it is never automatically resent. Healthy rows and projectors continue. Restoring a quarantined record requires explicit database recovery from its retained payload or backup before removing its quarantine entry.
+
+Global startup readiness closes automatic sends. Human answers remain subject to ownership, cancellation, authority and capacity checks, but do not wait for the global automatic-dispatch readiness latch. A persistent reconciliation failure is fenced per execution; a global storage failure keeps automatic dispatch closed and retrying.
 
 Main's selective renderer persistence remains in place. Explicit read/unread actions separately persist their receipts, including bulk acknowledgement, without writing renderer state for every streamed event. Local acknowledgements also survive backend-incarnation rehydration.
 
@@ -80,3 +89,9 @@ The dialog offers Preset and Cron. The cron editor uses the shared evaluator for
 - [ ] Activate local MCP, grant scheduling, create/manage a supervised task, reject unsafe mode, revoke authority.
 
 History retains terminal runs for 90 days with a 1,000-row per-task cap, delivered notifications for seven days, and undelivered terminal notifications for 30 days. Unfinished execution and unresolved evidence are retained. Deletion preserves existing threads/worktrees. Native notification delivery is bounded at-least-once; a crash between presentation and acknowledgement can repeat a notice.
+
+## Review follow-up scope
+
+The local Agent Bridge listener restoration is an explicit part of Phase 3, including the existing read, thread and task MCP toolsets. It stays opt-in, loopback-only, and requires fresh UI activation; existing credentials receive no automatic scheduling grant. Scheduler mutations now apply only to the calling agent client's own supervised tasks. User-owned schedules remain read-only to agents. The unrelated task-board UI remains shelved.
+
+Sidebar grouping and explicit read/unread receipt persistence were requested during feature testing. Read-state writes occur for explicit user acknowledgements (including bulk acknowledgement), rather than every streamed message. The existing Bridge branch helper's detached-HEAD default-branch fallback is also part of this PR and is called out for owner review.

@@ -381,3 +381,105 @@ it.effect(
       ).toBe(true);
     }).pipe(Effect.provide(testLayer), Effect.scoped),
 );
+
+it.effect(
+  "keeps user-owned supervised tasks readable but rejects agent update, run and delete",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* setupTools;
+      yield* f.grant(true);
+      const { task } = yield* f.create();
+      const caller = yield* f.caller();
+      expect(
+        (yield* f.service.get(
+          { id: task.id },
+          {
+            kind: "agent",
+            clientId: caller.client.id,
+            grantGeneration: caller.client.grantGeneration,
+            visibleProjectIds: caller.visibleProjectIds,
+          },
+        )).task.id,
+      ).toBe(task.id);
+      const configuration = {
+        name: "Agent rename",
+        prompt: task.prompt,
+        cron: task.cron,
+        timezone: task.timezone,
+      };
+      for (const [tool, args] of [
+        ["update_scheduled_task", { expectedVersion: task.version, configuration }],
+        ["run_scheduled_task", {}],
+        ["delete_scheduled_task", { expectedVersion: task.version }],
+      ] as const) {
+        const result = yield* Effect.result(
+          f.call(tool, { taskId: task.id, clientRequestId: tool, ...args }),
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") expect(result.failure.message).toContain("user-owned");
+      }
+      yield* f.grant(false);
+      const current = (yield* f.store.task(task.id))!.task;
+      expect(current.authority).toEqual({ kind: "user" });
+      expect(current.enabled).toBe(true);
+      expect(current.version).toBe(task.version);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+);
+
+it.effect("MCP can disable its own task after the configured provider disappears", () =>
+  Effect.gen(function* () {
+    const f = yield* setupTools;
+    yield* f.grant(true);
+    const task = savedTask(yield* f.createTask());
+    f.host.providers = [];
+    const result = savedTask(
+      yield* f.call("update_scheduled_task", {
+        taskId: task.id,
+        expectedVersion: task.version,
+        clientRequestId: "offline-disable",
+        configuration: {
+          name: task.name,
+          prompt: task.prompt,
+          cron: task.cron,
+          timezone: task.timezone,
+          enabled: false,
+        },
+      }),
+    );
+    expect(result.enabled).toBe(false);
+    expect(result.modelSelection).toEqual(task.modelSelection);
+    expect(result.authority).toBeUndefined(); // Tool echoes never expose execution authority.
+    expect((yield* f.store.task(task.id))!.task.authority).toEqual(
+      task.authority ?? {
+        kind: "agent",
+        clientId: "local",
+        grantGeneration: (yield* f.caller()).client.grantGeneration,
+      },
+    );
+  }).pipe(Effect.provide(testLayer), Effect.scoped),
+);
+
+it.effect("MCP metadata edits preserve an expired one-shot without probing its provider", () =>
+  Effect.gen(function* () {
+    const f = yield* setupTools;
+    yield* f.grant(true);
+    const task = savedTask(yield* f.createTask(undefined, { cron: "0 1 0 1 1 * 1970" }));
+    yield* TestClock.adjust("2 minutes");
+    f.host.providers = [];
+    const result = (yield* f.call("update_scheduled_task", {
+      taskId: task.id,
+      expectedVersion: task.version,
+      clientRequestId: "expired-metadata",
+      configuration: {
+        name: "Expired, renamed",
+        prompt: task.prompt,
+        cron: task.cron,
+        timezone: task.timezone,
+      },
+    })) as { task: ScheduledTask; schedule: { nextFireTimes: string[] } };
+    expect(result.task.name).toBe("Expired, renamed");
+    expect(result.task.oneShotAt).toBe(task.oneShotAt);
+    expect(result.task.maxRuns).toBe(1);
+    expect(result.schedule.nextFireTimes).toEqual([]);
+  }).pipe(Effect.provide(testLayer), Effect.scoped),
+);

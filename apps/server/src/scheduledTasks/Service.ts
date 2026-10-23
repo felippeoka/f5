@@ -1,3 +1,4 @@
+import { scheduledRunLeafSubmissions, scheduledRunHasSettledLeaves } from "./submissions.ts";
 import { makeShutdownSourceScope, registerShutdown } from "../shutdown.ts";
 import { scheduledExecutionConfiguration } from "@t3tools/shared/scheduledTasks";
 import { scheduleAuthorityCurrent } from "./authority.ts";
@@ -7,7 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { fenceScheduledRun } from "./cancellation.ts";
 import { retryScheduledOperation } from "./worker.ts";
 import { detectScheduledClockJump, scheduledDeadlineDelay } from "./timing.ts";
-import { SCHEDULED_RUN_EVENT_TYPES } from "./projector.ts";
+import { isScheduledRunEvent } from "./projector.ts";
 import { scheduledUsageRetryAt } from "./usageGate.ts";
 import {
   buildSlashComposerMenuItems,
@@ -39,7 +40,7 @@ import {
   oneShotCron,
 } from "@t3tools/shared/cronSchedule";
 import { runtimeModeCapabilities } from "@t3tools/shared/runtimeMode";
-import { Clock, Deferred, Duration, Effect, Semaphore, Stream } from "effect";
+import { Cause, Clock, Deferred, Duration, Effect, Semaphore, Stream } from "effect";
 import type { AgentBridgeHostShape } from "../agentBridge/AgentBridgeHost.ts";
 import { isProviderUsable } from "../agentBridge/threadTools.ts";
 import type { ServerSettingsShape } from "../serverSettings.ts";
@@ -84,10 +85,17 @@ export const makeScheduledTaskService = (deps: {
     let wake = yield* Deferred.make<void>();
     const signal = Effect.suspend(() => Deferred.succeed(wake, undefined)).pipe(Effect.asVoid);
     const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => new Date(ms).toISOString()));
+    const publishMutex = yield* Semaphore.make(1);
+    let publishedRevision = 0;
     const changed = (taskIds: ScheduledTaskId[] = [], runIds: ScheduledTaskRunId[] = []) =>
-      store.readRevision.pipe(
-        Effect.flatMap((revision) => deps.publish({ revision, taskIds, runIds })),
-        Effect.andThen(signal),
+      publishMutex.withPermits(1)(
+        Effect.gen(function* () {
+          const revision = yield* store.readRevision;
+          if (revision <= publishedRevision) return;
+          yield* deps.publish({ revision, taskIds, runIds });
+          publishedRevision = revision;
+          yield* signal;
+        }),
       );
     const validateAge = (requestedAt: string, at: string) =>
       Math.abs(Date.parse(at) - Date.parse(requestedAt)) > MAX_REQUEST_AGE
@@ -122,7 +130,12 @@ export const makeScheduledTaskService = (deps: {
             "forbidden",
             "Agent Bridge can manage only supervised schedules.",
           );
-        if (task.authority.kind === "agent" && task.authority.clientId !== actor.clientId)
+        if (task.authority.kind === "user")
+          return yield* scheduleError(
+            "forbidden",
+            "Only the user can mutate user-owned schedules.",
+          );
+        if (task.authority.clientId !== actor.clientId)
           return yield* scheduleError("forbidden", "This schedule belongs to another client.");
       });
     const validate = (configuration: ScheduledTaskConfiguration, at: string) =>
@@ -433,6 +446,8 @@ export const makeScheduledTaskService = (deps: {
             const value: ScheduledTask = {
               ...current,
               ...config,
+              runsConsumed: current.runsConsumed,
+              lastRunAt: current.lastRunAt,
               ...(adopting ? { disabledReason: null } : {}),
               nextRunAt: !config.enabled
                 ? null
@@ -537,9 +552,14 @@ export const makeScheduledTaskService = (deps: {
     ) =>
       store.transaction(
         Effect.gen(function* () {
-          const owner = (yield* store.active).find((r) => r.run.taskId === task.id);
+          // Quarantined evidence may still own execution even when it cannot be decoded.
+          const owner = (yield* sql<{
+            submission_started: number;
+            budget_consumed: number;
+            created_at: string;
+          }>`SELECT submission_started,budget_consumed,created_at FROM scheduled_task_runs WHERE task_id=${task.id} AND owns_execution=1 LIMIT 1`)[0];
           const reason = owner
-            ? owner.started || owner.budgetConsumed
+            ? owner.submission_started || owner.budget_consumed
               ? "overlap"
               : "already_pending"
             : task.maxRuns !== null && task.runsConsumed >= task.maxRuns
@@ -548,7 +568,7 @@ export const makeScheduledTaskService = (deps: {
           if (trigger !== "manual" && owner && reason) {
             const summaries = yield* sql<{
               id: string;
-            }>`SELECT id FROM scheduled_task_runs WHERE task_id=${task.id} AND reason=${reason} AND created_at>=${owner.run.createdAt} AND trigger!='manual' ORDER BY created_at DESC LIMIT 1`;
+            }>`SELECT id FROM scheduled_task_runs WHERE task_id=${task.id} AND reason=${reason} AND created_at>=${owner.created_at} AND trigger!='manual' ORDER BY created_at DESC LIMIT 1`;
             if (summaries[0]) {
               yield* sql`UPDATE scheduled_task_runs SET state_json=json_set(state_json,'$.evaluatedThrough',${at},'$.suppressedCount',json_extract(state_json,'$.suppressedCount')+1) WHERE id=${summaries[0].id}`;
               yield* store.revision;
@@ -672,6 +692,23 @@ export const makeScheduledTaskService = (deps: {
         try: () => nextScheduleFires(task.cron, task.timezone, new Date(at), 1),
         catch: (error) => scheduleError("invalid_schedule", String(error)),
       });
+    const invalidSchedule = (task: ScheduledTask, at: string, detail: string) =>
+      store.transaction(
+        Effect.gen(function* () {
+          const live = yield* store.task(task.id);
+          if (live?.task.version !== task.version) return;
+          yield* store.saveTask({
+            ...live.task,
+            enabled: false,
+            nextRunAt: null,
+            disabledReason: "invalid_schedule",
+            updatedAt: at,
+            version: live.task.version + 1,
+          });
+          yield* store.revision;
+          yield* Effect.logError("scheduledTasks.invalidSchedule", { taskId: task.id, detail });
+        }),
+      );
     const evaluate = (catchUp: boolean) =>
       Effect.gen(function* () {
         const at = yield* now,
@@ -686,41 +723,49 @@ export const makeScheduledTaskService = (deps: {
             current.epoch !== control.epoch && current.cutoverAt ? current.cutoverAt : at;
           for (const task of yield* store.tasks()) {
             if (!task.enabled) continue;
-            const next = (yield* nextFires(task, cutover))[0] ?? null;
-            yield* store.transaction(
-              Effect.gen(function* () {
-                const live = yield* store.task(task.id);
-                if (!live || live.task.version !== task.version) return;
-                yield* store.saveTask({
-                  ...task,
-                  nextRunAt: next,
-                  enabled: next !== null,
-                  updatedAt: at,
-                });
-                const summary: ScheduledTaskRun = {
-                  id: ScheduledTaskRunId.makeUnsafe(
-                    `interval:${task.id}:${current.epoch}:${cutover}`,
-                  ),
-                  taskId: task.id,
-                  scheduledFor: cutover,
-                  trigger: "schedule",
-                  status: "skipped",
-                  reason: "disabled_interval",
-                  threadId: null,
-                  error: null,
-                  createdAt: at,
-                  startedAt: null,
-                  finishedAt: at,
-                  evaluatedThrough: current.enabled ? cutover : null,
-                  suppressedCount: 0,
-                };
-                const prior = yield* sql<{
-                  id: string;
-                }>`SELECT id FROM scheduled_task_runs WHERE task_id=${task.id} AND reason='disabled_interval' AND json_extract(state_json,'$.evaluatedThrough') IS NULL ORDER BY created_at DESC LIMIT 1`;
-                if (current.enabled && prior[0])
-                  yield* sql`UPDATE scheduled_task_runs SET state_json=json_set(state_json,'$.evaluatedThrough',${cutover}) WHERE id=${prior[0].id}`;
-                else yield* store.insertRun(summary, task, false);
-              }),
+            yield* Effect.gen(function* () {
+              const next = (yield* nextFires(task, cutover))[0] ?? null;
+              yield* store.transaction(
+                Effect.gen(function* () {
+                  const live = yield* store.task(task.id);
+                  if (!live || live.task.version !== task.version) return;
+                  yield* store.saveTask({
+                    ...live.task,
+                    nextRunAt: next,
+                    enabled: next !== null,
+                    updatedAt: at,
+                  });
+                  const summary: ScheduledTaskRun = {
+                    id: ScheduledTaskRunId.makeUnsafe(
+                      `interval:${task.id}:${current.epoch}:${cutover}`,
+                    ),
+                    taskId: task.id,
+                    scheduledFor: cutover,
+                    trigger: "schedule",
+                    status: "skipped",
+                    reason: "disabled_interval",
+                    threadId: null,
+                    error: null,
+                    createdAt: at,
+                    startedAt: null,
+                    finishedAt: at,
+                    evaluatedThrough: current.enabled ? cutover : null,
+                    suppressedCount: 0,
+                  };
+                  const prior = yield* sql<{
+                    id: string;
+                  }>`SELECT id FROM scheduled_task_runs WHERE task_id=${task.id} AND reason='disabled_interval' AND json_extract(state_json,'$.evaluatedThrough') IS NULL ORDER BY created_at DESC LIMIT 1`;
+                  if (current.enabled && prior[0])
+                    yield* sql`UPDATE scheduled_task_runs SET state_json=json_set(state_json,'$.evaluatedThrough',${cutover}) WHERE id=${prior[0].id}`;
+                  else yield* store.insertRun(summary, task, false);
+                }),
+              );
+            }).pipe(
+              Effect.catch((error) =>
+                error.code === "invalid_schedule"
+                  ? invalidSchedule(task, at, error.message)
+                  : Effect.fail(error),
+              ),
             );
           }
           yield* sql`UPDATE scheduled_control SET enabled=${current.enabled ? 1 : 0},epoch=${current.epoch},cutover_at=${cutover} WHERE id=1`;
@@ -748,36 +793,18 @@ export const makeScheduledTaskService = (deps: {
                   task.nextRunAt!,
                   at,
                 );
-                yield* store.saveTask({ ...task, nextRunAt: next, updatedAt: at });
+                yield* store.saveTask({ ...live.task, nextRunAt: next, updatedAt: at });
               }),
             );
           }).pipe(
             Effect.catch((error) =>
               error.code === "invalid_schedule"
-                ? store.transaction(
-                    Effect.gen(function* () {
-                      const live = yield* store.task(task.id);
-                      if (live?.task.version === task.version)
-                        yield* store.saveTask({
-                          ...task,
-                          enabled: false,
-                          nextRunAt: null,
-                          updatedAt: at,
-                          version: task.version + 1,
-                        });
-                      yield* Effect.logError("scheduledTasks.invalidSchedule", {
-                        taskId: task.id,
-                        detail: error.message,
-                      });
-                    }),
-                  )
+                ? invalidSchedule(task, at, error.message)
                 : Effect.fail(error),
             ),
           );
         }
-        yield* store.readRevision.pipe(
-          Effect.flatMap((revision) => deps.publish({ revision, taskIds: [], runIds: [] })),
-        );
+        yield* changed();
       });
     const claim = (candidate: StoredRun) =>
       Effect.gen(function* () {
@@ -809,14 +836,23 @@ export const makeScheduledTaskService = (deps: {
           (p) => p.id === current.snapshot.projectId && p.deletedAt === null,
         );
         if (!project) {
-          yield* store.transition(current.run.id, "skipped", "project_missing", at);
-          yield* store.saveTask({
-            ...task,
-            enabled: false,
-            nextRunAt: null,
-            version: task.version + 1,
-            disabledReason: "project_missing",
-          });
+          yield* store.transaction(
+            Effect.gen(function* () {
+              yield* store.transition(current.run.id, "skipped", "project_missing", at);
+              const live = yield* store.task(task.id);
+              if (live?.task.version !== task.version) return;
+              yield* store.saveTask({
+                ...live.task,
+                enabled: false,
+                nextRunAt: null,
+                version: live.task.version + 1,
+                updatedAt: at,
+                disabledReason: "project_missing",
+              });
+              yield* store.revision;
+            }),
+          );
+          yield* changed([task.id], [current.run.id]);
           return null;
         }
         const provider = (yield* host.listProviderInstances).find(
@@ -923,7 +959,7 @@ export const makeScheduledTaskService = (deps: {
               lastRunAt: at,
               enabled: exhausted ? false : liveTask.enabled,
               nextRunAt: exhausted ? null : liveTask.nextRunAt,
-              version: liveTask.version + 1,
+              version: liveTask.version + (exhausted ? 1 : 0),
               updatedAt: at,
             });
             yield* store.revision;
@@ -1008,6 +1044,18 @@ export const makeScheduledTaskService = (deps: {
               Effect.catch((error) =>
                 Effect.gen(function* () {
                   const at = yield* now;
+                  // No provider handoff is possible before this durable marker.
+                  const deferred = yield* sql`UPDATE scheduled_task_runs
+                    SET retry_at=${new Date(Date.parse(at) + 30000).toISOString()}
+                    WHERE id=${claimed.run.id} AND submission_started=0 AND owns_execution=1 AND canceled=0 RETURNING id`;
+                  if (deferred.length) {
+                    yield* signal;
+                    yield* Effect.logWarning("scheduledTasks.dispatch.preflightRetry", {
+                      runId: claimed.run.id,
+                      error,
+                    });
+                    return;
+                  }
                   const failure =
                     error._tag === "AgentBridgeHostError"
                       ? (error.submissionFailure ?? toTurnSubmissionError(error).kind)
@@ -1091,99 +1139,144 @@ export const makeScheduledTaskService = (deps: {
             (threadFilter && current.run.threadId !== threadFilter)
           )
             continue;
-          if (current.canceled) {
-            yield* store.transaction(
-              Effect.gen(function* () {
-                const safe = yield* fenceScheduledRun(current.run.id, at).pipe(
-                  Effect.provideService(SqlClient.SqlClient, sql),
-                );
-                if (safe)
-                  yield* store.transition(
-                    current.run.id,
-                    current.run.reason === "thread_removed" ? "failed" : "skipped",
-                    current.run.reason === "thread_removed" ? "thread_removed" : "canceled",
-                    at,
+          yield* Effect.gen(function* () {
+            if (current.canceled) {
+              yield* store.transaction(
+                Effect.gen(function* () {
+                  const safe = yield* fenceScheduledRun(current.run.id, at).pipe(
+                    Effect.provideService(SqlClient.SqlClient, sql),
                   );
-              }),
-            );
-            continue;
-          }
-          if (!current.started || !current.submissionId) continue;
-          const rejected = yield* sql<{
-            state: string;
-            error_detail: string | null;
-          }>`SELECT d.state,d.error_detail FROM scheduled_run_submissions s JOIN provider_turn_deliveries d ON d.command_id=s.submission_id WHERE s.run_id=${current.run.id} AND (d.state='abandoned' OR (d.state='rejected' AND d.certainty='not_sent' AND d.usage_limit_json IS NULL)) ORDER BY d.updated_at DESC LIMIT 1`;
-          if (rejected.length && current.run.reason !== "recovery_pending") {
-            yield* store.transaction(
-              Effect.gen(function* () {
-                const safe = yield* fenceScheduledRun(current.run.id, at).pipe(
-                  Effect.provideService(SqlClient.SqlClient, sql),
-                );
-                if (safe)
+                  if (
+                    safe &&
+                    (current.run.reason !== "delivery_unknown" ||
+                      !current.started ||
+                      (yield* scheduledRunHasSettledLeaves(sql, current.run.id)))
+                  )
+                    yield* store.transition(
+                      current.run.id,
+                      current.run.reason === "thread_removed" ? "failed" : "skipped",
+                      current.run.reason === "thread_removed" ? "thread_removed" : "canceled",
+                      at,
+                    );
+                }),
+              );
+              return;
+            }
+            if (!current.started || !current.submissionId) return;
+            const submission = (yield* scheduledRunLeafSubmissions(sql, current.run.id)).at(-1);
+            const submissionId = submission?.submission_id ?? current.submissionId;
+            const rejected = yield* sql<{
+              state: string;
+              error_detail: string | null;
+            }>`SELECT d.state,d.error_detail FROM scheduled_run_submissions s JOIN provider_turn_deliveries d ON d.command_id=s.submission_id WHERE s.run_id=${current.run.id} AND s.submission_id=${submissionId} AND (d.state='abandoned' OR (d.state='rejected' AND d.certainty='not_sent' AND d.usage_limit_json IS NULL)) ORDER BY d.updated_at DESC LIMIT 1`;
+            if (rejected.length) {
+              yield* store.transaction(
+                Effect.gen(function* () {
+                  const safe = yield* fenceScheduledRun(current.run.id, at).pipe(
+                    Effect.provideService(SqlClient.SqlClient, sql),
+                  );
                   yield* store.transition(
                     current.run.id,
-                    "failed",
-                    "delivery_failed",
+                    safe ? "failed" : "needs_attention",
+                    safe ? "delivery_failed" : "delivery_unknown",
                     at,
                     rejected[0]!.error_detail,
                   );
-              }),
-            );
-            continue;
-          }
-          const receipt = yield* host.getSubmission(CommandId.makeUnsafe(current.submissionId));
-          const thread = snapshot.threads.find((t) => t.id === current.run.threadId);
-          if (
-            !receipt &&
-            !thread &&
-            (recovering ||
-              Date.parse(at) - Date.parse(current.run.startedAt ?? current.run.createdAt) > 600000)
-          )
-            yield* store.transition(
-              current.run.id,
-              "needs_attention",
-              "delivery_unknown",
-              at,
-              "Execution was interrupted during submission. The original prompt will not be resent automatically.",
-            );
-          else if (
-            !receipt &&
-            thread &&
-            !thread.latestTurn &&
-            (recovering ||
-              Date.parse(at) - Date.parse(current.run.startedAt ?? current.run.createdAt) > 600000)
-          )
-            yield* store.transition(
-              current.run.id,
-              "needs_attention",
-              "setup_failed",
-              at,
-              "Submission was interrupted. Inspect the thread and worktree before resolving.",
-            );
-          if (current.run.threadId) {
-            const queue = yield* host.getQueueSnapshot(current.run.threadId);
-            const item = queue.items.find((i) => i.submissionId === current.submissionId);
+                }),
+              );
+              return;
+            }
+            const receipt = yield* host.getSubmission(CommandId.makeUnsafe(submissionId));
+            const thread = snapshot.threads.find((t) => t.id === current.run.threadId);
             if (
-              item &&
-              (item.status === "failed" ||
-                queue.blockedKind === "error" ||
-                queue.blockedKind === "paused")
+              !receipt &&
+              !thread &&
+              (recovering ||
+                Date.parse(at) - Date.parse(current.run.startedAt ?? current.run.createdAt) >
+                  600000)
             )
               yield* store.transition(
                 current.run.id,
                 "needs_attention",
-                queue.reasonCode === "worktree_setup_failed" ? "setup_failed" : "manual_pause",
+                "delivery_unknown",
                 at,
-                queue.reasonDetail ?? item.lastErrorDetail,
+                "Execution was interrupted during submission. The original prompt will not be resent automatically.",
               );
-          }
-          if (
-            receipt &&
-            (receipt.disposition === "canceled" ||
-              receipt.disposition === "cleared" ||
-              receipt.disposition === "rejected")
-          )
-            yield* store.transition(current.run.id, "failed", "delivery_failed", at);
+            else if (
+              !receipt &&
+              thread &&
+              !thread.latestTurn &&
+              (recovering ||
+                Date.parse(at) - Date.parse(current.run.startedAt ?? current.run.createdAt) >
+                  600000)
+            )
+              yield* store.transition(
+                current.run.id,
+                "needs_attention",
+                "setup_failed",
+                at,
+                "Submission was interrupted. Inspect the thread and worktree before resolving.",
+              );
+            if (current.run.threadId) {
+              const queue = yield* host.getQueueSnapshot(current.run.threadId);
+              const item = queue.items.find((i) => i.submissionId === submissionId);
+              if (
+                item &&
+                (item.status === "failed" ||
+                  queue.blockedKind === "error" ||
+                  queue.blockedKind === "paused")
+              )
+                yield* store.transition(
+                  current.run.id,
+                  "needs_attention",
+                  queue.reasonCode === "worktree_setup_failed" ? "setup_failed" : "manual_pause",
+                  at,
+                  queue.reasonDetail ?? item.lastErrorDetail,
+                );
+            }
+            if (
+              receipt &&
+              (receipt.disposition === "canceled" ||
+                receipt.disposition === "cleared" ||
+                receipt.disposition === "rejected")
+            ) {
+              const safe = yield* store.transaction(
+                fenceScheduledRun(current.run.id, at).pipe(
+                  Effect.provideService(SqlClient.SqlClient, sql),
+                ),
+              );
+              yield* store.transition(
+                current.run.id,
+                safe ? "failed" : "needs_attention",
+                safe ? "delivery_failed" : "delivery_unknown",
+                at,
+              );
+            }
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.gen(function* () {
+                if (Cause.hasInterruptsOnly(cause)) return yield* Effect.interrupt;
+                yield* Effect.logError("scheduledTasks.reconcile.runFailed", {
+                  runId: current.run.id,
+                  cause,
+                });
+                yield* store.transaction(
+                  Effect.gen(function* () {
+                    yield* fenceScheduledRun(current.run.id, at).pipe(
+                      Effect.provideService(SqlClient.SqlClient, sql),
+                    );
+                    yield* store.transition(
+                      current.run.id,
+                      "needs_attention",
+                      "delivery_unknown",
+                      at,
+                      "Recovery failed for this execution. Unsent work was fenced; inspect the conversation before retrying.",
+                    );
+                  }),
+                );
+              }),
+            ),
+          );
         }
       });
     const reconcile = reconcileFor();
@@ -1281,14 +1374,10 @@ export const makeScheduledTaskService = (deps: {
       );
       yield* retryScheduledOperation(
         host.domainEvents.pipe(
-          Stream.filter(
-            (e) => e.aggregateKind === "thread" && SCHEDULED_RUN_EVENT_TYPES.includes(e.type),
-          ),
-          Stream.runForEach((e) =>
-            sql`SELECT id FROM scheduled_task_runs WHERE thread_id=${e.aggregateId}`.pipe(
-              Effect.flatMap((rows) => (rows.length ? changed() : Effect.void)),
-            ),
-          ),
+          Stream.filter((e) => e.aggregateKind === "thread" && isScheduledRunEvent(e)),
+          // The projector commits the revision first. Terminal transitions release
+          // ownership, so publishing must use the revision rather than an owner lookup.
+          Stream.runForEach(() => changed()),
         ),
         "scheduledTasks.domainEvents",
       ).pipe(Effect.forkIn(sources.scope));
@@ -1319,9 +1408,9 @@ export const makeScheduledTaskService = (deps: {
         );
         lastWall = wall;
         lastMono = mono;
-        yield* evaluate(drift);
-        yield* revalidateAuthorities;
-        yield* reconcile;
+        yield* mutex.withPermits(1)(
+          evaluate(drift).pipe(Effect.andThen(revalidateAuthorities), Effect.andThen(reconcile)),
+        );
         yield* store.prune(new Date(wall).toISOString());
         yield* signal;
       });

@@ -7,6 +7,7 @@ import * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
 
+import { repairUnreleasedScheduledTaskMigrations } from "./repairUnreleasedScheduledTaskMigrations.ts";
 import { LATEST_MIGRATION_ID, MIGRATIONS, runMigrations } from "./Migrations.ts";
 import * as SqliteClient from "./NodeSqliteClient.ts";
 import scheduledMigration from "./Migrations/128_ScheduledTasks.ts";
@@ -67,6 +68,7 @@ const assertUpgrade = (version: PrecedingVersion) =>
       { migration_id: 126, name: "ProviderTerminalRecoveryIndexes" },
       { migration_id: 127, name: "ClearPlanningWorkflowLaneBranches" },
       { migration_id: 128, name: "ScheduledTasks" },
+      { migration_id: 129, name: "ScheduledTaskQuarantine" },
     ]);
     expect(
       yield* sql`SELECT event_id,attempt,origin_session_generation,next_due_at IS NOT NULL AS retry FROM provider_terminal_events`,
@@ -107,6 +109,7 @@ for (const version of ["main126", "main127", "schedules124", "schedules127"] as 
   effectIt.effect(`upgrades ${version} without losing durable evidence`, () =>
     Effect.gen(function* () {
       yield* prepareUpgrade(version);
+      yield* repairUnreleasedScheduledTaskMigrations;
       yield* runMigrations;
       yield* runMigrations;
       yield* assertUpgrade(version);
@@ -123,7 +126,13 @@ for (const version of ["schedules124", "schedules127"] as const) {
       yield* sql.unsafe(
         `CREATE TRIGGER interrupt_repair BEFORE UPDATE ON effect_sql_migrations WHEN OLD.migration_id=${id} AND OLD.name='ScheduledTasks' BEGIN SELECT RAISE(ABORT, 'interrupted repair'); END`,
       );
-      expect(Exit.isFailure(yield* Effect.exit(runMigrations))).toBe(true);
+      expect(
+        Exit.isFailure(
+          yield* Effect.exit(
+            repairUnreleasedScheduledTaskMigrations.pipe(Effect.andThen(runMigrations)),
+          ),
+        ),
+      ).toBe(true);
       expect(yield* sql`SELECT name FROM effect_sql_migrations WHERE migration_id=${id}`).toEqual([
         { name: "ScheduledTasks" },
       ]);
@@ -134,6 +143,7 @@ for (const version of ["schedules124", "schedules127"] as const) {
         yield* sql`SELECT migration_id FROM effect_sql_migrations WHERE migration_id=128`,
       ).toEqual([]);
       yield* sql`DROP TRIGGER interrupt_repair`;
+      yield* repairUnreleasedScheduledTaskMigrations;
       yield* runMigrations;
       yield* assertUpgrade(version);
     }).pipe(Effect.provide(SqliteClient.layerMemory()), Effect.scoped),
@@ -155,6 +165,7 @@ it("upgrades and reopens a file database from schedules 127 without losing owner
       try {
         await upgraded.runPromise(
           Effect.gen(function* () {
+            yield* repairUnreleasedScheduledTaskMigrations;
             yield* runMigrations;
             yield* assertUpgrade("schedules127");
           }),

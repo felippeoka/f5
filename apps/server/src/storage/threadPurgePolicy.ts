@@ -1,6 +1,21 @@
 import type { ThreadId, CommandId } from "@t3tools/contracts";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
+export class ScheduledThreadPurgeBlocked extends Data.TaggedError("ScheduledThreadPurgeBlocked")<{
+  readonly threadId: ThreadId;
+  readonly message: string;
+}> {}
+export const assertScheduledThreadPurgeable = (sql: SqlClient.SqlClient, threadId: ThreadId) =>
+  Effect.gen(function* () {
+    const owners =
+      yield* sql`SELECT id FROM scheduled_task_runs WHERE thread_id=${threadId} AND owns_execution=1 LIMIT 1`;
+    if (owners.length)
+      return yield* new ScheduledThreadPurgeBlocked({
+        threadId,
+        message: "Resolve the scheduled run before purging its execution evidence.",
+      });
+  });
+
 /** Every durable thread reference must have an explicit retention decision. */
 export const threadPurgePolicy: Readonly<
   Record<
@@ -8,6 +23,10 @@ export const threadPurgePolicy: Readonly<
     { readonly kind: "root" | "cascade" | "explicit" | "retain"; readonly reason?: string }
   >
 > = {
+  scheduled_task_quarantine: {
+    kind: "retain",
+    reason: "Malformed scheduled execution evidence requires explicit recovery.",
+  },
   scheduled_task_runs: {
     kind: "retain",
     reason: "Scheduled execution ownership and bounded history survive thread purge.",
@@ -133,12 +152,7 @@ export const purgeThreadRows = (
           yield* Effect.yieldNow;
         }
       });
-    const owners =
-      yield* sql`SELECT id FROM scheduled_task_runs WHERE thread_id=${threadId} AND owns_execution=1`;
-    if (owners.length)
-      return yield* Effect.fail(
-        new Error("Resolve the scheduled run before purging its execution evidence."),
-      );
+    yield* assertScheduledThreadPurgeable(sql, threadId);
     for (const handler of Object.values(threadPurgeHandlers)) yield* drain(handler(sql, threadId));
     yield* sql`DELETE FROM attachment_owners WHERE owner_kind = 'activity' AND attachment_id IN (SELECT attachment_id FROM attachments WHERE thread_id = ${threadId})`;
     yield* sql`UPDATE projection_usage_metadata SET coverage_started_at = CASE WHEN coverage_started_at < ${coverageResumesAt} THEN ${coverageResumesAt} ELSE coverage_started_at END WHERE singleton_id = 1`;

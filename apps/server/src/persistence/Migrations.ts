@@ -1,3 +1,4 @@
+import Migration0129 from "./Migrations/129_ScheduledTaskQuarantine.ts";
 import Migration0127 from "./Migrations/127_ClearPlanningWorkflowLaneBranches.ts";
 import Migration0126 from "./Migrations/126_ProviderTerminalRecoveryIndexes.ts";
 import Migration0124 from "./Migrations/124_ProviderTerminalRetry.ts";
@@ -131,7 +132,6 @@ import Migration0074 from "./Migrations/074_ProviderTerminalEvents.ts";
 import Migration0075 from "./Migrations/075_SessionErrorRetryability.ts";
 import Migration0076 from "./Migrations/076_AuxiliaryTurnProjectionRepair.ts";
 import { Effect } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -167,6 +167,7 @@ export const MIGRATIONS = {
   "126_ProviderTerminalRecoveryIndexes": Migration0126,
   "127_ClearPlanningWorkflowLaneBranches": Migration0127,
   "128_ScheduledTasks": Migration0128,
+  "129_ScheduledTaskQuarantine": Migration0129,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,
@@ -329,31 +330,6 @@ const run = Migrator.make({});
  */
 export const runMigrations = Effect.gen(function* () {
   yield* Effect.log("Running migrations...");
-  const sql = yield* SqlClient.SqlClient;
-  const tracking =
-    yield* sql`SELECT name FROM sqlite_master WHERE type='table' AND name='effect_sql_migrations'`;
-  if (tracking.length)
-    yield* sql.withTransaction(
-      Effect.gen(function* () {
-        // Released main owns 124 and 127. Only repair the exact identities used
-        // by unreleased #193 builds, atomically with the missing main migration.
-        const previous = yield* sql<{
-          migration_id: number;
-          name: string;
-        }>`SELECT migration_id, name FROM effect_sql_migrations
-           WHERE migration_id IN (124, 127) AND name='ScheduledTasks'
-           ORDER BY migration_id`;
-        for (const migration of previous) {
-          if (migration.migration_id === 124) {
-            yield* Migration0124;
-            yield* sql`UPDATE effect_sql_migrations SET name='ProviderTerminalRetry' WHERE migration_id=124 AND name='ScheduledTasks'`;
-          } else {
-            yield* Migration0127;
-            yield* sql`UPDATE effect_sql_migrations SET name='ClearPlanningWorkflowLaneBranches' WHERE migration_id=127 AND name='ScheduledTasks'`;
-          }
-        }
-      }),
-    );
   yield* run({ loader });
   yield* Effect.log("Migrations ran successfully");
 });

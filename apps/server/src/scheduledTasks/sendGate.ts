@@ -27,10 +27,10 @@ export const scheduledSendGate = (
     };
     if (!(yield* scheduleAuthorityCurrent(snapshot.authority, snapshot.projectId, settings, sql)))
       return "cancel" as const;
-    return row.ready === 1 &&
-      row.capacity === 1 &&
+    return row.capacity === 1 &&
       (row.kind === "user_input" ||
-        (settings.scheduledTasks.enabled &&
+        (row.ready === 1 &&
+          settings.scheduledTasks.enabled &&
           row.enabled === 1 &&
           row.epoch === settings.scheduledTasks.epoch))
       ? ("ready" as const)
