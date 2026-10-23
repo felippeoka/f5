@@ -12,6 +12,9 @@ vi.mock("../../hooks/useSettings", () => ({
   useSettings: () => ({ ...DEFAULT_UNIFIED_SETTINGS, reviewGuideModelSelection: state.selection }),
   useUpdateSettings: () => ({ updateSettings: state.update }),
 }));
+vi.mock("./SettingsRouteContext", () => ({
+  useSettingsRouteContext: () => ({ selectedProject: null }),
+}));
 vi.mock("../../nativeApi", () => ({
   ensureNativeApi: () => ({ server: { getConfig: async () => ({ providers: [] }) } }),
 }));
