@@ -2503,8 +2503,12 @@ describe("ChatView timeline (full app)", () => {
           timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight,
         ).toBeLessThanOrEqual(2);
         let previousHeight = form.getBoundingClientRect().height;
+        // Hold time so a slow runner can't finish or skip the expansion before it is seeked.
+        await cdp().send("Animation.enable");
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 0 });
         editor.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
         await vi.waitFor(() => expect(form.dataset.composerCollapsed).toBe("false"));
+        await vi.waitFor(() => expect(form.hasAttribute("data-composer-resizing")).toBe(true));
         for (const fraction of [0.05, 0.15, 0.5]) {
           await seekComposerTransitions(form, fraction);
           expect(form.getBoundingClientRect().height).toBeGreaterThan(previousHeight);
@@ -2513,11 +2517,13 @@ describe("ChatView timeline (full app)", () => {
             timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight,
           ).toBeLessThanOrEqual(2);
         }
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await waitForComposerTransitions(form);
         expect(
           timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight,
         ).toBeLessThanOrEqual(2);
       } finally {
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await mounted.cleanup();
       }
     });

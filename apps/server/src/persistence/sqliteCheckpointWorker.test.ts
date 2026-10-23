@@ -60,7 +60,8 @@ const withClient = async <E>(
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename, checkpointWorker: true }))),
     );
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    // Windows can refuse the delete while a just-terminated worker still holds the database open.
+    rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   }
 };
 

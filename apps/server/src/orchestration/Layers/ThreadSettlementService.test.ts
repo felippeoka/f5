@@ -706,7 +706,11 @@ it.effect("settles as soon as branch status sees the PR merge, without waiting f
       yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
       assert.isFalse(yield* settledAfter(50));
       yield* Queue.offer(pr.statusChanges, "https://gitlab.example/team/repo/-/merge_requests/7");
-      assert.isTrue(yield* settledAfter(500));
+      // Settling can wait on I/O, so a loaded runner needs real time rather than a count of yields.
+      const deadline = Date.now() + 5_000;
+      while ((yield* f.thread()).settledAt === null && Date.now() < deadline)
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 5)));
+      assert.isNotNull((yield* f.thread()).settledAt);
       assert.equal((yield* f.thread()).settledBy, "auto");
     }),
   ),
