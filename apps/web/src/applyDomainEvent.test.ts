@@ -950,6 +950,29 @@ describe("applyDomainEvent", () => {
     expect(next.threads[0]?.lastInteractionAt).toBe("2026-04-01T09:07:00.000Z");
   });
 
+  it("uses verified delivery message bindings when reverting retried turns", () => {
+    const thread = makeThread();
+    const messages = ["abandoned", "accepted", "later"].map((id, index) => ({
+      id: MessageId.makeUnsafe(id),
+      role: "user" as const,
+      text: id,
+      attachments: [],
+      createdAt: `2026-10-22T12:00:0${index}.000Z`,
+      updatedAt: `2026-10-22T12:00:0${index}.000Z`,
+      streaming: false,
+    }));
+    const next = applyDomainEvent(
+      makeState({ threads: [{ ...thread, messages }] }),
+      makeEvent("thread.reverted", {
+        threadId: thread.id,
+        turnCount: 1,
+        retainedTurnIds: [TurnId.makeUnsafe("retried-turn")],
+        retainedMessageIds: [MessageId.makeUnsafe("accepted")],
+      }),
+    );
+    expect(next.threads[0]?.messages.map((message) => message.id)).toEqual(["accepted"]);
+  });
+
   it("applies native task tracking and keeps retained-turn tasks across a revert", () => {
     const turn1 = TurnId.makeUnsafe("turn-1");
     const turn2 = TurnId.makeUnsafe("turn-2");

@@ -7,17 +7,17 @@ import { RepositoryBusyError } from "../../project/Layers/WorktreeLifecycleCoord
 import * as fs from "node:fs/promises";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import type { OrchestrationThread } from "@t3tools/contracts";
+import type { OrchestrationThread, OrchestrationEvent } from "@t3tools/contracts";
 import path from "node:path";
 import os from "node:os";
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
 import { makeFakeGitCore } from "../../git/testDoubles.ts";
-import { CommandId, MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import { CommandId, EventId, MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { vi } from "vitest";
-import { Deferred, Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Queue, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../../config.ts";
@@ -60,6 +60,7 @@ const makeDependencies = (
   worktreePath: string | null,
   resumeThread?: OrchestrationThread,
   beforeSessionRead: Effect.Effect<void> = Effect.void,
+  domainEvents: Stream.Stream<OrchestrationEvent> = Stream.empty,
 ) =>
   Layer.mergeAll(
     Layer.succeed(ProjectionThreadRepository, {
@@ -109,7 +110,7 @@ const makeDependencies = (
             { id: ProjectId.makeUnsafe("queue-dispatcher-project"), workspaceRoot: process.cwd() },
           ],
         }),
-      streamDomainEvents: Stream.empty,
+      streamDomainEvents: domainEvents,
     } as never),
     Layer.succeed(RuntimeReceiptBus, {
       publish: () => Effect.void,
@@ -129,13 +130,16 @@ const makeTestLayer = (
   automatic?: boolean,
   beforeSessionRead?: Effect.Effect<void>,
   preparation?: WorktreePreparationShape,
+  domainEvents?: Stream.Stream<OrchestrationEvent>,
 ) =>
   NextTurnQueueDispatcherLive.pipe(
     Layer.provideMerge(preparation ? Layer.succeed(WorktreePreparation, preparation) : Layer.empty),
     Layer.provide(Layer.succeed(GitCore, git)),
     Layer.provideMerge(ProjectionTurnRepositoryLive.pipe(Layer.provide(persistence))),
     Layer.provideMerge(storeLayer),
-    Layer.provideMerge(makeDependencies(worktreePath, resumeThread, beforeSessionRead)),
+    Layer.provideMerge(
+      makeDependencies(worktreePath, resumeThread, beforeSessionRead, domainEvents),
+    ),
     Layer.provideMerge(
       automatic === undefined
         ? Layer.empty
@@ -164,6 +168,76 @@ const seedThread = (threadId: ThreadId) =>
       )
     `;
   });
+
+it.effect("republishes the restored queue when rewind preflight fails", () =>
+  Effect.gen(function* () {
+    const events = yield* Queue.unbounded<OrchestrationEvent>();
+    yield* Effect.gen(function* () {
+      const dispatcher = yield* NextTurnQueueDispatcher;
+      const store = yield* NextTurnQueueStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.makeUnsafe("rewind-failed-publication");
+      yield* seedThread(threadId);
+      yield* store.setPaused({
+        threadId,
+        paused: true,
+        reasonCode: "rewind_in_progress",
+        detail: "Rewinding the conversation.",
+      });
+      yield* dispatcher.start;
+      yield* dispatcher.drain;
+      const before = yield* dispatcher.getSnapshot(threadId);
+      assert.equal(before.reasonCode, "rewind_in_progress");
+      const publication = yield* Stream.runHead(dispatcher.changes).pipe(
+        Effect.forkScoped({ startImmediately: true }),
+      );
+      // Rewind restores raw SQL before it emits its failure activity.
+      yield* sql`UPDATE next_turn_queue_state SET pause_reason_code = 'manual_pause', pause_detail = 'User paused', revision = revision + 1 WHERE thread_id = ${threadId}`;
+      const at = new Date().toISOString();
+      yield* Queue.offer(events, {
+        sequence: 1,
+        eventId: EventId.makeUnsafe("rewind-failure-event"),
+        type: "thread.activity-appended",
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: at,
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.makeUnsafe("rewind-failure"),
+            kind: "conversation.rewind.failed",
+            tone: "error",
+            summary: "Conversation rewind could not start",
+            payload: {},
+            turnId: null,
+            createdAt: at,
+          },
+        },
+      });
+      assert.equal(Option.getOrThrow(yield* Fiber.join(publication)), threadId);
+      const restored = yield* dispatcher.getSnapshot(threadId);
+      assert.equal(restored.paused, true);
+      assert.equal(restored.reasonCode, "manual_pause");
+      assert.equal(restored.reasonDetail, "User paused");
+    }).pipe(
+      Effect.provide(
+        makeTestLayer(
+          undefined,
+          null,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          Stream.fromQueue(events),
+        ),
+      ),
+    );
+  }),
+);
 
 const insert = (index: number, threadId: ThreadId) =>
   Effect.gen(function* () {
