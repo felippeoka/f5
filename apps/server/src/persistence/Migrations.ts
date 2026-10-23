@@ -1,6 +1,14 @@
+import Migration0136 from "./Migrations/136_ScratchProjects.ts";
+import Migration0135 from "./Migrations/135_RestartBackgroundWork.ts";
+import Migration0134 from "./Migrations/134_BackgroundWorkEffort.ts";
+import Migration0133 from "./Migrations/133_NativeHistoryRetiredTurns.ts";
+import Migration0132 from "./Migrations/132_McpApps.ts";
+import Migration0131 from "./Migrations/131_ThreadSettlement.ts";
+import Migration0130 from "./Migrations/130_ThreadPullRequestWatches.ts";
+import Migration0129 from "./Migrations/129_PrHubReviewGuides.ts";
 import Migration0128 from "./Migrations/128_ProviderTurnDeliveryBoundaryIndex.ts";
-import Migration0129 from "./Migrations/129_ScheduledTasks.ts";
-import Migration0130 from "./Migrations/130_ScheduledTaskQuarantine.ts";
+import Migration0137 from "./Migrations/137_ScheduledTasks.ts";
+import Migration0138 from "./Migrations/138_ScheduledTaskQuarantine.ts";
 import Migration0127 from "./Migrations/127_ClearPlanningWorkflowLaneBranches.ts";
 import Migration0126 from "./Migrations/126_ProviderTerminalRecoveryIndexes.ts";
 import Migration0124 from "./Migrations/124_ProviderTerminalRetry.ts";
@@ -163,13 +171,22 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
+  // 124 to 128 shipped on main first; the October migrations follow them.
+  "136_ScratchProjects": Migration0136,
+  "135_RestartBackgroundWork": Migration0135,
+  "131_ThreadSettlement": Migration0131,
+  "132_McpApps": Migration0132,
+  "133_NativeHistoryRetiredTurns": Migration0133,
+  "134_BackgroundWorkEffort": Migration0134,
+  "130_ThreadPullRequestWatches": Migration0130,
+  "129_PrHubReviewGuides": Migration0129,
   "124_ProviderTerminalRetry": Migration0124,
   "125_ProviderTerminalRetryIndexes": Migration0125,
   "126_ProviderTerminalRecoveryIndexes": Migration0126,
   "127_ClearPlanningWorkflowLaneBranches": Migration0127,
   "128_ProviderTurnDeliveryBoundaryIndex": Migration0128,
-  "129_ScheduledTasks": Migration0129,
-  "130_ScheduledTaskQuarantine": Migration0130,
+  "137_ScheduledTasks": Migration0137,
+  "138_ScheduledTaskQuarantine": Migration0138,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,

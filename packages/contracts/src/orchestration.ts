@@ -1,5 +1,7 @@
 import { ScheduledOrigin } from "./baseSchemas";
+import { OrchestrationProposedPlanId, OrchestrationProposedPlan } from "./proposedPlan";
 import { FilesystemPath } from "./baseSchemas";
+import { ThreadSearchInput, ThreadSearchResult } from "./threadSearch";
 import {
   PlanningWorkflowSummary,
   CodeReviewWorkflowSummary,
@@ -56,6 +58,7 @@ import {
 } from "./baseSchemas";
 
 export const ORCHESTRATION_WS_METHODS = {
+  searchThread: "threads.search",
   getSnapshot: "orchestration.getSnapshot",
   getLatestSequence: "orchestration.getLatestSequence",
   getStartupSnapshot: "orchestration.getStartupSnapshot",
@@ -294,6 +297,7 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  runOnWorktreeSettle: Schema.optional(Schema.Boolean),
   /**
    * Whether the agent may start while this setup script still runs. Absent
    * means true, so scripts saved before the option existed keep running in
@@ -346,8 +350,16 @@ export const ProjectSkill = ProjectSkillDefinition.mapFields((fields) => ({
 }));
 export type ProjectSkill = typeof ProjectSkill.Type;
 
+/**
+ * `scratch` is the profile's reserved home for threads without a project. Only the server
+ * creates it (`project.scratch.create`), and each of its threads runs in its own folder.
+ */
+export const ProjectKind = Schema.Literals(["standard", "scratch"]);
+export type ProjectKind = typeof ProjectKind.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
+  kind: Schema.optional(ProjectKind).pipe(Schema.withDecodingDefault(() => "standard" as const)),
   title: TrimmedNonEmptyString,
   workspaceRoot: FilesystemPath,
   defaultModel: Schema.NullOr(TrimmedNonEmptyString),
@@ -391,20 +403,7 @@ export const OrchestrationMessage = Schema.Struct({
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
 
-export const OrchestrationProposedPlanId = TrimmedNonEmptyString;
-export type OrchestrationProposedPlanId = typeof OrchestrationProposedPlanId.Type;
-
-export const OrchestrationProposedPlan = Schema.Struct({
-  id: OrchestrationProposedPlanId,
-  turnId: Schema.NullOr(TurnId),
-  planMarkdown: TrimmedNonEmptyString,
-  implementedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
-  implementationThreadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-});
-export type OrchestrationProposedPlan = typeof OrchestrationProposedPlan.Type;
-
+export { OrchestrationProposedPlanId, OrchestrationProposedPlan } from "./proposedPlan";
 export const TaskItemStatus = Schema.Literals(["pending", "in_progress", "completed"]);
 export type TaskItemStatus = typeof TaskItemStatus.Type;
 
@@ -956,8 +955,18 @@ export const RewindDraft = Schema.Struct({
 });
 export type RewindDraft = typeof RewindDraft.Type;
 
+export const ThreadSettledBy = Schema.Literals(["user", "auto", "agent"]);
+export type ThreadSettledBy = typeof ThreadSettledBy.Type;
+
 export const OrchestrationThread = Schema.Struct({
   scheduledOrigin: Schema.optional(Schema.NullOr(ScheduledOrigin)),
+  settledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  settledBy: Schema.optional(Schema.NullOr(ThreadSettledBy)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  autoSettleDisabled: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
   rewindDrafts: Schema.optional(Schema.Array(RewindDraft)),
   pendingUserInputs: Schema.optional(Schema.Array(PendingUserInput)),
   id: ThreadId,
@@ -971,6 +980,10 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(FilesystemPath),
+  /** A scratch thread's own folder. Set only for threads of the scratch project. */
+  scratchPath: Schema.optional(Schema.NullOr(FilesystemPath)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
@@ -1257,6 +1270,10 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(FilesystemPath),
+  /** Allocated by the engine for scratch threads; a client value is discarded. */
+  scratchPath: Schema.optional(Schema.NullOr(FilesystemPath)),
+  /** Text whose first words name a scratch thread's folder; defaults to the title. */
+  scratchFolderWords: Schema.optional(Schema.String.check(Schema.isMaxLength(8_000))),
   threadReferences: Schema.optional(Schema.Array(ThreadReference)),
   createdAt: IsoDateTime,
 });
@@ -1267,6 +1284,30 @@ const ThreadDeleteCommand = Schema.Struct({
   threadId: ThreadId,
   expectedArchivedAt: Schema.optional(IsoDateTime),
   expectedWorktreePath: Schema.optional(Schema.NullOr(FilesystemPath)),
+});
+
+const ThreadSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.settle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  settledBy: Schema.optional(ThreadSettledBy),
+  settledAt: Schema.optional(IsoDateTime),
+  expectedUpdatedAt: Schema.optional(IsoDateTime),
+});
+const ThreadUnsettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.unsettle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  reason: Schema.optional(Schema.Literals(["user", "activity", "wake"])),
+});
+const ThreadAutoSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.auto-settle.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  enabled: Schema.Boolean,
 });
 
 const ThreadArchiveCommand = Schema.Struct({
@@ -1402,6 +1443,9 @@ export const ThreadTurnStartBootstrap = Schema.Struct({
 export type ThreadTurnStartBootstrap = typeof ThreadTurnStartBootstrap.Type;
 
 export const ThreadTurnStartCommand = Schema.Struct({
+  /** Server-only identity; intentionally absent from ClientThreadTurnStartCommand. */
+  continuationRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128))),
+
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
   threadId: ThreadId,
@@ -1588,6 +1632,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectWorkflowDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
+  ThreadAutoSettleCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadPinsReplaceCommand,
@@ -1623,6 +1670,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectWorkflowDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
+  ThreadAutoSettleCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadPinsReplaceCommand,
@@ -1781,6 +1831,17 @@ const ThreadSessionNotesRecordCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Only an owned provider session can reconcile an already-observed native rewind.
+const ThreadNativeHistoryReconcileCommand = Schema.Struct({
+  type: Schema.Literal("thread.native-history.reconcile"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  providerInstanceId: ProviderInstanceId,
+  expectedTurnId: TurnId,
+  removedTurnIds: Schema.Array(TurnId).check(Schema.isMaxLength(500)),
+  createdAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   retainedMessageIds: Schema.optional(Schema.Array(MessageId)),
   retainedTurnIds: Schema.optional(Schema.Array(TurnId)),
@@ -1864,7 +1925,17 @@ const ProjectWorkflowUpsertCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Server-only: creates the profile's scratch project. Clients call `projects.ensureScratch`. */
+export const ProjectScratchCreateCommand = Schema.Struct({
+  type: Schema.Literal("project.scratch.create"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  workspaceRoot: FilesystemPath,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  ProjectScratchCreateCommand,
   Schema.Struct({
     type: Schema.Literals(["project.workflow.archive", "project.workflow.unarchive"]),
     commandId: CommandId,
@@ -1894,6 +1965,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadCompactedRecordCommand,
   ThreadSessionNotesRecordCommand,
   ThreadRevertCompleteCommand,
+  ThreadNativeHistoryReconcileCommand,
   ThreadTitleGenerationStartCommand,
   ThreadTitleRegenerationCompleteCommand,
   ThreadTitleRegenerationFailCommand,
@@ -1931,6 +2003,9 @@ export const OrchestrationEventType = Schema.Literals([
   "project.debug-workflow-deleted",
   "thread.created",
   "thread.deleted",
+  "thread.settled",
+  "thread.unsettled",
+  "thread.auto-settle-changed",
   "thread.archived",
   "thread.unarchived",
   "thread.pins-replaced",
@@ -1978,6 +2053,7 @@ export const OrchestrationActorKind = Schema.Literals(["client", "server", "prov
 
 export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
+  kind: Schema.optional(ProjectKind).pipe(Schema.withDecodingDefault(() => "standard" as const)),
   title: TrimmedNonEmptyString,
   workspaceRoot: FilesystemPath,
   defaultModel: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
@@ -2094,6 +2170,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(FilesystemPath),
+  scratchPath: Schema.optional(Schema.NullOr(FilesystemPath)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   threadReferences: Schema.optional(Schema.Array(ThreadReference)).pipe(
     Schema.withDecodingDefault(() => []),
   ),
@@ -2113,6 +2192,20 @@ export const ThreadDeletedPayload = Schema.Struct({
   threadId: ThreadId,
   deletedAt: IsoDateTime,
   pinRevision: Schema.optional(NonNegativeInt),
+});
+
+export const ThreadSettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  settledAt: IsoDateTime,
+  settledBy: ThreadSettledBy,
+});
+export const ThreadUnsettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  reason: Schema.Literals(["user", "activity", "wake"]),
+});
+export const ThreadAutoSettleChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  enabled: Schema.Boolean,
 });
 
 export const ThreadArchivedPayload = Schema.Struct({
@@ -2238,6 +2331,8 @@ export const ThreadMessageSentPayload = Schema.Struct({
 });
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
+  continuationRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128))),
+
   expectedTurnId: Schema.optional(TurnId),
   presentation: Schema.optional(Schema.Literal("continuation")),
   threadId: ThreadId,
@@ -2299,6 +2394,10 @@ export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
+  /** Native reconciliation removes only strongly identified abandoned turns. */
+  removedTurnIds: Schema.optional(Schema.Array(TurnId).check(Schema.isMaxLength(500))),
+  nativeTurnId: Schema.optional(TurnId),
+  removedMessageIds: Schema.optional(Schema.Array(MessageId).check(Schema.isMaxLength(1000))),
   /** Verified delivery bindings shared by live projection and event replay. */
   retainedMessageIds: Schema.optional(Schema.Array(MessageId)),
   retainedTurnIds: Schema.optional(Schema.Array(TurnId)),
@@ -2523,6 +2622,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.deleted"),
     payload: ThreadDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.settled"),
+    payload: ThreadSettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unsettled"),
+    payload: ThreadUnsettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.auto-settle-changed"),
+    payload: ThreadAutoSettleChangedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -3272,6 +3386,7 @@ export const OrchestrationGetLatestSequenceResult = Schema.Struct({
 export type OrchestrationGetLatestSequenceResult = typeof OrchestrationGetLatestSequenceResult.Type;
 
 export const OrchestrationRpcSchemas = {
+  searchThread: { input: ThreadSearchInput, output: ThreadSearchResult },
   getLatestSequence: { input: Schema.Struct({}), output: OrchestrationGetLatestSequenceResult },
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,

@@ -333,7 +333,7 @@ suite("durable turn lifecycle", (it) => {
         yield* sql`INSERT INTO scheduled_run_submissions(submission_id,run_id,thread_id,message_id,turn_id,kind)
         VALUES('source','canceled-run',${scheduled},'source-message','old-turn','initial')`;
         for (const thread of [scheduled, ordinary])
-          yield* sql`INSERT INTO restart_turn_markers VALUES(${thread},'old-turn',${new Date().toISOString()},${`restart:${thread}`})`;
+          yield* sql`INSERT INTO restart_turn_markers(thread_id,turn_id,marked_at,continuation_id) VALUES(${thread},'old-turn',${new Date().toISOString()},${`restart:${thread}`})`;
         assert.deepEqual(yield* recoverRestartTurnMarkers, [ordinary]);
         assert.equal((yield* sql`SELECT * FROM restart_turn_markers`).length, 0);
         const queue = yield* NextTurnQueueStore;
@@ -354,9 +354,9 @@ suite("durable turn lifecycle", (it) => {
         yield* interrupted(blockedThread);
         const marked = new Date().toISOString();
         const continuationId = `resume:${threadId}:old-turn`;
-        yield* sql`INSERT INTO restart_turn_markers VALUES (${threadId}, 'old-turn', ${marked}, ${continuationId})`;
-        yield* sql`INSERT INTO restart_turn_markers VALUES (${blockedThread}, 'old-turn', ${marked}, ${`resume:${blockedThread}:old-turn`})`;
-        yield* sql`INSERT INTO restart_turn_markers VALUES (${expiredThread}, 'old-turn', ${new Date(Date.now() - 31 * 60_000).toISOString()}, ${`resume:${expiredThread}:old-turn`})`;
+        yield* sql`INSERT INTO restart_turn_markers (thread_id, turn_id, marked_at, continuation_id) VALUES (${threadId}, 'old-turn', ${marked}, ${continuationId})`;
+        yield* sql`INSERT INTO restart_turn_markers (thread_id, turn_id, marked_at, continuation_id) VALUES (${blockedThread}, 'old-turn', ${marked}, ${`resume:${blockedThread}:old-turn`})`;
+        yield* sql`INSERT INTO restart_turn_markers (thread_id, turn_id, marked_at, continuation_id) VALUES (${expiredThread}, 'old-turn', ${new Date(Date.now() - 31 * 60_000).toISOString()}, ${`resume:${expiredThread}:old-turn`})`;
         assert.deepEqual(yield* recoverRestartTurnMarkers, [threadId]);
         assert.deepEqual(yield* recoverRestartTurnMarkers, []);
         const store = yield* NextTurnQueueStore;
@@ -386,13 +386,33 @@ suite("durable turn lifecycle", (it) => {
       }),
   );
 
+  it.effect(
+    "queues one bounded background-cut continuation and never claims the tasks completed",
+    () =>
+      Effect.gen(function* () {
+        const threadId = yield* seed("restart-background-cut");
+        yield* interrupted(threadId);
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO restart_turn_markers (thread_id, turn_id, marked_at, continuation_id, interrupted_background_work) VALUES (${threadId}, 'old-turn', ${new Date().toISOString()}, ${`resume:${threadId}:old-turn`}, 201)`;
+        assert.deepEqual(yield* recoverRestartTurnMarkers, [threadId]);
+        assert.deepEqual(yield* recoverRestartTurnMarkers, []);
+        const queue = yield* (yield* NextTurnQueueStore).listByThread(threadId);
+        assert.equal(queue.items.length, 1);
+        const text = queue.items[0]!.command.message.text;
+        assert.include(text, "more than 200");
+        assert.include(text, "Completion was not confirmed");
+        assert.include(text, "Do not assume that a task succeeded");
+        assert.isBelow(text.length, 500);
+      }),
+  );
+
   it.effect("revokes restart markers after opt-out or newer conversation work", () =>
     Effect.gen(function* () {
       const threadId = yield* seed("restart-revoked");
       yield* interrupted(threadId);
       const sql = yield* SqlClient.SqlClient;
       const marker = () =>
-        sql`INSERT INTO restart_turn_markers VALUES (${threadId}, 'old-turn', ${new Date().toISOString()}, ${`resume:${threadId}:old-turn`})`;
+        sql`INSERT INTO restart_turn_markers (thread_id, turn_id, marked_at, continuation_id) VALUES (${threadId}, 'old-turn', ${new Date().toISOString()}, ${`resume:${threadId}:old-turn`})`;
       yield* marker();
       yield* interrupted(threadId, "newer-turn");
       assert.deepEqual(yield* recoverRestartTurnMarkers, []);
@@ -402,7 +422,7 @@ suite("durable turn lifecycle", (it) => {
       );
       const optedOutThread = yield* seed("restart-opted-out");
       yield* interrupted(optedOutThread);
-      yield* sql`INSERT INTO restart_turn_markers VALUES (${optedOutThread}, 'old-turn', ${new Date().toISOString()}, ${`resume:${optedOutThread}:old-turn`})`;
+      yield* sql`INSERT INTO restart_turn_markers (thread_id, turn_id, marked_at, continuation_id) VALUES (${optedOutThread}, 'old-turn', ${new Date().toISOString()}, ${`resume:${optedOutThread}:old-turn`})`;
       yield* (yield* ServerSettingsService).updateSettings({
         resumeActiveTurnsAfterRestart: false,
       });

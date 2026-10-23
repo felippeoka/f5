@@ -5,6 +5,7 @@ import { Effect, Layer, Option, Schema } from "effect";
 import { OrchestrationEvent, ScheduledTaskRunId, TurnId } from "@t3tools/contracts";
 import { ServerConfig } from "../config.ts";
 import { makeNextTurnQueueStore } from "../nextTurnQueue/Layers/NextTurnQueueStore.ts";
+import { createEmptyReadModel } from "../orchestration/projector.ts";
 import { makeCommitSideEffects } from "../orchestration/commitSideEffects.ts";
 import { projectScheduledRunEvent } from "./projector.ts";
 import { scheduledSendGate } from "./sendGate.ts";
@@ -89,6 +90,7 @@ for (const rollback of [false, true])
               yield* commit(event, {
                 commandType: "thread.user-input.respond",
                 steerFallback: false,
+                readModel: createEmptyReadModel(at),
               });
               if (rollback) return yield* Effect.fail("rollback command");
             }),

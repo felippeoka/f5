@@ -102,6 +102,7 @@ export interface ProjectSidebarLists<T extends ThreadListItem = ThreadListItem> 
   activeThreads: Array<T | Thread>;
   scheduledThreads: T[];
   snoozedThreads: T[];
+  settledThreads: T[];
   archivedSidebarItems: ArchivedSidebarItem[];
   projectDraftThreadId: ThreadId | null;
 }
@@ -286,12 +287,21 @@ export function buildProjectSidebarLists<T extends ThreadListItem>(input: {
       ? draftThread.threadId
       : null;
   const orderedActiveThreads = orderActiveSidebarThreads({
-    threads: activeThreads,
+    threads: activeThreads.filter((thread) => !thread.settledAt),
     draftThreadId: projectDraftThreadId,
   });
   const snoozedThreads = projectSnoozedThreads(
-    threads.filter((thread) => !thread.scheduledOrigin),
+    threads.filter((thread) => !thread.settledAt && !thread.scheduledOrigin),
     project.id,
+  );
+  const settledThreads = sortThreadsByActivity(
+    persistedProjectThreads.filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        !!thread.settledAt &&
+        !thread.scheduledOrigin &&
+        !thread.scheduledOrigin,
+    ),
   );
 
   return {
@@ -301,6 +311,7 @@ export function buildProjectSidebarLists<T extends ThreadListItem>(input: {
     activeThreads: orderedActiveThreads,
     scheduledThreads,
     snoozedThreads,
+    settledThreads,
     archivedSidebarItems,
     projectDraftThreadId,
   };

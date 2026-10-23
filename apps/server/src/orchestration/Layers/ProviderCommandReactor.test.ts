@@ -19,6 +19,7 @@ import type {
   McpReloadResult,
   ProviderRuntimeEvent,
   ProviderSession,
+  ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
@@ -54,6 +55,7 @@ import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 
 import { ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "../../git/Errors.ts";
+import { ThreadTitleRetryDelay } from "../../threadTitle.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import {
   ProjectMcpConfigService,
@@ -62,6 +64,7 @@ import {
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -87,6 +90,7 @@ import {
 } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { makeTraceSink } from "../../observability/TraceSink.ts";
 import { makeLocalFileTracer } from "../../observability/LocalFileTracer.ts";
 import { dispatchBootstrapTurnStart } from "../../wsServer/bootstrapTurnStart.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -221,6 +225,7 @@ describe("ProviderCommandReactor", () => {
     readonly settings?: Partial<ServerSettings>;
     readonly stateDir?: string;
     readonly threadTitle?: string;
+    readonly pullRequest?: ThreadPullRequestLink;
     readonly threadModel?: string;
     readonly createThread?: boolean;
     readonly tracePath?: string;
@@ -604,14 +609,21 @@ describe("ProviderCommandReactor", () => {
         ),
     } satisfies ProviderSessionDirectoryShape;
 
-    const tracerLayer = input?.tracePath
+    let flushTrace: Effect.Effect<void> = Effect.void;
+    const tracePath = input?.tracePath;
+    const tracerLayer = tracePath
       ? Layer.effect(
           Tracer.Tracer,
-          makeLocalFileTracer({
-            filePath: input.tracePath,
-            maxBytes: 1024 * 1024,
-            maxFiles: 2,
-            batchWindowMs: 1,
+          Effect.gen(function* () {
+            const options = {
+              filePath: tracePath,
+              maxBytes: 1024 * 1024,
+              maxFiles: 2,
+              batchWindowMs: 1,
+            };
+            const sink = yield* makeTraceSink(options);
+            flushTrace = sink.flush;
+            return yield* makeLocalFileTracer({ ...options, sink });
           }),
         )
       : Layer.empty;
@@ -760,7 +772,11 @@ describe("ProviderCommandReactor", () => {
       : Layer.succeed(ProviderService, service);
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(settingsLayer),
-      Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(
+        input?.pullRequest
+          ? orchestrationLayer.pipe(Layer.provideMerge(SqlitePersistenceMemory))
+          : orchestrationLayer,
+      ),
       Layer.provideMerge(projectMcpLayer),
       Layer.provideMerge(providerLayer),
       Layer.provideMerge(Layer.succeed(ProviderSessionDirectory, providerSessionDirectory)),
@@ -772,6 +788,7 @@ describe("ProviderCommandReactor", () => {
         } as unknown as TextGenerationShape),
       ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), stateDir)),
+      Layer.provideMerge(Layer.succeed(ThreadTitleRetryDelay, "1 millis")),
       Layer.provideMerge(tracerLayer),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -858,6 +875,7 @@ describe("ProviderCommandReactor", () => {
             threadId: ThreadId.makeUnsafe("thread-1"),
             projectId: asProjectId("project-1"),
             title: input?.threadTitle ?? "Thread",
+            ...(input?.pullRequest ? { pullRequest: input.pullRequest } : {}),
             model: input?.threadModel ?? "gpt-5-codex",
             interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
             runtimeMode: "approval-required",
@@ -870,6 +888,7 @@ describe("ProviderCommandReactor", () => {
     }
 
     return {
+      flushTrace: () => Effect.runPromise(flushTrace),
       waitForDeliveries: () => Promise.all(pendingDeliveries),
       actualProvider: await runtime.runPromise(Effect.service(ProviderService)),
       engine,
@@ -886,6 +905,14 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      corruptTitleLink: () =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+            if (Option.isNone(sql)) throw new Error("Fixture did not expose its link database");
+            yield* sql.value`UPDATE projection_thread_pull_requests SET title='' WHERE thread_id='thread-1'`;
+          }),
+        ),
       mcpReload,
       readEffectiveStoredConfig,
       readEffectiveRuntimeConfig: readEffectiveStoredConfig,
@@ -1540,7 +1567,7 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    await Effect.runPromise(Effect.sleep("25 millis"));
+    await harness.flushTrace();
 
     const after = await Effect.runPromise(Metric.snapshot);
     expect(
@@ -4007,74 +4034,91 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession).toHaveBeenCalledTimes(1);
   });
 
-  it("generates a first-thread title asynchronously without blocking the provider turn", async () => {
-    const harness = await createHarness({ threadTitle: DEFAULT_NEW_THREAD_TITLE });
-    const now = new Date().toISOString();
-    const titleResult = Promise.withResolvers<{ title: string }>();
-    harness.generateThreadTitle.mockImplementationOnce(() =>
-      Effect.promise(() => titleResult.promise),
-    );
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.makeUnsafe("cmd-turn-start-title-1"),
-        threadId: ThreadId.makeUnsafe("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-title-1"),
-          role: "user",
-          text: "provider message text",
-          attachments: [],
+  it.each([false, true])(
+    "generates a first-thread title asynchronously without blocking the provider turn, corrupt PR=%s",
+    async (corrupt) => {
+      const harness = await createHarness({
+        threadTitle: DEFAULT_NEW_THREAD_TITLE,
+        pullRequest: {
+          provider: "github",
+          host: "github.com",
+          repository: "team/repo",
+          number: 42,
+          title: "Fix native transport",
+          url: "https://github.com/team/repo/pull/42",
         },
-        titleGenerationModel: "custom/title-model",
-        titleGenerationModelSelection: {
+      });
+      if (corrupt) await harness.corruptTitleLink();
+      const now = new Date().toISOString();
+      const titleResult = Promise.withResolvers<{ title: string }>();
+      harness.generateThreadTitle.mockImplementationOnce(() =>
+        Effect.promise(() => titleResult.promise),
+      );
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-turn-start-title-1"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-title-1"),
+            role: "user",
+            text: "provider message text",
+            attachments: [],
+          },
+          titleGenerationModel: "custom/title-model",
+          titleGenerationModelSelection: {
+            instanceId: ProviderInstanceId.make("codex_personal"),
+            model: "custom/title-model",
+          },
+          titleSourceText: "Raw first prompt",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+
+      await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
+        message: "Raw first prompt",
+        model: "custom/title-model",
+        modelSelection: {
           instanceId: ProviderInstanceId.make("codex_personal"),
           model: "custom/title-model",
         },
-        titleSourceText: "Raw first prompt",
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
-      message: "Raw first prompt",
-      model: "custom/title-model",
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("codex_personal"),
-        model: "custom/title-model",
-      },
-    });
-
-    let readModel = await Effect.runPromise(harness.engine.getReadModel());
-    let thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
-    expect(thread?.title).toBe(DEFAULT_NEW_THREAD_TITLE);
-    expect(thread?.titleRegeneration).toMatchObject({
-      requestId: expect.stringContaining("server:thread-title-generate:"),
-    });
-
-    titleResult.resolve({ title: "Fix sidebar layout" });
-
-    await waitFor(async () => {
-      const nextReadModel = await Effect.runPromise(harness.engine.getReadModel());
-      const nextThread = nextReadModel.threads.find(
-        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      });
+      expect(harness.generateThreadTitle.mock.calls[0]?.[0].linkedContext).toEqual(
+        corrupt ? undefined : expect.stringContaining("Fix native transport"),
       );
-      return nextThread?.title === "Fix sidebar layout";
-    });
 
-    readModel = await Effect.runPromise(harness.engine.getReadModel());
-    thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
-    expect(thread).toMatchObject({
-      title: "Fix sidebar layout",
-      titleSource: "generated",
-      titleRevision: 1,
-      titleRegeneration: null,
-    });
-  });
+      let readModel = await Effect.runPromise(harness.engine.getReadModel());
+      let thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+      expect(thread?.title).toBe(DEFAULT_NEW_THREAD_TITLE);
+      expect(thread?.titleRegeneration).toMatchObject({
+        requestId: expect.stringContaining("server:thread-title-generate:"),
+      });
+
+      titleResult.resolve({ title: "Fix sidebar layout" });
+
+      await waitFor(async () => {
+        const nextReadModel = await Effect.runPromise(harness.engine.getReadModel());
+        const nextThread = nextReadModel.threads.find(
+          (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+        );
+        return nextThread?.title === "Fix sidebar layout";
+      });
+
+      readModel = await Effect.runPromise(harness.engine.getReadModel());
+      thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+      expect(thread).toMatchObject({
+        title: "Fix sidebar layout",
+        titleSource: "generated",
+        titleRevision: 1,
+        titleRegeneration: null,
+      });
+    },
+  );
 
   it("generates a first-thread title after draft-thread bootstrap", async () => {
     const harness = await createHarness({ createThread: false });
@@ -4402,7 +4446,8 @@ describe("ProviderCommandReactor", () => {
   it("applies a fallback heuristic title when generation fails", async () => {
     const harness = await createHarness({ threadTitle: DEFAULT_NEW_THREAD_TITLE });
     const now = new Date().toISOString();
-    harness.generateThreadTitle.mockImplementationOnce(() =>
+    // Every attempt fails, including the retries.
+    harness.generateThreadTitle.mockImplementation(() =>
       Effect.fail(
         new TextGenerationError({
           operation: "generateThreadTitle",
@@ -5225,6 +5270,68 @@ describe("ProviderCommandReactor", () => {
     const model = await Effect.runPromise(harness.engine.getReadModel());
     expect(model.threads[0]?.session?.status).toBe("stopped");
   });
+
+  it.each([false, true])(
+    "delivers buffered native output only to its existing session and never recreates a lost owner: %s",
+    async (live) => {
+      const harness = await createHarness({
+        bridgeTurnDelivery: false,
+        threadModel: "default",
+        threadTitle: "Native continuation fixture",
+      });
+      const threadId = ThreadId.make("thread-1");
+      const createdAt = new Date().toISOString();
+      if (live)
+        harness.runtimeSessions.push({
+          provider: "pi",
+          threadId,
+          status: "ready",
+          runtimeMode: "approval-required",
+          model: "default",
+          createdAt,
+          updatedAt: createdAt,
+        });
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("native-intent"),
+          threadId,
+          message: {
+            messageId: MessageId.make("native-message"),
+            role: "user",
+            text: "Continue native extension work",
+            attachments: [],
+          },
+          continuationRequestId: "owned-wake",
+          presentation: "continuation",
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          createdAt,
+        }),
+      );
+      const events = await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0)));
+      const intent = events.find((event) => event.type === "thread.turn-start-requested");
+      if (!intent || intent.type !== "thread.turn-start-requested")
+        throw new Error("Missing native intent.");
+      expect(intent.payload.continuationRequestId).toBe("owned-wake");
+      const result = await Effect.runPromise(
+        harness.reactor.deliverTurnStart(intent).pipe(Effect.result, Effect.scoped),
+      );
+      expect(result._tag).toBe(live ? "Success" : "Failure");
+      if (result._tag === "Failure")
+        expect(result.failure).toMatchObject({ certainty: "not_sent", retryable: false });
+      if (live)
+        expect(harness.sendTurn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            continuationRequestId: "owned-wake",
+            submissionSource: "automation",
+          }),
+        );
+      else expect(harness.sendTurn).not.toHaveBeenCalled();
+      expect(harness.startSession).not.toHaveBeenCalled();
+      expect(harness.ensureWorktree).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not deliver a pending turn after its thread was archived", async () => {
     const harness = await createHarness();

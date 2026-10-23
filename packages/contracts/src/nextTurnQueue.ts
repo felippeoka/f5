@@ -74,9 +74,9 @@ export const NextTurnQueueItem = Schema.Struct({
   command: ThreadTurnStartCommand,
   attemptCount: NonNegativeInt,
   notBefore: Schema.NullOr(IsoDateTime),
-  scheduleReason: Schema.optional(Schema.NullOr(Schema.Literal("usage_limit_reset"))).pipe(
-    Schema.withDecodingDefault(() => null),
-  ),
+  scheduleReason: Schema.optional(
+    Schema.NullOr(Schema.Literals(["usage_limit_reset", "pull_request_watch"])),
+  ).pipe(Schema.withDecodingDefault(() => null)),
   dispatchStartedAt: Schema.NullOr(IsoDateTime),
   lastErrorCode: Schema.NullOr(Schema.String),
   lastErrorDetail: Schema.NullOr(Schema.String),

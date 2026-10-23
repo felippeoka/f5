@@ -32,6 +32,7 @@ const harness = (
     providerCwd?: string;
     zeroTurnClaude?: boolean;
     forkCodex?: boolean;
+    forkPi?: boolean;
     failReadback?: boolean;
     cancelDuringCapture?: boolean;
     nativeClaude?: boolean;
@@ -88,9 +89,11 @@ const harness = (
             providerName:
               options.zeroTurnClaude || options.nativeClaude
                 ? "claudeAgent"
-                : worktreePath
-                  ? "opencode"
-                  : "codex",
+                : options.forkPi
+                  ? "pi"
+                  : worktreePath
+                    ? "opencode"
+                    : "codex",
           },
           messages: [{ id: messageId, text: "Recovered source", attachments: [] }],
           checkpoints: [],
@@ -168,8 +171,8 @@ const harness = (
               threadId,
               cwd: options.providerCwd ?? options.nativeWorkspace ?? worktreePath,
               resumeCursor: {
-                threadId: identity,
-                ...(options.forkCodex && rollbackCalls > 0
+                ...(options.forkPi ? { sessionFile: identity } : { threadId: identity }),
+                ...((options.forkCodex || options.forkPi) && rollbackCalls > 0
                   ? { rewindSourceThreadId: "provider-session" }
                   : {}),
               },
@@ -201,6 +204,7 @@ const harness = (
             providerTurns = providerTurns.slice(0, -numTurns);
             if (options.zeroTurnClaude) identity = "replacement-claude-session";
             if (options.forkCodex) identity = "replacement-codex-session";
+            if (options.forkPi) identity = "replacement-pi-session";
             return Effect.void;
           }),
       } as never),
@@ -408,6 +412,26 @@ layer("conversation rewind recovery", (it) => {
       assert.equal(row.identity, "replacement-codex-session");
       assert.equal(h.rollbackCalls(), 1);
     }),
+  );
+  it.effect(
+    "recovers a verified Pi native fork by its session file without replaying the mutation",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* harness("rewind-pi-fork", null, null, {
+          forkPi: true,
+          failReadback: true,
+        });
+        yield* h.rewind.run(h.request);
+        yield* h.rewind.recover;
+        const sql = yield* SqlClient.SqlClient;
+        const row = (yield* sql<{
+          state: string;
+          identity: string;
+        }>`SELECT state, provider_session_id AS identity FROM rewind_operations WHERE operation_id = ${h.operationId}`)[0]!;
+        assert.equal(row.state, "completed");
+        assert.equal(row.identity, "replacement-pi-session");
+        assert.equal(h.rollbackCalls(), 1);
+      }),
   );
   it.effect(
     "OpenCode keeps files by capturing before rollback and restoring after verified readback",

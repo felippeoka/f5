@@ -31,6 +31,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ProjectIcon,
+  ProjectKind,
   ThreadEnvMode,
   UserMessageSkillCall as ContractUserMessageSkillCall,
 } from "@t3tools/contracts";
@@ -144,6 +145,8 @@ export interface Project {
   defaultModel?: string | null;
   defaultModelSelection?: ModelSelection | null | undefined;
   id: ProjectId;
+  /** `scratch` is the server-owned home for threads without a project. */
+  kind?: ProjectKind | undefined;
   name: string;
   cwd: string;
   model: string;
@@ -173,6 +176,9 @@ export interface Thread {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  settledAt?: string | null;
+  settledBy?: import("@t3tools/contracts").ThreadSettledBy | null;
+  autoSettleDisabled?: boolean;
   pinnedAt?: string | null;
   pinOrderKey?: number | null;
   snoozedUntil?: string | null;
@@ -190,6 +196,8 @@ export interface Thread {
   lastVisitedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  /** A thread without a project works in this folder of its own. */
+  scratchPath?: string | null | undefined;
   compaction?: ThreadCompaction | null | undefined;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
@@ -233,6 +241,9 @@ export type ThreadListItem = Pick<
   | "codexThreadId"
   | "createdAt"
   | "archivedAt"
+  | "settledAt"
+  | "settledBy"
+  | "autoSettleDisabled"
   | "pinnedAt"
   | "pinOrderKey"
   | "snoozedUntil"
@@ -241,6 +252,7 @@ export type ThreadListItem = Pick<
   | "lastInteractionAt"
   | "branch"
   | "worktreePath"
+  | "scratchPath"
   | "threadReferences"
   | "error"
 >;

@@ -1,4 +1,6 @@
 import { ScheduledOrigin } from "@t3tools/contracts";
+import { ReadSqlClient } from "../../persistence/ReadSqlClient.ts";
+import { makeThreadFind } from "../threadFind.ts";
 import { SnapshotReadClients, withSnapshotRead } from "../../persistence/snapshotReadExecutor.ts";
 import {
   PlanningWorkflowSummary,
@@ -127,6 +129,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
+    autoSettleDisabled: Schema.BooleanFromBit,
     tasks: Schema.fromJsonString(Schema.Array(TaskItem)),
     tasksTracking: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadTaskTracking))).pipe(
       Schema.withDecodingDefault(() => null),
@@ -149,7 +152,11 @@ const ProjectionThreadSummaryDbRowSchema = Schema.Struct({
   interactionMode: ProjectionThread.fields.interactionMode,
   branch: ProjectionThread.fields.branch,
   worktreePath: ProjectionThread.fields.worktreePath,
+  scratchPath: ProjectionThread.fields.scratchPath,
   archivedAt: ProjectionThread.fields.archivedAt,
+  settledAt: ProjectionThread.fields.settledAt,
+  settledBy: ProjectionThread.fields.settledBy,
+  autoSettleDisabled: Schema.BooleanFromBit,
   pinnedAt: ProjectionThread.fields.pinnedAt,
   pinOrderKey: ProjectionThread.fields.pinOrderKey,
   snoozedUntil: ProjectionThread.fields.snoozedUntil,
@@ -457,8 +464,12 @@ function buildThreadSnapshot(params: {
     interactionMode: row.interactionMode,
     branch: row.branch,
     worktreePath: row.worktreePath,
+    scratchPath: row.scratchPath ?? null,
     latestTurn: params.latestTurnByThread.get(row.threadId) ?? null,
     archivedAt: row.archivedAt,
+    settledAt: row.settledAt ?? null,
+    settledBy: row.settledBy ?? null,
+    autoSettleDisabled: row.autoSettleDisabled ?? false,
     pinnedAt: row.pinnedAt,
     pinOrderKey: row.pinOrderKey,
     snoozedUntil: row.snoozedUntil,
@@ -804,6 +815,13 @@ function buildThreadHistoryPageResult(params: {
 
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const reader = yield* Effect.serviceOption(ReadSqlClient);
+  const searchThread = yield* makeThreadFind.pipe(
+    Effect.provideService(
+      SqlClient.SqlClient,
+      Option.getOrElse(reader, () => sql),
+    ),
+  );
 
   /** Unresolved rewind drafts by thread, for every thread or just `threadId`. */
   const loadRewindDrafts = (threadId: string | null) =>
@@ -870,6 +888,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       sql`
         SELECT
           project_id AS "projectId",
+          kind,
           title,
           workspace_root AS "workspaceRoot",
           default_model AS "defaultModel",
@@ -899,6 +918,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          scratch_path AS "scratchPath",
           latest_turn_id AS "latestTurnId",
           tasks_json AS "tasks",
           tasks_turn_id AS "tasksTurnId",
@@ -907,6 +927,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           compaction_json AS "compaction",
           session_notes_json AS "sessionNotes",
           thread_references_json AS "threadReferences",
+          settled_at AS "settledAt",settled_by AS "settledBy",auto_settle_disabled AS "autoSettleDisabled",
           archived_at AS "archivedAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
@@ -944,6 +965,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          scratch_path AS "scratchPath",
+          settled_at AS "settledAt",settled_by AS "settledBy",auto_settle_disabled AS "autoSettleDisabled",
           archived_at AS "archivedAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
@@ -2625,6 +2648,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       }));
       const unsortedProjects: Array<OrchestrationProject> = projectRows.map((row) => ({
         id: row.projectId,
+        kind: row.kind,
         title: row.title,
         workspaceRoot: row.workspaceRoot,
         defaultModel: row.defaultModel,
@@ -3074,6 +3098,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     );
 
   return {
+    searchThread,
     getSnapshot,
     getRetainedThreadDetails,
     getBootstrapSnapshot,
@@ -3124,6 +3149,8 @@ export const OrchestrationProjectionSnapshotQueryLive = Layer.effect(
         ),
       );
     return {
+      // Search uses its own read-only connection rather than a snapshot reader.
+      searchThread: front.searchThread,
       getSnapshot: () => run(background, "background", back.getSnapshot()),
       getRetainedThreadDetails: (threadId) =>
         run(foreground, "foreground", front.getRetainedThreadDetails(threadId)),

@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ThreadId } from "@t3tools/contracts";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useAppSettings } from "~/appSettings";
+import { useAppSettingsSelector } from "~/appSettings";
 import { deleteThreadsWithCleanup, setThreadArchived } from "~/archiveActions";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { scheduledTasksQueryOptions } from "~/lib/scheduledTasksQuery";
@@ -28,6 +29,12 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 export type ScheduledTaskMenuState =
   | { state: "available"; name: string }
   | { state: "loading" | "unavailable" | "removed" };
+/** The server's reason a settle was refused, without the invariant prefix or a stack. */
+export function settlementErrorDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const reason = /invariant failed \(thread\.(?:un)?settle\): ([^\n]+)/.exec(message)?.[1];
+  return reason?.trim() || "Check pending work on the thread, then retry.";
+}
 
 export type ThreadActionId =
   | "scheduled-origin"
@@ -41,6 +48,8 @@ export type ThreadActionId =
   | "snooze-three-hours"
   | "snooze-tomorrow"
   | "snooze-next-week"
+  | "settle"
+  | "unsettle"
   | "archive"
   | "unarchive"
   | "mark-unread"
@@ -57,7 +66,10 @@ export interface ThreadActionMenuItem {
 }
 
 export function buildThreadActionMenuItems(input: {
-  readonly thread: Pick<Thread, "archivedAt" | "titleRegeneration" | "scheduledOrigin">;
+  readonly thread: Pick<
+    Thread,
+    "archivedAt" | "titleRegeneration" | "scheduledOrigin" | "settledAt"
+  >;
   readonly pinned: boolean;
   readonly snoozed: boolean;
   readonly schedule?: ScheduledTaskMenuState;
@@ -103,6 +115,15 @@ export function buildThreadActionMenuItems(input: {
               ] as const)),
         ]
       : []),
+    ...(thread.archivedAt === null
+      ? [
+          {
+            id: thread.settledAt ? ("unsettle" as const) : ("settle" as const),
+            label: thread.settledAt ? "Unsettle" : "Settle",
+            disabled: !thread.settledAt && (pinned || snoozed),
+          },
+        ]
+      : []),
     {
       id: thread.archivedAt === null ? "archive" : "unarchive",
       label: thread.archivedAt === null ? "Archive" : "Unarchive",
@@ -145,7 +166,7 @@ export function useThreadActionController(input: {
   });
   const pinRevision = useStore((state) => state.pinRevision ?? 0);
   const markThreadUnread = useStore((state) => state.markThreadUnread);
-  const { settings } = useAppSettings();
+  const confirmThreadDelete = useAppSettingsSelector((settings) => settings.confirmThreadDelete);
   const navigate = useNavigate();
   const clearComposerDraftForThread = useComposerDraftStore((state) => state.clearThreadDraft);
   const clearProjectDraftThreadById = useComposerDraftStore(
@@ -412,6 +433,23 @@ export function useThreadActionController(input: {
         }
         return;
       }
+      if (actionId === "settle" || actionId === "unsettle") {
+        try {
+          await api.orchestration.dispatchCommand({
+            type: actionId === "settle" ? "thread.settle" : "thread.unsettle",
+            commandId: newCommandId(),
+            threadId,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: actionId === "settle" ? "Could not settle thread" : "Could not unsettle thread",
+            description: settlementErrorDetail(error),
+          });
+        }
+        return;
+      }
       if (actionId === "archive" || actionId === "unarchive") {
         await archiveThread(threadId, actionId === "archive");
         return;
@@ -421,10 +459,7 @@ export function useThreadActionController(input: {
         return;
       }
       if (actionId === "copy-path") {
-        const workspacePath =
-          thread.worktreePath ??
-          projects.find((project) => project.id === thread.projectId)?.cwd ??
-          null;
+        const workspacePath = resolveThreadWorkspaceCwd({ thread, projects }) ?? null;
         if (!workspacePath) {
           toastManager.add({
             type: "error",
@@ -441,7 +476,7 @@ export function useThreadActionController(input: {
         return;
       }
       if (actionId !== "delete") return;
-      if (settings.confirmThreadDelete) {
+      if (confirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
           [
             `Delete thread "${thread.title}"?`,
@@ -463,8 +498,8 @@ export function useThreadActionController(input: {
       navigate,
       pinRevision,
       projects,
-      settings.confirmThreadDelete,
       queryClient,
+      confirmThreadDelete,
     ],
   );
 

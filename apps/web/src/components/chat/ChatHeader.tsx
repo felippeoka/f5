@@ -1,4 +1,5 @@
 import { ScheduledOriginBadge } from "../scheduled/ScheduledOriginBadge";
+import { ThreadSettlementControl } from "../thread/ThreadSettlementControl";
 import { ThreadPrLinks } from "../prHub/ThreadPrLinks";
 import {
   type EditorId,
@@ -345,7 +346,12 @@ export const ChatHeader = memo(function ChatHeader({
             {nativeGoalSummary}
           </span>
         )}
-        {isServerThread ? <ThreadPrLinks threadId={activeThreadId} /> : null}
+        {isServerThread ? (
+          <>
+            <ThreadPrLinks threadId={activeThreadId} />
+            <ThreadSettlementControl threadId={activeThreadId} />
+          </>
+        ) : null}
         {threadStatus ? (
           <ThreadStatusPillBadge
             pill={threadStatus}

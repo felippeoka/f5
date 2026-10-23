@@ -1,4 +1,5 @@
 import { assertScheduledDeliveryAllowed } from "../../scheduledTasks/deliveryGate.ts";
+import { readMcpAppModelContext } from "../../mcpApps/McpAppContext.ts";
 import { registerShutdown } from "../../shutdown.ts";
 import { ProviderControlTarget } from "../../provider/controlTarget.ts";
 import { isControlEvent } from "../commandAdmission.ts";
@@ -25,6 +26,7 @@ import { readProjectSettings } from "../../project/projectSettings";
 import { isTemporaryWorktreeBranch } from "../../git/worktreePaths.ts";
 import { ensureWorkspaceDirectory } from "../../provider/workspaceDirectory.ts";
 import {
+  PROVIDER_DISPLAY_NAMES,
   type ChatAttachment,
   CommandId,
   DEFAULT_RUNTIME_MODE,
@@ -64,7 +66,8 @@ import {
   normalizeProviderStartOptions,
 } from "@t3tools/shared/providerOptions";
 
-import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
+import { resolveThreadWorkspaceCwd } from "@t3tools/shared/threadWorkspace";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import {
   increment,
@@ -102,6 +105,10 @@ import {
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
 import { toCodexProviderStartOptions } from "../../provider/codexProviderOptions.ts";
+import {
+  readThreadPullRequestLinks,
+  threadTitlePullRequestContext,
+} from "../../prHub/threadLinks.ts";
 import { resolveEffectiveStartConfig } from "../../provider/effectiveStartConfig.ts";
 import {
   readPersistedCwd,
@@ -146,22 +153,7 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
 }
 
 function providerDisplayName(provider: ProviderKind): string {
-  switch (provider) {
-    case "claudeAgent":
-      return "Claude";
-    case "codex":
-      return "Codex";
-    case "cursor":
-      return "Cursor";
-    case "opencode":
-      return "OpenCode";
-    case "grok":
-      return "Grok";
-    case "antigravity":
-      return "Antigravity";
-    case "muse":
-      return "Muse Code";
-  }
+  return PROVIDER_DISPLAY_NAMES[provider];
 }
 
 function providerFromSessionName(value: string | null | undefined): ProviderKind | undefined {
@@ -173,6 +165,8 @@ function providerFromSessionName(value: string | null | undefined): ProviderKind
     case "grok":
     case "antigravity":
     case "muse":
+    case "pi":
+    case "acp":
       return value;
     default:
       return undefined;
@@ -377,6 +371,12 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+  const appContextForTurn = (threadId: ThreadId, enabled: boolean) =>
+    enabled && Option.isSome(sqlOption)
+      ? readMcpAppModelContext(threadId).pipe(
+          Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+        )
+      : Effect.succeed("");
   const providerSessionDirectory = yield* ProviderSessionDirectory;
   const projectMcpConfigService = yield* ProjectMcpConfigService;
   const git = yield* GitCore;
@@ -1014,9 +1014,10 @@ const make = Effect.gen(function* () {
           activeInstanceId !== undefined &&
           preferredInstanceId !== activeInstanceId;
         const sessionModelSwitch =
-          currentProvider === undefined
+          activeProvider === undefined
             ? "in-session"
-            : (yield* providerService.getCapabilities(currentProvider)).sessionModelSwitch;
+            : (yield* providerService.getCapabilities(activeProvider, activeInstanceId))
+                .sessionModelSwitch;
         const requestedModel = commandModel;
         const modelChanged =
           requestedModel !== undefined && requestedModel !== activeSession?.model;
@@ -1243,6 +1244,7 @@ const make = Effect.gen(function* () {
   const sendTurnForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly deliveryId?: CommandId;
+    readonly continuationRequestId?: string;
     readonly messageText: string;
     readonly submissionSource?: "human" | "automation";
     readonly attachments?: ReadonlyArray<ChatAttachment>;
@@ -1258,6 +1260,37 @@ const make = Effect.gen(function* () {
     const thread = yield* resolveThread(input.threadId);
     if (!thread) {
       return;
+    }
+    if (input.continuationRequestId) {
+      yield* requireDeliverableThread(input.threadId);
+      const live = (yield* providerService.listSessions()).find(
+        (session) => session.threadId === input.threadId && session.status !== "closed",
+      );
+      if (
+        !live ||
+        live.runtimeMode !== thread.runtimeMode ||
+        (live.model !== undefined &&
+          live.model !== (thread.modelSelection?.model ?? thread.model)) ||
+        (thread.modelSelection && thread.modelSelection.instanceId !== live.providerInstanceId)
+      )
+        return yield* new ProviderTurnDeliveryError({
+          certainty: "not_sent",
+          retryable: false,
+          detail: "The native continuation's session or settings changed; it was not restarted.",
+        });
+      return yield* providerService.sendTurn({
+        threadId: input.threadId,
+        continuationRequestId: input.continuationRequestId,
+        input: input.messageText,
+        ...(input.deliveryId ? { deliveryId: input.deliveryId } : {}),
+        submissionSource: "automation",
+        ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+        ...(input.workflowExecutionProfile
+          ? { workflowExecutionProfile: input.workflowExecutionProfile }
+          : {}),
+      });
     }
     if (thread.worktreePath && thread.branch) {
       const model = yield* orchestrationEngine.getReadModel();
@@ -1335,7 +1368,10 @@ const make = Effect.gen(function* () {
     const sessionModelSwitch =
       activeSession === undefined
         ? "in-session"
-        : (yield* providerService.getCapabilities(activeSession.provider)).sessionModelSwitch;
+        : (yield* providerService.getCapabilities(
+            activeSession.provider,
+            activeSession.providerInstanceId,
+          )).sessionModelSwitch;
     const modelForTurn =
       sessionModelSwitch === "unsupported"
         ? activeSession?.model
@@ -1346,6 +1382,10 @@ const make = Effect.gen(function* () {
       input.provider ??
       inferProviderForModel(thread.model, "codex");
 
+    const mcpAppContext = yield* appContextForTurn(
+      input.threadId,
+      recoveryProvider === "codex" && input.submissionSource !== "automation",
+    );
     yield* providerSessionDirectory.upsert({
       threadId: input.threadId,
       provider: recoveryProvider,
@@ -1377,7 +1417,11 @@ const make = Effect.gen(function* () {
         Effect.provideService(ServerSettingsService, serverSettings),
       );
     return yield* providerService.sendTurn({
+      ...(input.continuationRequestId
+        ? { continuationRequestId: input.continuationRequestId }
+        : {}),
       threadId: input.threadId,
+      ...(mcpAppContext ? { mcpAppContext } : {}),
       ...(input.submissionSource ? { submissionSource: input.submissionSource } : {}),
       ...(input.deliveryId !== undefined ? { deliveryId: input.deliveryId } : {}),
       ...(normalizedInput ? { input: normalizedInput } : {}),
@@ -1591,10 +1635,24 @@ const make = Effect.gen(function* () {
             model: event.payload.titleGenerationModel,
           }
         : settings.textGenerationModelSelection);
+    const linkedContext = Option.isSome(sqlOption)
+      ? yield* readThreadPullRequestLinks(thread.id, 5).pipe(
+          Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+          Effect.map(threadTitlePullRequestContext),
+          Effect.timeoutOption("250 millis"),
+          Effect.map(Option.getOrUndefined),
+          Effect.catch(() =>
+            Effect.logWarning("Thread title linked PR context is unavailable", {
+              threadId: thread.id,
+            }).pipe(Effect.as(undefined)),
+          ),
+        )
+      : undefined;
     const generated = yield* resolveBestEffortGeneratedTitleResult({
       cwd,
       titleSourceText,
       attachments,
+      ...(linkedContext !== undefined ? { linkedContext } : {}),
       titleGenerationModel: requestedSelection.model,
       titleGenerationModelSelection: requestedSelection,
       ...(event.payload.origin === "explicit" ? { previousTitle: thread.title } : {}),
@@ -1747,21 +1805,29 @@ const make = Effect.gen(function* () {
           retryable: false,
           detail: "Unknown project",
         });
-      // sendTurn rejects the steer unless `expectedTurnId` is still the live
-      // turn, which keeps running in its checkout even if that switched branches.
-      yield* assertWorktreeReady(
-        git,
-        {
-          projectCwd: project.workspaceRoot,
-          worktreePath: thread.worktreePath,
-          branch: thread.branch,
-        },
-        false,
-        { allowBranchDrift: true },
-      ).pipe(Effect.mapError(toProviderTurnDeliveryError));
+      // A thread without a project has no checkout to be ready. sendTurn rejects the
+      // steer unless `expectedTurnId` is still the live turn, which keeps running in
+      // its checkout even if that switched branches.
+      if (!isScratchProject(project))
+        yield* assertWorktreeReady(
+          git,
+          {
+            projectCwd: project.workspaceRoot,
+            worktreePath: thread.worktreePath,
+            branch: thread.branch,
+          },
+          false,
+          { allowBranchDrift: true },
+        ).pipe(Effect.mapError(toProviderTurnDeliveryError));
+      const mcpAppContext = yield* appContextForTurn(
+        thread.id,
+        providerFromSessionName(thread.session?.providerName) === "codex" &&
+          submissionSource !== "automation",
+      );
       yield* requireDeliverableThread(thread.id);
       return yield* providerService.sendTurn({
         threadId: thread.id,
+        ...(mcpAppContext ? { mcpAppContext } : {}),
         ...(event.commandId ? { deliveryId: event.commandId } : {}),
         ...(submissionSource ? { submissionSource } : {}),
         expectedTurnId: event.payload.expectedTurnId,
@@ -1826,6 +1892,9 @@ const make = Effect.gen(function* () {
     );
 
     return yield* sendTurnForThread({
+      ...(event.payload.continuationRequestId
+        ? { continuationRequestId: event.payload.continuationRequestId }
+        : {}),
       threadId: event.payload.threadId,
       ...(event.commandId !== null ? { deliveryId: event.commandId } : {}),
       messageText: message.text,

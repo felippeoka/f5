@@ -23,7 +23,9 @@ who opens the project in F5 then starts from the same defaults.
 
 ## Fields
 
-- `iconPath`: a relative path to a PNG, JPEG, GIF, WebP, ICO or SVG image inside the project.
+- `iconPath`: a relative path to a PNG, JPEG, GIF, WebP, ICO, SVG or macOS `.icns` image inside
+  the project. Without it, F5 looks for common favicon paths, then `Resources/AppIcon.icns` and
+  `AppIcon.icns`. An `.icns` icon is shown from its embedded PNG.
 - `defaultThreadEnvMode`: `"local"` or `"worktree"`.
 - Most project-scoped settings, such as `defaultRuntimeMode`, `worktreeSubmodules`,
   `enableAssistantStreaming`, `textGenerationModelSelection`, `sourceControlWriting` and

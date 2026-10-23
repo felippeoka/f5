@@ -1,7 +1,7 @@
 import { normalizeCron, previewCronSchedule, SCHEDULE_PRESETS } from "@t3tools/shared/cronSchedule";
 import { CronScheduleEditor, inspectCronInput } from "./CronScheduleEditor";
 import { projectSettingsQueryOptions } from "../../lib/projectSettingsQuery";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   type ModelSlug,
@@ -30,7 +30,11 @@ import { providerModelOptionsToSelections } from "../../providerModelOptions";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTheme } from "../../hooks/useTheme";
 import { ComposerPromptEditor } from "../ComposerPromptEditor";
-import { ComposerCommandMenu, type ComposerCommandItem } from "../chat/ComposerCommandMenu";
+import {
+  ComposerCommandMenu,
+  composerSuggestionOptionId,
+  type ComposerCommandItem,
+} from "../chat/ComposerCommandMenu";
 import { ProviderInstanceModelPicker } from "../chat/ProviderInstanceModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { getComposerProviderState } from "../chat/composerProviderState";
@@ -174,6 +178,7 @@ function Editor(
   const [preview, setPreview] = useState<PreviewState>({ kind: "unpreviewed" });
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState(value.prompt.length);
+  const skillListId = useId();
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const { resolvedTheme } = useTheme();
   const taskId = useRef(props.task?.id ?? ScheduledTaskId.makeUnsafe(crypto.randomUUID()));
@@ -198,6 +203,7 @@ function Editor(
         runtimeSlashCommandsSource: "instance",
       }).filter((i) => i.type === "skill")
     : [];
+  const activeSkillId = items.find((item) => item.id === highlighted)?.id ?? items[0]?.id;
   const chooseSkill = (item: ComposerCommandItem) => {
     if (item.type !== "skill") return;
     const next = `/${item.name} ${value.prompt.slice(cursor)}`;
@@ -327,6 +333,10 @@ function Editor(
                 value={value.prompt}
                 cursor={cursor}
                 terminalContexts={[]}
+                suggestionListId={skillListId}
+                activeSuggestionId={
+                  activeSkillId ? composerSuggestionOptionId(skillListId, activeSkillId) : undefined
+                }
                 disabled={saving}
                 placeholder="Describe the work, or /skill-name args"
                 className="min-h-24 rounded-md border p-3"
@@ -355,11 +365,12 @@ function Editor(
               />
               {items.length > 0 && (
                 <ComposerCommandMenu
+                  listId={skillListId}
                   items={items}
                   resolvedTheme={resolvedTheme}
                   isLoading={false}
                   triggerKind="slash-command"
-                  activeItemId={highlighted}
+                  activeItemId={activeSkillId ?? null}
                   onHighlightedItemChange={setHighlighted}
                   onSelect={chooseSkill}
                 />

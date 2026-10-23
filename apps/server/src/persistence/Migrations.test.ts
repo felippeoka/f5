@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
 import { repairUnreleasedScheduledTaskMigrations } from "./repairUnreleasedScheduledTaskMigrations.ts";
 import { LATEST_MIGRATION_ID, MIGRATIONS, runMigrations } from "./Migrations.ts";
 import * as SqliteClient from "./NodeSqliteClient.ts";
-import quarantineMigration from "./Migrations/130_ScheduledTaskQuarantine.ts";
-import scheduledMigration from "./Migrations/129_ScheduledTasks.ts";
+import quarantineMigration from "./Migrations/138_ScheduledTaskQuarantine.ts";
+import scheduledMigration from "./Migrations/137_ScheduledTasks.ts";
 
 describe("MIGRATIONS", () => {
   // The migrator only runs IDs above the highest one a database has applied,
@@ -32,7 +32,8 @@ type PrecedingVersion =
   | "schedules124"
   | "schedules127"
   | "schedules128"
-  | "schedules129";
+  | "schedules129"
+  | "schedules130";
 
 const prepareUpgrade = (version: PrecedingVersion) =>
   Effect.gen(function* () {
@@ -41,7 +42,7 @@ const prepareUpgrade = (version: PrecedingVersion) =>
     const through =
       version === "schedules124"
         ? 123
-        : version === "main128"
+        : ["main128", "schedules130"].includes(version)
           ? 128
           : ["main127", "schedules128", "schedules129"].includes(version)
             ? 127
@@ -55,9 +56,12 @@ const prepareUpgrade = (version: PrecedingVersion) =>
           ? "124_ScheduledTasks"
           : version === "schedules127"
             ? "127_ScheduledTasks"
-            : "128_ScheduledTasks"
+            : version === "schedules130"
+              ? "129_ScheduledTasks"
+              : "128_ScheduledTasks"
       ] = scheduledMigration;
     if (version === "schedules129") preceding["129_ScheduledTaskQuarantine"] = quarantineMigration;
+    if (version === "schedules130") preceding["130_ScheduledTaskQuarantine"] = quarantineMigration;
     yield* Migrator.make({})({ loader: Migrator.fromRecord(preceding) });
     yield* sql`INSERT INTO provider_terminal_events(event_id,thread_id,turn_id,event_type,event_json,received_at,attempt) VALUES('receipt','thread','turn','turn.completed','{}','2026-10-01',2)`;
     yield* sql`INSERT INTO projection_threads(thread_id,project_id,title,model,model_selection_json,branch,created_at,last_interaction_at,updated_at) VALUES('thread','project','Author','test-model','{}','a','now','now','now')`;
@@ -89,8 +93,16 @@ const assertUpgrade = (version: PrecedingVersion) =>
       { migration_id: 126, name: "ProviderTerminalRecoveryIndexes" },
       { migration_id: 127, name: "ClearPlanningWorkflowLaneBranches" },
       { migration_id: 128, name: "ProviderTurnDeliveryBoundaryIndex" },
-      { migration_id: 129, name: "ScheduledTasks" },
-      { migration_id: 130, name: "ScheduledTaskQuarantine" },
+      { migration_id: 129, name: "PrHubReviewGuides" },
+      { migration_id: 130, name: "ThreadPullRequestWatches" },
+      { migration_id: 131, name: "ThreadSettlement" },
+      { migration_id: 132, name: "McpApps" },
+      { migration_id: 133, name: "NativeHistoryRetiredTurns" },
+      { migration_id: 134, name: "BackgroundWorkEffort" },
+      { migration_id: 135, name: "RestartBackgroundWork" },
+      { migration_id: 136, name: "ScratchProjects" },
+      { migration_id: 137, name: "ScheduledTasks" },
+      { migration_id: 138, name: "ScheduledTaskQuarantine" },
     ]);
     expect(
       yield* sql`SELECT event_id,attempt,origin_session_generation,next_due_at IS NOT NULL AS retry FROM provider_terminal_events`,
@@ -102,7 +114,9 @@ const assertUpgrade = (version: PrecedingVersion) =>
       yield* sql`SELECT branch,scheduled_origin_json FROM projection_threads WHERE thread_id='thread'`,
     ).toEqual([
       {
-        branch: ["main127", "main128", "schedules128", "schedules129"].includes(version)
+        branch: ["main127", "main128", "schedules128", "schedules129", "schedules130"].includes(
+          version,
+        )
           ? "a"
           : null,
         scheduled_origin_json: legacySchedules ? '{"taskId":"task","runId":"run"}' : null,
@@ -137,6 +151,7 @@ for (const version of [
   "schedules127",
   "schedules128",
   "schedules129",
+  "schedules130",
 ] as const) {
   effectIt.effect(`upgrades ${version} without losing durable evidence`, () =>
     Effect.gen(function* () {
@@ -172,7 +187,7 @@ for (const version of ["schedules124", "schedules127", "schedules128"] as const)
         { branch: "a" },
       ]);
       expect(
-        yield* sql`SELECT migration_id FROM effect_sql_migrations WHERE migration_id=130`,
+        yield* sql`SELECT migration_id FROM effect_sql_migrations WHERE migration_id=138`,
       ).toEqual([]);
       yield* sql`DROP TRIGGER interrupt_repair`;
       yield* repairUnreleasedScheduledTaskMigrations;

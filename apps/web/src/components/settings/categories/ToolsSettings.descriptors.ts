@@ -1,9 +1,9 @@
+import { SETTINGS_ITEM_ROUTES } from "../settingsRouting";
 import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const TOOLS_SETTINGS_DESCRIPTORS = [
   {
-    id: "tools.agent-bridge",
-    category: "tools",
+    ...SETTINGS_ITEM_ROUTES["tools.agent-bridge"],
     label: "Agent Bridge",
     description: "Connect a local MCP client and explicitly grant scheduled task access.",
     keywords: ["schedules", "MCP", "local", "agent", "permissions"],
@@ -11,12 +11,10 @@ export const TOOLS_SETTINGS_DESCRIPTORS = [
     scope: "global",
   },
   {
-    id: "tools.mcp",
-    category: "tools",
+    ...SETTINGS_ITEM_ROUTES["tools.mcp"],
     label: "MCP servers",
     description: "Configure common and project-scoped Model Context Protocol servers.",
     keywords: ["tools", "model context protocol", "stdio", "http", "server"],
     targetSelector: '[data-settings-search-target="tools.mcp"]',
-    scope: "both",
   },
 ] as const satisfies ReadonlyArray<SettingsItemDescriptor>;

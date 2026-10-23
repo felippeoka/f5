@@ -33,7 +33,7 @@ await Effect.runPromise(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sql`SELECT migration_id,name FROM effect_sql_migrations
-    WHERE (migration_id IN(124,127,128) AND name='ScheduledTasks') OR (migration_id=129 AND name='ScheduledTaskQuarantine') ORDER BY migration_id`;
+    WHERE (migration_id IN(124,127,128,129) AND name='ScheduledTasks') OR (migration_id IN(129,130) AND name='ScheduledTaskQuarantine') ORDER BY migration_id`;
     console.log(JSON.stringify({ mode: apply ? "apply" : "inspect", migrations: rows }));
     if (!apply || !rows.length) return;
     const backup = `${filename}.before-scheduled-task-repair-${Date.now()}.sqlite`;

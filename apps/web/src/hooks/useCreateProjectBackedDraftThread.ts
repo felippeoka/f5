@@ -1,4 +1,5 @@
 import { resolveNewThreadPreferences } from "../newThreadPreferences";
+import { isScratchProject } from "@t3tools/shared/scratchProject";
 import {
   cachedGlobalDraftSettings,
   defaultDraftRuntimeMode,
@@ -9,7 +10,7 @@ import { type ProjectId, type ServerSettings, ThreadId } from "@t3tools/contract
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useAppSettings, type AppSettings } from "../appSettings";
+import { type AppSettings, updateAppSettings, useAppSettingsSelector } from "../appSettings";
 import {
   type DraftThreadEnvMode,
   type DraftThreadState,
@@ -21,6 +22,8 @@ import { getModelPreferences } from "../modelPreferencesStore";
 import { useStore } from "../store";
 
 export interface CreateProjectBackedDraftThreadOptions {
+  /** Rechecked after async settings resolution, immediately before navigation. */
+  canNavigate?: () => boolean;
   branch?: string | null;
   worktreePath?: string | null;
   envMode?: DraftThreadEnvMode;
@@ -52,7 +55,7 @@ export function seedDraftThreadFromModelPreferences(
   if (preference.provider) draft.setProvider(threadId, preference.provider);
   if (preference.instanceId) draft.setProviderInstance(threadId, preference.instanceId);
   if (preference.model) draft.setModel(threadId, preference.model);
-  if (preference.options) draft.setModelOptions(threadId, preference.options);
+  if (preference.options !== undefined) draft.setModelOptions(threadId, preference.options);
 }
 
 function maybeMarkOnboardingLiteCompleted(
@@ -138,7 +141,7 @@ export async function createProjectBackedDraftThread({
       onboardingLiteStatus,
       updateSettings,
     );
-    if (routeThreadId !== storedDraftThread.threadId) {
+    if (routeThreadId !== storedDraftThread.threadId && options?.canNavigate?.() !== false) {
       await navigate({
         to: "/$threadId",
         params: { threadId: storedDraftThread.threadId },
@@ -186,10 +189,12 @@ export async function createProjectBackedDraftThread({
   seedDraftThreadFromModelPreferences(threadId, projectId, resolvedSettings);
   maybeMarkOnboardingLiteCompleted(projectId, threadId, onboardingLiteStatus, updateSettings);
 
-  await navigate({
-    to: "/$threadId",
-    params: { threadId },
-  });
+  if (options?.canNavigate?.() !== false) {
+    await navigate({
+      to: "/$threadId",
+      params: { threadId },
+    });
+  }
 
   return {
     projectId,
@@ -199,7 +204,7 @@ export async function createProjectBackedDraftThread({
 
 export function useCreateProjectBackedDraftThread() {
   const navigate = useNavigate();
-  const { settings, updateSettings } = useAppSettings();
+  const onboardingLiteStatus = useAppSettingsSelector((settings) => settings.onboardingLiteStatus);
   const resolveProjectThreadEnvMode = useProjectThreadEnvModeResolver();
   const routeThreadId = useParams({
     strict: false,
@@ -209,6 +214,21 @@ export function useCreateProjectBackedDraftThread() {
   return useCallback(
     async (projectId: ProjectId, options?: CreateProjectBackedDraftThreadOptions) => {
       const { forceNonDefaultEnvMode = false, ...draftOptions } = options ?? {};
+      // A thread without a project gets its own folder from the server: no branch, no worktree.
+      if (isScratchProject(useStore.getState().projects.find((entry) => entry.id === projectId)))
+        return createProjectBackedDraftThread({
+          navigate,
+          onboardingLiteStatus,
+          projectId,
+          routeThreadId,
+          updateSettings: updateAppSettings,
+          options: {
+            ...draftOptions,
+            branch: null,
+            worktreePath: null,
+            envMode: "local",
+          },
+        });
       const requested =
         draftOptions.envMode ?? (draftOptions.worktreePath ? "worktree" : undefined);
       const envMode = await resolveProjectThreadEnvMode(projectId, {
@@ -217,19 +237,13 @@ export function useCreateProjectBackedDraftThread() {
       });
       return createProjectBackedDraftThread({
         navigate,
-        onboardingLiteStatus: settings.onboardingLiteStatus,
+        onboardingLiteStatus,
         projectId,
         routeThreadId,
-        updateSettings,
+        updateSettings: updateAppSettings,
         options: { ...draftOptions, envMode },
       });
     },
-    [
-      navigate,
-      resolveProjectThreadEnvMode,
-      routeThreadId,
-      settings.onboardingLiteStatus,
-      updateSettings,
-    ],
+    [navigate, onboardingLiteStatus, resolveProjectThreadEnvMode, routeThreadId],
   );
 }
