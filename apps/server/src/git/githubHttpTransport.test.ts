@@ -48,7 +48,7 @@ describe("GitHub HTTP transport", () => {
     );
     const [url, options] = fetcher.mock.calls[0]!;
     expect(String(url)).toBe(expected);
-    expect(options?.redirect).toBe("error");
+    expect(options?.redirect).toBe("manual");
     expect(new Headers(options?.headers).get("authorization")).toBe(
       `Bearer ${host!.endsWith(".test") ? "enterprise-secret" : "cloud-secret"}`,
     );
@@ -103,7 +103,43 @@ describe("GitHub HTTP transport", () => {
     expect(result.kind).toBe("timeout");
     expect(result.detail).not.toContain("private fetch payload");
   });
-  it("does not follow redirects or send arbitrary headers", async () => {
+  it("follows a renamed repository's redirect within the API origin only", async () => {
+    const redirect = (location: string) =>
+      new Response(null, { status: 301, headers: { Location: location } });
+    const request = (fetcher: typeof fetch) =>
+      Effect.runPromise(
+        makeGitHubHttpTransport(fetcher)({
+          cwd: ".",
+          args: ["api", "repos/zeit/next.js", "--hostname", "github.com", "--include"],
+          env: { GH_TOKEN: "cloud-secret" },
+        }),
+      );
+
+    const renamed = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(redirect("https://api.github.com/repositories/70107786"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ full_name: "vercel/next.js" })));
+    const result = await request(renamed);
+    expect(String(renamed.mock.calls[1]![0])).toBe("https://api.github.com/repositories/70107786");
+    expect(parseGitHubApiResponse(result.stdout)).toMatchObject({
+      status: 200,
+      body: { full_name: "vercel/next.js" },
+    });
+
+    // Another origin never receives the token: the redirect comes back as a failed response.
+    const elsewhere = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(redirect("https://attacker.example/repos/zeit/next.js"));
+    expect(await request(elsewhere)).toMatchObject({ code: 1 });
+    expect(elsewhere).toHaveBeenCalledTimes(1);
+
+    const loop = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => redirect("https://api.github.com/repos/zeit/next.js"));
+    expect(await request(loop)).toMatchObject({ code: 1 });
+    expect(loop).toHaveBeenCalledTimes(4);
+  });
+  it("refuses arbitrary headers before sending anything", async () => {
     const fetcher = vi.fn<typeof fetch>();
     const result = await Effect.runPromise(
       makeGitHubHttpTransport(fetcher)({

@@ -56,6 +56,8 @@ export function makeGitHubFetch(
   };
 }
 
+const MAX_GITHUB_REDIRECTS = 3;
+
 let defaultGitHubFetch: GitHubFetch | undefined;
 const githubFetch: GitHubFetch = (input, init) =>
   (defaultGitHubFetch ??= makeGitHubFetch())(input, init);
@@ -118,13 +120,33 @@ export function makeGitHubHttpTransport(
             timeout,
             ...(input.signal ? [input.signal] : []),
           ]);
-          const response = await fetcher(url, {
-            method: option("--method") ?? "GET",
-            headers,
-            ...(input.stdin === undefined ? {} : { body: input.stdin }),
-            signal,
-            redirect: "error",
-          });
+          // GitHub redirects renamed and transferred repositories. Redirects are followed only
+          // within the API origin, so the token is never sent anywhere else; any other redirect
+          // is returned as the failed response it is.
+          const method = option("--method") ?? "GET";
+          const origin = new URL(base).origin;
+          let target = url;
+          let response: Response;
+          for (let hop = 0; ; hop++) {
+            response = await fetcher(target, {
+              method,
+              headers,
+              ...(input.stdin === undefined ? {} : { body: input.stdin }),
+              signal,
+              redirect: "manual",
+            });
+            const location = response.headers.get("location");
+            const follows =
+              response.status === 307 ||
+              response.status === 308 ||
+              ([301, 302, 303].includes(response.status) &&
+                (method === "GET" || method === "HEAD"));
+            if (!follows || !location || hop === MAX_GITHUB_REDIRECTS) break;
+            const next = new URL(location, target);
+            if (next.origin !== origin) break;
+            await response.body?.cancel();
+            target = next;
+          }
           const limit = input.maxStdoutBytes ?? 8 * 1024 * 1024;
           const headerText = `HTTP/1.1 ${response.status} Response\r\n${[...response.headers].map(([key, value]) => `${key}: ${value}\r\n`).join("")}\r\n`;
           let bytes = Buffer.byteLength(headerText);
