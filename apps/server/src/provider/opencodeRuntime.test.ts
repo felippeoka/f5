@@ -2,6 +2,8 @@ import { once } from "node:events";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 
 import { Effect, Layer, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -266,6 +268,13 @@ it("aborts an in-flight SDK request when the owning server lifetime ends", async
     );
     // Bounded phases name the step that stalls instead of ending in the test timeout.
     await within(received.promise, "the request to reach the server");
+    // A collection mid-request must not drop the abort (a weakly followed signal did, on CI).
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    for (let pass = 0; pass < 3; pass++) {
+      gc();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     lifetime.abort(new Error("server exited"));
     expect(await within(result, "the request to abort")).toBe("aborted");
   } finally {

@@ -679,9 +679,9 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
                   request instanceof Request
                     ? new Request(request, init)
                     : new Request(String(request), init);
-                return fetch(
-                  new Request(source, { signal: AbortSignal.any([source.signal, input.signal!]) }),
-                );
+                // Hand the signal to fetch itself. A Request built around it follows the signal
+                // only weakly, so a garbage collection mid-request would drop the abort.
+                return fetch(source, { signal: AbortSignal.any([source.signal, input.signal!]) });
               },
               { preconnect: fetch.preconnect },
             ),
