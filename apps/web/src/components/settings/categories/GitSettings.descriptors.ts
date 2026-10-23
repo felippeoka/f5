@@ -2,6 +2,14 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const GIT_SETTINGS_DESCRIPTORS = [
   {
+    id: "git.manage-worktrees",
+    category: "git",
+    label: "Manage worktrees",
+    description: "Browse, switch, and remove worktree checkouts for each project.",
+    keywords: ["worktree", "worktrees", "checkout", "branches", "manage"],
+    targetSelector: '[data-settings-search-target="git.manage-worktrees"]',
+  },
+  {
     id: "git.submodules",
     category: "git",
     label: "Worktree submodules",
