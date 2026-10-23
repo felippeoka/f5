@@ -6,7 +6,7 @@ import type {
   NextTurnQueueSnapshot,
   RuntimeMode,
 } from "@t3tools/contracts";
-import { RUNTIME_MODE_VALUES } from "@t3tools/contracts";
+import { isAdmittedDeliveryQueueItem, RUNTIME_MODE_VALUES } from "@t3tools/contracts";
 import { CSS } from "@dnd-kit/utilities";
 import { useSortable } from "@dnd-kit/sortable";
 import {
@@ -68,7 +68,8 @@ export function NextTurnQueueRow({
   readonly canRunNow: boolean;
   readonly onRunNow: (item: NextTurnQueueItem) => Promise<void>;
 }) {
-  const disabled = busy || item.status === "dispatching";
+  const admitted = isAdmittedDeliveryQueueItem(item);
+  const disabled = busy || item.status === "dispatching" || admitted;
   const display = buildQueueRowDisplay(item);
   const continuation = item.command.presentation === "continuation";
   const draft = useNextTurnQueueStore(
@@ -137,8 +138,11 @@ export function NextTurnQueueRow({
       ? 0
       : Math.max(0, Math.ceil((Date.parse(item.notBefore) - nowMs) / 1_000));
 
-  const statusText =
-    item.status === "dispatching"
+  const statusText = admitted
+    ? snapshot.unresolvedDelivery
+      ? "Delivery unconfirmed. Use Recheck, Retry or Discard above."
+      : "Checking delivery…"
+    : item.status === "dispatching"
       ? "Sending this turn now."
       : retrySeconds > 0
         ? item.scheduleReason === "usage_limit_reset" && item.attemptCount === 0
@@ -172,7 +176,7 @@ export function NextTurnQueueRow({
         }
       }}
     >
-      {draft ? (
+      {draft && !admitted ? (
         <div className="space-y-2">
           <Textarea
             ref={textareaRef}
@@ -315,7 +319,7 @@ export function NextTurnQueueRow({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
-            {item.status === "failed" ? (
+            {!admitted && item.status === "failed" ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -327,17 +331,19 @@ export function NextTurnQueueRow({
                 <RotateCcwIcon />
               </Button>
             ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              disabled={disabled || continuation || index === 0}
-              aria-label="Move queued turn to top"
-              onClick={() => void onMoveToTop(item)}
-            >
-              <ArrowUpIcon />
-            </Button>
-            {canRunNow ? (
+            {!admitted ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                disabled={disabled || continuation || index === 0}
+                aria-label="Move queued turn to top"
+                onClick={() => void onMoveToTop(item)}
+              >
+                <ArrowUpIcon />
+              </Button>
+            ) : null}
+            {!admitted && canRunNow ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -349,7 +355,7 @@ export function NextTurnQueueRow({
                 <PlayIcon />
               </Button>
             ) : null}
-            {onSteer ? (
+            {!admitted && onSteer ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -360,34 +366,38 @@ export function NextTurnQueueRow({
                 Steer now
               </Button>
             ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              disabled={disabled || continuation}
-              aria-label="Edit queued turn"
-              onClick={() => {
-                focusEditorRef.current = true;
-                setEditDraft(snapshot.threadId, item.itemId, {
-                  text: display.visibleText,
-                  model: item.command.model ?? "",
-                  runtimeMode: item.command.runtimeMode,
-                  interactionMode: item.command.interactionMode,
-                });
-              }}
-            >
-              <PencilIcon />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              disabled={disabled || continuation || snapshot.items.length >= snapshot.maxItems}
-              aria-label="Duplicate queued turn"
-              onClick={() => void onDuplicate(item)}
-            >
-              <CopyIcon />
-            </Button>
+            {!admitted ? (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled={disabled || continuation}
+                  aria-label="Edit queued turn"
+                  onClick={() => {
+                    focusEditorRef.current = true;
+                    setEditDraft(snapshot.threadId, item.itemId, {
+                      text: display.visibleText,
+                      model: item.command.model ?? "",
+                      runtimeMode: item.command.runtimeMode,
+                      interactionMode: item.command.interactionMode,
+                    });
+                  }}
+                >
+                  <PencilIcon />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled={disabled || continuation || snapshot.items.length >= snapshot.maxItems}
+                  aria-label="Duplicate queued turn"
+                  onClick={() => void onDuplicate(item)}
+                >
+                  <CopyIcon />
+                </Button>
+              </>
+            ) : null}
             <Button
               type="button"
               variant="ghost"

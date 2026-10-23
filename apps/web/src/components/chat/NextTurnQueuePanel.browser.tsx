@@ -7,6 +7,8 @@ import { render } from "vitest-browser-react";
 
 import { ComposerTray } from "./composer/ComposerTray";
 import { NextTurnQueuePanel, NextTurnQueueSync } from "./NextTurnQueuePanel";
+import { ThreadQueueCountBadge } from "../thread/ThreadQueueCountBadge";
+import { toastManager } from "../ui/toast";
 import { useNextTurnQueueStore } from "../../nextTurnQueueStore";
 
 const nativeApiMock = vi.hoisted(() => ({ current: null as unknown }));
@@ -26,6 +28,22 @@ afterEach(async () => {
 });
 
 describe("NextTurnQueuePanel", () => {
+  it.each([false, true])("labels an empty paused queue (compact=%s)", async (compact) => {
+    const threadId = ThreadId.makeUnsafe("empty-paused");
+    useNextTurnQueueStore.getState().applySnapshot({
+      threadId,
+      revision: 1,
+      paused: true,
+      blockedKind: "paused",
+      reasonCode: "manual_pause",
+      reasonDetail: null,
+      maxItems: 20,
+      quarantinedCount: 0,
+      items: [],
+    });
+    active = await render(<ThreadQueueCountBadge threadId={threadId} compact={compact} />);
+    await expect.element(page.getByLabelText("Queue paused")).toHaveTextContent("Queue paused");
+  });
   it.each(["stopping", "needs_recovery", "failed", "completed", "cancelled"] as const)(
     "handles an empty queue with a %s transition",
     async (phase) => {
@@ -372,6 +390,50 @@ describe("NextTurnQueuePanel", () => {
     await expect.element(page.getByRole("button", { name: "Discard" })).toBeInTheDocument();
     await page.getByRole("button", { name: "Recheck" }).click();
     expect(recheckDelivery).toHaveBeenCalledWith({ threadId });
+    await expect
+      .element(page.getByRole("button", { name: "Clear", exact: true }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Cancel queued turn" })).toBeDisabled();
+    const regular = {
+      ...snapshot.items[0]!,
+      itemId: CommandId.makeUnsafe("regular"),
+      status: "queued" as const,
+      lastErrorCode: null,
+    };
+    const mixed = { ...snapshot, revision: 4, items: [...snapshot.items, regular] };
+    useNextTurnQueueStore.getState().applySnapshot(mixed);
+    const clear = vi
+      .fn()
+      .mockResolvedValue({ snapshot: { ...snapshot, revision: 5 }, removed: [regular] });
+    const restore = vi.fn().mockRejectedValue(new Error("Undo was rejected"));
+    const list = vi.fn().mockResolvedValue({ ...snapshot, revision: 6 });
+    const toast = vi.spyOn(toastManager, "add");
+    nativeApiMock.current = { nextTurnQueue: { clear, restore, list } };
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    expect(clear).toHaveBeenCalledWith({
+      threadId,
+      scope: "all",
+      expectedRevision: 4,
+      keepItemIds: [itemId],
+    });
+    await expect
+      .element(page.getByRole("button", { name: "Clear", exact: true }))
+      .not.toBeInTheDocument();
+    const undo = toast.mock.calls.find(([options]) => options.title === "Queue cleared.")?.[0]
+      .actionProps;
+    expect(undo).toBeDefined();
+    undo?.onClick?.({} as React.MouseEvent<HTMLButtonElement>);
+    await vi.waitFor(() =>
+      expect(toast).toHaveBeenCalledWith({ type: "error", title: "Undo was rejected" }),
+    );
+    expect(list).toHaveBeenCalledWith({ threadId });
+    useNextTurnQueueStore.getState().applySnapshot({ ...mixed, revision: 7 });
+    clear.mockRejectedValueOnce(new Error("Clear was rejected"));
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(toast).toHaveBeenCalledWith({ type: "error", title: "Clear was rejected" }),
+    );
+    expect(list).toHaveBeenCalledTimes(2);
   });
 
   it("keeps resume available when a delivery pause has nothing left to recover", async () => {
@@ -555,6 +617,43 @@ describe("NextTurnQueuePanel", () => {
       await page.getByRole("button", { name: "Cancel" }).click();
       await expect.element(page.getByText("First draft")).toBeVisible();
     });
+
+    it.each(["delivery_rejected", "delivery_ambiguous"] as const)(
+      "hides a saved edit draft after admission fails with %s",
+      async (lastErrorCode) => {
+        const queued = item("one", "First draft");
+        useNextTurnQueueStore.getState().applySnapshot(snapshot(1, [queued]));
+        active = await render(<NextTurnQueuePanel threadId={threadId} />);
+        await page.getByRole("button", { name: "Edit queued turn" }).click();
+        await page.getByRole("textbox", { name: "Queued turn text" }).fill("Half-written edit");
+        await active.unmount();
+
+        useNextTurnQueueStore.getState().applySnapshot({
+          ...snapshot(2, []),
+          items: [{ ...queued, status: "failed", lastErrorCode }],
+          paused: true,
+          blockedKind: "error",
+          reasonCode: lastErrorCode,
+          unresolvedDelivery: {
+            deliveryId: queued.command.commandId,
+            state: lastErrorCode === "delivery_ambiguous" ? "ambiguous" : "rejected",
+          },
+        });
+        active = await render(<NextTurnQueuePanel variant="tray" threadId={threadId} />);
+
+        await expect
+          .element(page.getByRole("textbox", { name: "Queued turn text" }))
+          .not.toBeInTheDocument();
+        await expect
+          .element(page.getByRole("button", { name: "Edit queued turn" }))
+          .not.toBeInTheDocument();
+        await expect.element(page.getByRole("button", { name: "Save" })).not.toBeInTheDocument();
+        await expect
+          .element(page.getByRole("button", { name: "Cancel queued turn" }))
+          .toBeDisabled();
+        await expect.element(page.getByRole("button", { name: "Recheck" })).toBeVisible();
+      },
+    );
 
     it("drops an unconfirmed reorder when the panel unmounts", async () => {
       const reorder = vi.fn(() => new Promise<never>(() => {}));

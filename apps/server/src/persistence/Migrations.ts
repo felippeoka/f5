@@ -1,3 +1,4 @@
+import Migration0128 from "./Migrations/128_ProviderTurnDeliveryBoundaryIndex.ts";
 import Migration0127 from "./Migrations/127_ClearPlanningWorkflowLaneBranches.ts";
 import Migration0126 from "./Migrations/126_ProviderTerminalRecoveryIndexes.ts";
 import Migration0124 from "./Migrations/124_ProviderTerminalRetry.ts";
@@ -164,6 +165,7 @@ export const MIGRATIONS = {
   "125_ProviderTerminalRetryIndexes": Migration0125,
   "126_ProviderTerminalRecoveryIndexes": Migration0126,
   "127_ClearPlanningWorkflowLaneBranches": Migration0127,
+  "128_ProviderTurnDeliveryBoundaryIndex": Migration0128,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,

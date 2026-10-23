@@ -83,3 +83,14 @@ layer("127_ClearPlanningWorkflowLaneBranches", (it) => {
     }),
   );
 });
+
+for (const columns of ["thread_id TEXT", "thread_id TEXT, branch TEXT"] as const) {
+  it.effect(`skips partial legacy thread columns: ${columns}`, () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql.unsafe(`CREATE TABLE projection_threads (${columns})`);
+      yield* sql`CREATE TABLE projection_planning_workflows (workflow_json TEXT)`;
+      yield* Migration0127;
+    }).pipe(Effect.provide(SqliteClient.layerMemory())),
+  );
+}
