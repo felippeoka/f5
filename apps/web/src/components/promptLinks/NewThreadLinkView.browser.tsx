@@ -279,6 +279,26 @@ it("checks out a pull request in a new worktree only after the user confirms", a
   expect(api.nextTurnQueue.submit).not.toHaveBeenCalled();
 });
 
+it("reports a failed thread lookup instead of opening a second thread for the pull request", async () => {
+  api.prHub.getThreadsForPr.mockRejectedValueOnce(new Error("PR hub is unavailable"));
+  const screen = await render(<NewThreadLinkView search={search({ pr: "lopes-felipe/f5#42" })} />);
+
+  await expect.element(screen.getByRole("alert")).toHaveTextContent("PR hub is unavailable");
+  expect(api.projects.findByRepository).not.toHaveBeenCalled();
+  expect(api.git.preparePullRequestThread).not.toHaveBeenCalled();
+});
+
+it("prepares no worktree when it cannot read the server configuration", async () => {
+  api.prHub.getThreadsForPr.mockResolvedValueOnce([]);
+  api.projects.findByRepository.mockResolvedValueOnce([project]);
+  api.server.getConfig.mockRejectedValueOnce(new Error("Server unavailable"));
+  const screen = await render(<NewThreadLinkView search={search({ pr: "lopes-felipe/f5#42" })} />);
+
+  await screen.getByRole("button", { name: "Check out in a new worktree" }).click();
+  await expect.element(screen.getByRole("alert")).toHaveTextContent("Server unavailable");
+  expect(api.git.preparePullRequestThread).not.toHaveBeenCalled();
+});
+
 it("refuses to check out a pull request from a fork", async () => {
   api.prHub.getThreadsForPr.mockResolvedValueOnce([]);
   api.projects.findByRepository.mockResolvedValueOnce([project]);

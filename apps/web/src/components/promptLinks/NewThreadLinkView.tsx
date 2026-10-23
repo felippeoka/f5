@@ -87,7 +87,9 @@ async function openPullRequestThread(
 ): Promise<ThreadId> {
   const api = ensureNativeApi();
   const url = promptLinkPullRequestUrl(pullRequest);
-  const [prepared, peek, config] = await Promise.all([
+  // Read first: failing after the worktree exists would leave it without a thread.
+  const config = await api.server.getConfig();
+  const [prepared, peek] = await Promise.all([
     api.git.preparePullRequestThread({
       cwd: project.workspaceRoot,
       reference: url,
@@ -96,7 +98,6 @@ async function openPullRequestThread(
       runSetupScript: false,
     }),
     api.prHub.peek({ url }).catch(() => null),
-    api.server.getConfig(),
   ]);
   if (!prepared.worktreePath) {
     throw new Error("F5 did not create an isolated worktree for this pull request.");
@@ -293,9 +294,8 @@ export function NewThreadLinkView({
           repository: `${link.pullRequest.owner}/${link.pullRequest.name}`,
           number: link.pullRequest.number,
         });
-        const threads = await ensureNativeApi()
-          .prHub.getThreadsForPr({ key })
-          .catch(() => []);
+        // A failed lookup is reported, not read as "no threads", which would open a duplicate.
+        const threads = await ensureNativeApi().prHub.getThreadsForPr({ key });
         if (threads.length === 1) return showThread(operation, threads[0]!.threadId, link);
         if (threads.length > 1) return operation.setState({ kind: "choose-thread", link, threads });
       }
