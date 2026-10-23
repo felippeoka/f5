@@ -1,17 +1,22 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
+import { ChromeProcessSupervisor, type ChromeProcessIo } from "./ChromeProcessSupervisor";
 import { ComputerHostChannel } from "./ComputerHostChannel";
 import type { ComputerController } from "./ComputerController";
 import { ComputerLeaseAuthority } from "./ComputerLeaseAuthority";
 function setup(
   certified = false,
   advertiseBackground?: boolean,
-  notification?: (
-    profile: string,
-    notice: import("@t3tools/contracts").DesktopScheduledNotification,
-  ) => boolean,
+  options: {
+    notification?: (
+      profile: string,
+      notice: import("@t3tools/contracts").DesktopScheduledNotification,
+    ) => boolean;
+    supervisor?: ChromeProcessSupervisor;
+  } = {},
 ) {
+  const { notification, supervisor } = options;
   const controller = {
     disconnect: vi.fn(),
     setPaused: vi.fn(),
@@ -29,7 +34,7 @@ function setup(
     controller as unknown as ComputerController,
     () => ({ available: true }),
     vi.fn(),
-    { certified: () => certified },
+    { certified: () => certified, ...(supervisor ? { supervisor } : {}) },
     undefined,
     {
       ...(notification ? { notification } : {}),
@@ -38,6 +43,7 @@ function setup(
     },
   );
   const process = Object.assign(new EventEmitter(), {
+    pid: 50,
     connected: true,
     send: vi.fn(),
     disconnect: vi.fn(),
@@ -149,6 +155,117 @@ describe("private computer host channel", () => {
     );
     h.process.emit("disconnect");
     expect(h.channel.chrome.current()).toBeNull();
+  });
+  it("registers only the backend's descendants and refuses a generation stopped by ⌃⌘Esc", async () => {
+    const io: ChromeProcessIo = {
+      snapshot: async () => [
+        { pid: 50, ppid: 1, pgid: 50, startTime: 0, zombie: false },
+        { pid: 100, ppid: 50, pgid: 100, startTime: 1_000, zombie: false },
+        { pid: 200, ppid: 1, pgid: 200, startTime: 1_000, zombie: false },
+      ],
+      killGroup: vi.fn(),
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+      now: () => 0,
+    };
+    const supervisor = new ChromeProcessSupervisor({ io });
+    const h = setup(true, undefined, { supervisor });
+    h.hello();
+    const registration = (pid: number, launchToken: string) => ({
+      profileId: "profile",
+      backendIncarnation: "incarnation",
+      threadId: "thread",
+      sessionGeneration: "s",
+      launchToken,
+      integration: "codex-chrome",
+      pid,
+      pgid: pid,
+      startTime: 1_000,
+    });
+    const response = (requestId: string) =>
+      h.process.send.mock.calls.find(([message]) => message.requestId === requestId)?.[0];
+    h.process.emit("message", {
+      type: "chromeProcessRegister",
+      requestId: "foreign",
+      registration: registration(200, "a"),
+    });
+    h.process.emit("message", {
+      type: "chromeProcessRegister",
+      requestId: "own",
+      registration: registration(100, "b"),
+    });
+    await vi.waitFor(() => expect(response("own")).toMatchObject({ result: true }));
+    expect(response("foreign")).toMatchObject({ error: { _tag: "Execution" } });
+
+    supervisor.stop(() => true, "emergency");
+    const holder = {
+      profileId: "profile",
+      threadId: "thread",
+      sessionGeneration: "s",
+      provider: "codex",
+    };
+    h.process.emit("message", { type: "chromeLeaseAcquire", requestId: "after-stop", holder });
+    await vi.waitFor(() =>
+      expect(response("after-stop")).toMatchObject({
+        error: { _tag: "Interrupted", cause: "kill-switch" },
+      }),
+    );
+    supervisor.resumed("profile", "thread");
+    h.process.emit("message", { type: "chromeLeaseAcquire", requestId: "resumed", holder });
+    await vi.waitFor(() => expect(response("resumed")).toMatchObject({ result: true }));
+  });
+  it("refuses Sky's foreground lease while codex-computer is uncertified", async () => {
+    const h = setup(true);
+    h.hello();
+    const holder = {
+      profileId: "profile",
+      threadId: "thread",
+      sessionGeneration: "s",
+      turnId: "turn",
+      executionGeneration: 1,
+      grantVersion: 1,
+      grants: [],
+      backend: "codex-builtin",
+      threadTitle: "Thread",
+      scope: { kind: "foreground" },
+      policyRevision: 0,
+    };
+    h.process.emit("message", { type: "builtinLeaseAcquire", requestId: "sky", holder });
+    await vi.waitFor(() =>
+      expect(h.process.send).toHaveBeenCalledWith(
+        {
+          type: "response",
+          requestId: "sky",
+          error: { _tag: "Unavailable", reason: "not-certified" },
+        },
+        expect.any(Function),
+      ),
+    );
+    expect(h.controller.lease.holders()).toEqual([]);
+  });
+  it("takes the restore lease without a certified record, keeping exclusion", async () => {
+    const h = setup(false);
+    h.hello();
+    const holder = {
+      profileId: "profile",
+      threadId: "restore",
+      sessionGeneration: "r",
+      provider: "claude",
+    };
+    h.process.emit("message", { type: "chromeRestoreAcquire", requestId: "restore", holder });
+    await vi.waitFor(() => expect(h.channel.chrome.current()).toEqual(holder));
+    h.controller.nativeWorkConflicts.mockReturnValue(true);
+    h.process.emit("message", {
+      type: "chromeRestoreAcquire",
+      requestId: "busy",
+      holder: { ...holder, profileId: "profile", threadId: "other" },
+    });
+    await vi.waitFor(() =>
+      expect(h.process.send).toHaveBeenCalledWith(
+        { type: "response", requestId: "busy", error: { _tag: "Busy", holder: "same-profile" } },
+        expect.any(Function),
+      ),
+    );
   });
   it("does not accept backend resume requests for native or Chrome control", async () => {
     const h = setup(true);
@@ -549,7 +666,7 @@ it.each([
 
 it("delivers and acknowledges scheduled notices without computer access, fencing stale incarnations", () => {
   const notify = vi.fn(() => true);
-  const h = setup(false, false, notify);
+  const h = setup(false, false, { notification: notify });
   h.hello(["scheduled-notifications-v1"]);
   const notification = {
     id: "notice",
@@ -577,7 +694,7 @@ it("delivers and acknowledges scheduled notices without computer access, fencing
   expect(notify).toHaveBeenCalledTimes(1);
 });
 it("does not acknowledge notices when desktop presentation is unavailable", () => {
-  const h = setup(false, false, () => false);
+  const h = setup(false, false, { notification: () => false });
   h.hello(["scheduled-notifications-v1"]);
   h.process.send.mockClear();
   h.process.emit("message", {
