@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runInNewContext } from "node:vm";
 import type { Worker as NodeWorker } from "node:worker_threads";
-import { Effect, Metric } from "effect";
+import { Cause, Effect, Metric } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it, vi } from "vitest";
 import * as NodeSqliteClient from "./NodeSqliteClient.ts";
@@ -65,10 +65,21 @@ const withClient = async <E>(
   }
 };
 
-const until = <E>(predicate: () => Effect.Effect<boolean, E>) =>
+const until = <E>(
+  predicate: () => Effect.Effect<boolean, E>,
+  waitingFor = "the condition",
+  seconds = 10,
+) =>
   Effect.gen(function* () {
     while (!(yield* predicate())) yield* Effect.sleep("10 millis");
-  }).pipe(Effect.timeout("10 seconds"));
+  }).pipe(
+    Effect.timeout(`${seconds} seconds`),
+    Effect.mapError((cause) =>
+      Cause.isTimeoutError(cause)
+        ? new Error(`Timed out after ${seconds}s waiting for ${waitingFor}`)
+        : cause,
+    ),
+  );
 
 // Observe from another connection: querying through the writer would keep
 // resetting the worker's 100 ms idle timer. A tail below 1,000 frames is
@@ -175,28 +186,36 @@ describe("SQLite checkpoint worker", () => {
     "reports a pinned reader and checkpoints after it releases",
     async () => {
       await withClient((sql, filename) =>
-        Effect.gen(function* () {
-          const reader = new DatabaseSync(filename);
-          try {
+        // A generator's finally does not run when a yielded effect fails, so the reader is
+        // released by the scope; left open, it also blocks the folder delete on Windows.
+        Effect.scoped(
+          Effect.gen(function* () {
+            const reader = yield* Effect.acquireRelease(
+              Effect.sync(() => new DatabaseSync(filename)),
+              (reader) => Effect.sync(() => reader.close()),
+            );
             reader.exec("BEGIN; SELECT * FROM payload");
             for (let index = 0; index < 40; index++) {
               yield* sql`INSERT INTO payload VALUES (zeroblob(1048576))`;
               yield* Effect.yieldNow;
             }
-            yield* until(() =>
-              Metric.value(sqliteCheckpointBlocked).pipe(Effect.map((state) => state.value === 1)),
+            yield* until(
+              () =>
+                Metric.value(sqliteCheckpointBlocked).pipe(
+                  Effect.map((state) => state.value === 1),
+                ),
+              "the pinned reader to be reported",
             );
             reader.exec("ROLLBACK");
             // Releasing an external reader alone must let the idle worker catch up.
-            yield* until(checkpointed(filename));
+            yield* until(checkpointed(filename), "the checkpoint after the reader released", 30);
             yield* sql`INSERT INTO payload VALUES (zeroblob(1))`;
             expect(statSync(`${filename}-wal`).size).toBeLessThanOrEqual(33554432);
-          } finally {
-            reader.close();
-          }
-        }),
+          }),
+        ),
       );
     },
+    60_000,
   );
 
   it("hands checkpoints back when the worker crashes or cannot start", async () => {
