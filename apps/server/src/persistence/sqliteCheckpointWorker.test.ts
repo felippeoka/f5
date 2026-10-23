@@ -103,7 +103,8 @@ describe("SQLite checkpoint worker", () => {
               postMessage: (message: { blocked: boolean }) => messages.push(message),
             },
           };
-        if (module === "node:fs") return { statSync: () => ({ size: 8_240_032 }) };
+        if (module === "node:fs")
+          return { openSync: () => 3, fstatSync: () => ({ size: 8_240_032 }), closeSync: () => {} };
         if (module === "node:sqlite")
           return {
             DatabaseSync: class {

@@ -19,7 +19,7 @@ const CHECKPOINT_IDLE_MS = 100;
 export const checkpointWorkerSource = `
 const { parentPort, workerData } = require("node:worker_threads");
 const { DatabaseSync } = require("node:sqlite");
-const { statSync } = require("node:fs");
+const { closeSync, fstatSync, openSync } = require("node:fs");
 const db = new DatabaseSync(workerData.filename);
 const version = db.prepare("SELECT sqlite_version() AS version").get().version;
 const [major, minor] = version.split(".").map(Number);
@@ -49,9 +49,13 @@ const inspect = (finishing) => {
     clearTimeout(idle);
     idle = setTimeout(() => inspect(true), workerData.idleMs);
   }
+  // fstat on an open handle: Windows stat by name can report the size cached in the directory
+  // entry, which stays stale while SQLite holds the WAL open.
   let walBytes = 0;
-  try { walBytes = statSync(workerData.filename + "-wal").size; }
+  let wal;
+  try { wal = openSync(workerData.filename + "-wal", "r"); walBytes = fstatSync(wal).size; }
   catch (error) { if (error.code !== "ENOENT") throw error; }
+  finally { if (wal !== undefined) closeSync(wal); }
   parentPort.postMessage({ ack: !finishing, walBytes, blocked });
 };
 parentPort.on("message", () => {
