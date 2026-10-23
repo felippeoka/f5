@@ -145,6 +145,45 @@ describe("ComposerStatusStrip", () => {
     }
   });
 
+  it("keeps a tall task popover anchored to its chip", async () => {
+    const manyTasks = Array.from({ length: 20 }, (_, index) => ({
+      id: String(index + 1),
+      content: `Task ${index + 1}`,
+      activeForm: `Working on task ${index + 1}`,
+      status: index === 19 ? "in_progress" : "completed",
+    })) as TaskItem[];
+    const screen = await render(
+      <div style={{ position: "fixed", bottom: 16, left: 16 }}>
+        <Harness chips={<TasksStatusChip tasks={manyTasks} summary="1 active · 19 done" />} />
+      </div>,
+    );
+    try {
+      await page.getByRole("button", { name: /^Tasks: 1 active/ }).click();
+      await expect
+        .element(
+          page
+            .getByRole("dialog", { name: "Task list" })
+            .getByText("Working on task 1", { exact: true }),
+        )
+        .toBeVisible();
+      // Measure after the open scale animation, which shrinks the popup's rect.
+      const popupElement = document.querySelector<HTMLElement>('[data-slot="popover-popup"]')!;
+      await Promise.all(popupElement.getAnimations().map((animation) => animation.finished));
+      const chip = document.querySelector('[data-status-chip="tasks"]')!.getBoundingClientRect();
+      const popup = popupElement.getBoundingClientRect();
+      const positioner = document
+        .querySelector('[data-slot="popover-positioner"]')!
+        .getBoundingClientRect();
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+      expect(popup.height).toBeLessThanOrEqual(26 * rem + 2);
+      expect(Math.abs(positioner.height - popup.height)).toBeLessThanOrEqual(2);
+      expect(chip.top - popup.bottom).toBeGreaterThanOrEqual(0);
+      expect(chip.top - popup.bottom).toBeLessThanOrEqual(12);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("shows a non-critical notice as a warning chip with the notice in its popover", async () => {
     const screen = await render(
       <Harness
