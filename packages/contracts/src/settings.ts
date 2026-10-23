@@ -13,7 +13,7 @@ import { ModelSelection, ProjectSkillScope, RuntimeMode } from "./orchestration"
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance";
 import { ThreadEnvMode, type ThreadEnvMode as ThreadEnvModeType } from "./threadEnvMode";
 import { ComputerPasswordMasking } from "./computerAutomation";
-import { UpstreamPortsSettings } from "./upstreamPortsWire";
+import { UpstreamPortsSettings, UpstreamPortsSettingsPatch } from "./upstreamPortsWire";
 export { ThreadEnvMode };
 
 // ── Client Settings (local-only) ───────────────────────────────
@@ -697,7 +697,7 @@ export const ServerSettingsPatch = Schema.Struct({
   computerUseExecutionMode: Schema.optionalKey(ComputerUseExecutionMode),
   computerUsePasswordMasking: Schema.optionalKey(ComputerPasswordMasking),
   autoPullDefaultBranch: Schema.optionalKey(Schema.Boolean),
-  upstreamPorts: Schema.optionalKey(UpstreamPortsSettings),
+  upstreamPorts: Schema.optionalKey(UpstreamPortsSettingsPatch),
   githubTransport: Schema.optionalKey(GitHubTransport),
   observability: Schema.optionalKey(
     Schema.Struct({

@@ -236,9 +236,12 @@ interface BaseState {
 
 const decodeSettings = Schema.decodeUnknownSync(UpstreamPortsSettings);
 
-/** Decision fields without the timestamp/author, to detect no-op decisions. */
+/**
+ * Decision fields without the timestamp, to detect no-op decisions. The author
+ * stays in, so confirming an automatic decision records it as the user's.
+ */
 const decisionSignature = (fields: DecisionFields) => {
-  const { decidedAt: _at, decidedBy: _by, ...rest } = fields;
+  const { decidedAt: _at, ...rest } = fields;
   return canonicalJson(rest);
 };
 
@@ -394,10 +397,19 @@ export function makeUpstreamPortsService(
 
     const claimFile = (cwd: string) =>
       commonDirFor(cwd).pipe(Effect.map((dir) => writerClaimPath(deps.baseDir, dir)));
+    const claimIo = <A>(run: () => Promise<A>) =>
+      Effect.tryPromise({
+        try: run,
+        catch: (error) =>
+          new UpstreamPortsError({
+            code: "unavailable",
+            message: `The upstream writer claim is unavailable: ${describe(error)}`,
+          }),
+      });
 
     const isWriter = (cwd: string) =>
       claimFile(cwd).pipe(
-        Effect.flatMap((file) => Effect.promise(() => readWriterClaim(file))),
+        Effect.flatMap((file) => claimIo(() => readWriterClaim(file))),
         Effect.map((claim) => claim !== null && isSameWriter(claim, me)),
         Effect.orElseSucceed(() => false),
       );
@@ -406,9 +418,9 @@ export function makeUpstreamPortsService(
     const requireWriter = (cwd: string) =>
       Effect.gen(function* () {
         const file = yield* claimFile(cwd);
-        const mine = yield* Effect.promise(() => ensureWriterClaim(file, me, now().toISOString()));
+        const mine = yield* claimIo(() => ensureWriterClaim(file, me, now().toISOString()));
         if (!mine) {
-          const claim = yield* Effect.promise(() => readWriterClaim(file));
+          const claim = yield* claimIo(() => readWriterClaim(file));
           return yield* fail(
             "read-only",
             `Managed by profile ${claim?.profileId ?? "unknown"}${claim?.hostname ? ` on ${claim.hostname}` : ""}.`,
@@ -908,8 +920,7 @@ export function makeUpstreamPortsService(
           const context = yield* resolveContext(project.id);
           if (!context.config || context.settings.schedule.mode === "off") return;
           const file = yield* claimFile(context.cwd);
-          if (!(yield* Effect.promise(() => ensureWriterClaim(file, me, now().toISOString()))))
-            return;
+          if (!(yield* claimIo(() => ensureWriterClaim(file, me, now().toISOString())))) return;
           const due = lastDueAt(context.settings.schedule, now());
           if (!due) return;
           const dueAt = due.toISOString();
@@ -1118,13 +1129,12 @@ export function makeUpstreamPortsService(
         if (outcome.status === "pending") return { ...group, reason: outcome.reason };
         yield* store.setGroupStatus(group, outcome.status, outcome.reason, now().toISOString());
         if (outcome.status === "rejected") {
-          for (const topicId of group.topicIds)
-            yield* store.setLinkState(
-              { projectId: group.projectId, topicId, threadId: group.threadId },
-              "unlinked",
-              { clientRequestId: group.clientRequestId, groupIndex: group.groupIndex },
-            );
-          yield* store.bumpLinksVersion(group.projectId);
+          // The filter unlinks every topic in the group and bumps the links version once.
+          yield* store.setLinkState(
+            { projectId: group.projectId, topicId: group.topicIds[0]!, threadId: group.threadId },
+            "unlinked",
+            { clientRequestId: group.clientRequestId, groupIndex: group.groupIndex },
+          );
         }
         return { ...group, status: outcome.status, reason: outcome.reason };
       });
@@ -1201,7 +1211,7 @@ export function makeUpstreamPortsService(
       Effect.gen(function* () {
         const context = yield* resolveContext(projectId);
         const claim = yield* claimFile(context.cwd).pipe(
-          Effect.flatMap((file) => Effect.promise(() => describeWriterClaim(file, me))),
+          Effect.flatMap((file) => claimIo(() => describeWriterClaim(file, me))),
           Effect.orElseSucceed(() => ({
             claimed: false,
             managedByThisProfile: false,
@@ -1539,11 +1549,26 @@ export function makeUpstreamPortsService(
     const unlinkPort: UpstreamPortsService["unlinkPort"] = (input) =>
       Effect.gen(function* () {
         const context = yield* resolveContext(input.projectId);
+        yield* requireConfig(context);
+        yield* requireWriter(context.cwd);
+        const links = yield* store.listLinks(context.projectId);
+        if (
+          !links.some(
+            (link) =>
+              link.topicId === input.topicId &&
+              link.threadId === input.threadId &&
+              link.state === "active",
+          )
+        )
+          return yield* fail(
+            "not-found",
+            `Topic ${input.topicId} is not linked to thread ${input.threadId}.`,
+          );
+        // Also bumps the links version.
         yield* store.setLinkState(
           { projectId: context.projectId, topicId: input.topicId, threadId: input.threadId },
           "unlinked",
         );
-        yield* store.bumpLinksVersion(context.projectId);
         yield* emit(context.projectId, "ports-updated");
         return { revision: (yield* currentView(context)).revision };
       }).pipe(Effect.mapError(internal));
@@ -1642,7 +1667,7 @@ export function makeUpstreamPortsService(
           "user",
           Effect.gen(function* () {
             const file = yield* claimFile(context.cwd);
-            yield* Effect.promise(() => takeOverWriterClaim(file, me, now().toISOString()));
+            yield* claimIo(() => takeOverWriterClaim(file, me, now().toISOString()));
           }),
         );
         const publication = yield* store.getPublication(context.projectId);

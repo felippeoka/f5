@@ -224,6 +224,12 @@ export class FakeGitRepo {
         this.refs.set(`refs/remotes/${remote}/${branch}`, this.refs.get(`refs/heads/${branch}`)!);
         return Effect.void;
       }),
+    deleteBranch: (_cwd, branch, expectedTip) =>
+      Effect.sync(() => {
+        this.calls.push(`deleteBranch ${branch}`);
+        if (this.refs.get(`refs/heads/${branch}`) === expectedTip)
+          this.refs.delete(`refs/heads/${branch}`);
+      }),
   };
 }
 

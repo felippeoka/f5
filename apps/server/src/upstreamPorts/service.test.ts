@@ -287,6 +287,18 @@ layer("upstream ports service", (it) => {
       const overview = yield* service.getOverview(PROJECT_ID);
       assert.strictEqual(overview.lastRun?.llmCalls, 1);
       assert.strictEqual(overview.lastRun?.autoDecidedCount, 1);
+
+      // Confirming the automatic skip unchanged attributes it to the user, once.
+      const topic = skipped.topics[0]!.topic;
+      const confirm = service.decide({
+        projectId: PROJECT_ID,
+        topicIds: [topic.id],
+        decision: { kind: "skip", reasonKey: topic.reasonKey!, reason: topic.reason! },
+      });
+      assert.deepStrictEqual((yield* confirm).updated, [topic.id]);
+      const confirmed = yield* service.getTopic({ projectId: PROJECT_ID, topicId: topic.id });
+      assert.strictEqual(confirmed.row.topic.decidedBy, "user");
+      assert.deepStrictEqual((yield* confirm).unchanged, [topic.id]);
     }),
   );
 
@@ -426,6 +438,7 @@ layer("upstream ports service", (it) => {
         assert.strictEqual(fixture.gh.prs[0]!.title, "Track upstream t3code changes (2026-10-22)");
         assert.ok(!fixture.gh.prs[0]!.body.includes("—"));
         const branchTip = fixture.repo.refs.get(`refs/heads/${overview.publication.branch}`)!;
+        const firstBranch = overview.publication.branch!;
 
         // A second decision lands on the same branch and refreshes the PR body.
         yield* service.decide({
@@ -459,6 +472,9 @@ layer("upstream ports service", (it) => {
         assert.ok(fixture.gh.prs.every((pr) => pr.repo === "o/f5"));
         assert.ok(fixture.gh.calls.every((call) => call === "bodies" || !call.includes("t3code")));
         assert.ok(fixture.gh.calls.includes(`create o/f5:${overview.publication.branch}`));
+        // The merged PR's local branch is deleted.
+        assert.isFalse(fixture.repo.refs.has(`refs/heads/${firstBranch}`));
+        assert.notStrictEqual(overview.publication.branch, firstBranch);
         const ready = yield* service.listTopics({ projectId: PROJECT_ID, list: "ready" });
         assert.strictEqual(ready.topics[0]!.topic.scope, "API only");
       }),
@@ -669,12 +685,23 @@ layer("upstream ports service", (it) => {
 
         const linked = yield* service.getTopic({ projectId: PROJECT_ID, topicId: ids[0]! });
         assert.strictEqual(linked.row.links.length, 1);
-        yield* service.unlinkPort({
+        const sql = yield* SqlClient.SqlClient;
+        const linksVersion = () =>
+          sql<{
+            version: number;
+          }>`SELECT links_version AS version FROM upstream_ledger_publication WHERE project_id = ${PROJECT_ID}`.pipe(
+            Effect.map((rows) => rows[0]!.version),
+          );
+        const before = yield* linksVersion();
+        const unlink = service.unlinkPort({
           projectId: PROJECT_ID,
           topicId: ids[0]!,
           threadId: first.groups[0]!.threadId,
         });
+        yield* unlink;
+        assert.strictEqual(yield* linksVersion(), before + 1);
         assert.strictEqual((yield* service.getOverview(PROJECT_ID)).counts["in-progress"], 0);
+        assert.strictEqual((yield* Effect.flip(unlink)).code, "not-found");
       }),
   );
 

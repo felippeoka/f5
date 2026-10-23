@@ -1,4 +1,5 @@
-import type { UpstreamTopic } from "@t3tools/contracts";
+import { UpstreamProjectConfig, type UpstreamTopic } from "@t3tools/contracts";
+import { Exit, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -587,6 +588,15 @@ describe("applyOps and opEffectPresent", () => {
       { kind: "interval", file: next, topics: [topic("pr-1", { title: "different" })] },
     ]);
     expect(applied.conflicts.join("\n")).toContain("topic id pr-1");
+  });
+});
+
+describe("UpstreamProjectConfig", () => {
+  it("rejects remote names that git would read as options", () => {
+    const decode = Schema.decodeUnknownExit(UpstreamProjectConfig);
+    const repository = "https://github.com/pingdotgg/t3code";
+    expect(Exit.isSuccess(decode({ repository, remote: "upstream" }))).toBe(true);
+    expect(Exit.isFailure(decode({ repository, remote: "-upload-pack" }))).toBe(true);
   });
 });
 
