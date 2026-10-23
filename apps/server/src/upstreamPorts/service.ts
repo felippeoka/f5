@@ -433,7 +433,10 @@ export function makeUpstreamPortsService(
 
     // ── Base ledger and view ──
 
-    const loadBase = (context: ProjectContext, options: { readonly fetch: boolean }) =>
+    const loadBase = (
+      context: ProjectContext,
+      options: { readonly fetch: boolean; readonly refresh?: boolean },
+    ) =>
       Effect.gen(function* () {
         const config = yield* requireConfig(context);
         const baseBranch =
@@ -441,7 +444,7 @@ export function makeUpstreamPortsService(
           "main";
         if (options.fetch) {
           const last = lastBaseFetch.get(context.projectId) ?? 0;
-          if (now().getTime() - last >= BASE_FETCH_MIN_INTERVAL_MS) {
+          if (options.refresh || now().getTime() - last >= BASE_FETCH_MIN_INTERVAL_MS) {
             yield* git
               .fetchBranch(context.cwd, "origin", baseBranch)
               .pipe(Effect.mapError(internal));
@@ -623,9 +626,10 @@ export function makeUpstreamPortsService(
               store,
               now,
               today,
-              loadBase: loadBase(context, { fetch: true }).pipe(
-                Effect.map((base) => ({ baseSha: base.baseSha, ledger: base.ledger })),
-              ),
+              loadBase: ({ refresh }) =>
+                loadBase(context, { fetch: true, refresh }).pipe(
+                  Effect.map((base) => ({ baseSha: base.baseSha, ledger: base.ledger })),
+                ),
               deriveRows: (view) =>
                 Effect.gen(function* () {
                   const base = baseCache.get(projectId);
@@ -1252,7 +1256,9 @@ export function makeUpstreamPortsService(
           occurrence?.status === "pending" && occurrence.nextAttemptAt
             ? new Date(occurrence.nextAttemptAt)
             : null;
-        const ghAvailable = deps.github ? yield* deps.github.available(context.cwd) : false;
+        const ghAvailable = deps.github
+          ? yield* deps.github.available(context.cwd).pipe(Effect.orElseSucceed(() => false))
+          : false;
         const triageModel = yield* resolveTriageModel(context);
         const rules = snapshot.base.rules;
         const strip = (run: RunRecord | null) => {
@@ -1536,6 +1542,25 @@ export function makeUpstreamPortsService(
         return { prompt: yield* portPrompt(context, config, snapshot, topics) };
       }).pipe(Effect.mapError(internal));
 
+    const closeLedgerPullRequest = (context: ProjectContext, number: number) =>
+      Effect.gen(function* () {
+        const refuse = (detail: string) =>
+          fail("unavailable", `Close ledger PR #${number} before discarding: ${detail}`);
+        const originUrl = yield* git
+          .remoteUrl(context.cwd, "origin")
+          .pipe(Effect.orElseSucceed(() => null));
+        const repo = originUrl ? parseGitHubRepo(originUrl) : null;
+        if (!deps.github || !repo) return yield* refuse("GitHub is unavailable.");
+        const github = deps.github;
+        const pr = yield* github
+          .findPullRequest({ cwd: context.cwd, repo, number })
+          .pipe(Effect.catch((error) => refuse(error.detail)));
+        if (pr?.state !== "open") return;
+        yield* github
+          .closePullRequest({ cwd: context.cwd, repo, number })
+          .pipe(Effect.catch((error) => refuse(error.detail)));
+      });
+
     const resolvePublication: UpstreamPortsService["resolvePublication"] = (input) =>
       Effect.gen(function* () {
         const context = yield* resolveContext(input.projectId);
@@ -1546,8 +1571,12 @@ export function makeUpstreamPortsService(
             "user",
             Effect.gen(function* () {
               yield* requireWriter(context.cwd);
-              yield* store.discardOpenOps(context.projectId, now().toISOString());
               const publication = yield* store.getPublication(context.projectId);
+              // The open ledger PR still carries the discarded ops; close it first so
+              // it cannot merge them later.
+              if (publication.prNumber !== null && publication.prState !== "merged")
+                yield* closeLedgerPullRequest(context, publication.prNumber);
+              yield* store.discardOpenOps(context.projectId, now().toISOString());
               yield* store.savePublication({
                 ...DEFAULT_PUBLICATION(context.projectId),
                 linksVersion: publication.linksVersion,

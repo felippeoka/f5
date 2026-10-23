@@ -19,6 +19,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { TextGenerationError } from "../git/Errors.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { UpstreamGitHubError } from "./github.ts";
 import { makeUpstreamPortsService, type UpstreamPortsDeps } from "./service.ts";
 import { makeUpstreamStore } from "./store.ts";
 import {
@@ -417,14 +418,20 @@ layer("upstream ports service", (it) => {
           subject: "Squash",
           files: firstTree,
         });
-        fixture.repo.refs.set("refs/remotes/origin/main", merged);
+        // The merge is only on the server, and the base fetch is still throttled:
+        // observing the merged PR must refetch before replaying leftovers.
+        fixture.repo.remoteTips.set("origin/main", merged);
         fixture.gh.prs[0]!.state = "merged";
-        fixture.clock.now = new Date(fixture.clock.now.getTime() + 3 * 60_000);
         yield* service.testing.publishNow(PROJECT_ID);
         overview = yield* service.getOverview(PROJECT_ID);
+        assert.strictEqual(fixture.repo.refs.get("refs/remotes/origin/main"), merged);
         assert.strictEqual(overview.publication.unpublishedOps, 1);
         assert.strictEqual(overview.publication.prNumber, 101);
         assert.strictEqual(fixture.gh.prs.length, 2);
+        // Every PR call targets the origin fork, never the upstream remote.
+        assert.ok(fixture.gh.prs.every((pr) => pr.repo === "o/f5"));
+        assert.ok(fixture.gh.calls.every((call) => call === "bodies" || !call.includes("t3code")));
+        assert.ok(fixture.gh.calls.includes(`create o/f5:${overview.publication.branch}`));
         const ready = yield* service.listTopics({ projectId: PROJECT_ID, list: "ready" });
         assert.strictEqual(ready.topics[0]!.topic.scope, "API only");
       }),
@@ -470,9 +477,49 @@ layer("upstream ports service", (it) => {
       publication = (yield* service.getOverview(PROJECT_ID)).publication;
       assert.strictEqual(publication.pausedReason, null);
       assert.strictEqual(publication.prNumber, 101);
+
+      // Transient push and GitHub failures keep retrying instead of pausing.
+      yield* service.decide({
+        projectId: PROJECT_ID,
+        topicIds: ["pr-1"],
+        decision: { kind: "port" },
+      });
+      fixture.repo.pushFailure = "ssh: connect to host github.com port 22: Operation timed out";
+      for (let attempt = 0; attempt < 5; attempt += 1)
+        yield* service.testing.publishNow(PROJECT_ID);
+      publication = (yield* service.getOverview(PROJECT_ID)).publication;
+      assert.strictEqual(publication.pausedReason, null);
+      assert.match(publication.lastError ?? "", /timed out/u);
+      fixture.repo.pushFailure = null;
+      fixture.gh.failure = new UpstreamGitHubError({
+        operation: "pull request lookup",
+        detail: "GitHub pull request lookup failed (502).",
+        transient: true,
+      });
+      yield* service.resolvePublication({ projectId: PROJECT_ID, action: "retry" });
+      publication = (yield* service.getOverview(PROJECT_ID)).publication;
+      assert.strictEqual(publication.pausedReason, null);
+      assert.strictEqual(publication.lastError, "GitHub pull request lookup failed (502).");
+
+      // Discard closes the open ledger PR, and refuses while it cannot.
+      fixture.gh.failure = new UpstreamGitHubError({
+        operation: "pull request close",
+        detail: "GitHub pull request close failed (403).",
+        transient: false,
+      });
+      const refused = yield* service
+        .resolvePublication({ projectId: PROJECT_ID, action: "discard" })
+        .pipe(Effect.flip);
+      assert.strictEqual(refused.code, "unavailable");
+      assert.strictEqual(fixture.gh.prs[1]!.state, "open");
+      assert.ok((yield* service.getOverview(PROJECT_ID)).publication.unpublishedOps > 0);
+      fixture.gh.failure = null;
       yield* service.resolvePublication({ projectId: PROJECT_ID, action: "discard" });
+      assert.strictEqual(fixture.gh.prs[1]!.state, "closed");
+      assert.ok(fixture.gh.calls.includes("close 101"));
       const after = yield* service.getOverview(PROJECT_ID);
       assert.strictEqual(after.publication.unpublishedOps, 0);
+      assert.strictEqual(after.publication.prNumber, null);
       assert.strictEqual(after.counts.inbox, 1);
     }),
   );
