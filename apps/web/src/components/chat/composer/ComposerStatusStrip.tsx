@@ -107,7 +107,8 @@ export function StatusChip(props: {
         sideOffset={6}
         aria-label={props.popupLabel}
         {...(props.initialFocus !== undefined ? { initialFocus: props.initialFocus } : {})}
-        className="w-[min(28rem,calc(100vw-2rem))] [&>[data-slot=popover-viewport]]:max-h-[min(50dvh,26rem,var(--available-height))] [&>[data-slot=popover-viewport]]:p-0"
+        // No --available-height in the min(): Base UI sets it to max-content while measuring, which voids the clamp and detaches tall popovers from the chip.
+        className="w-[min(28rem,calc(100vw-2rem))] [&>[data-slot=popover-viewport]]:max-h-[min(50dvh,26rem)] [&>[data-slot=popover-viewport]]:p-0"
       >
         {props.children}
       </PopoverPopup>
