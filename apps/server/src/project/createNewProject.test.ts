@@ -38,7 +38,7 @@ describe("new project from a name", () => {
         isDefaultProfile: true,
         homeDir: "/h",
       }),
-    ).toBe("/h/f5-projects");
+    ).toBe(Path.join("/h", "f5-projects"));
     expect(
       resolveProjectsRoot({
         setting: "",
@@ -46,7 +46,7 @@ describe("new project from a name", () => {
         isDefaultProfile: false,
         homeDir: "/h",
       }),
-    ).toBe("/h/f5-projects-work");
+    ).toBe(Path.join("/h", "f5-projects-work"));
     expect(
       resolveProjectsRoot({
         setting: " /srv/code ",
@@ -54,7 +54,7 @@ describe("new project from a name", () => {
         isDefaultProfile: false,
         homeDir: "/h",
       }),
-    ).toBe("/srv/code");
+    ).toBe(Path.resolve("/srv/code"));
   });
 
   it("gives a taken name the next free suffix", async () => {

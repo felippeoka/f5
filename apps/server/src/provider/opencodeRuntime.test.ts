@@ -230,6 +230,15 @@ describe("resolveOpenCodeInvocation", () => {
   );
 });
 
+function within<T>(promise: Promise<T>, waitingFor: string, ms = 5_000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out waiting for ${waitingFor}`)), ms).unref(),
+    ),
+  ]);
+}
+
 it("aborts an in-flight SDK request when the owning server lifetime ends", async () => {
   const { createServer } = await import("node:http");
   const received = Promise.withResolvers<void>();
@@ -248,16 +257,17 @@ it("aborts an in-flight SDK request when the owning server lifetime ends", async
     );
     const client = runtime.createOpenCodeSdkClient({
       baseUrl: `http://127.0.0.1:${address.port}`,
-      directory: process.cwd(),
+      directory: "/workspace",
       signal: lifetime.signal,
     });
     const result = client.session.list().then(
       () => "completed",
       () => "aborted",
     );
-    await received.promise;
+    // Bounded phases name the step that stalls instead of ending in the test timeout.
+    await within(received.promise, "the request to reach the server");
     lifetime.abort(new Error("server exited"));
-    expect(await result).toBe("aborted");
+    expect(await within(result, "the request to abort")).toBe("aborted");
   } finally {
     lifetime.abort();
     server.closeAllConnections();

@@ -1,6 +1,7 @@
 import * as Path from "node:path";
 import { createLargeIgnoredDependencyTree } from "../git/ignoredPaths.testUtils.ts";
 import { GitCore } from "../git/Services/GitCore.ts";
+import { canonicalWorktreePath } from "../git/worktreePaths.ts";
 import {
   automationLayer,
   git as runGit,
@@ -119,8 +120,12 @@ describe("worktree preparation", () => {
           const receipts = makeMemoryWorktreePreparations();
           const receipt = yield* receipts.allocate({
             operationId: "completed-setup",
-            repositoryIdentity: yield* core.resolveCommonDir(repo.root),
-            projectIdentity: repo.root,
+            // Preparation compares canonical paths; Windows short names and Git's forward slashes
+            // differ from the raw ones.
+            repositoryIdentity: yield* core
+              .resolveCommonDir(repo.root)
+              .pipe(Effect.flatMap((dir) => Effect.promise(() => canonicalWorktreePath(dir)))),
+            projectIdentity: yield* Effect.promise(() => canonicalWorktreePath(repo.root)),
             owner: `thread:${input.threadId}`,
             requestedBase: "main",
             baseOid: runGit(repo.root, "rev-parse", "HEAD"),

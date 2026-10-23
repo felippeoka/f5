@@ -380,7 +380,8 @@ it("closes a backpressured event stream before waiting for owned session cleanup
             ),
             { until: (done) => done },
           ).pipe(Effect.timeout("5 seconds"));
-          yield* Scope.close(owner, Exit.void).pipe(Effect.timeout("2 seconds"));
+          // A backpressured close never finishes; Windows tree kills alone may take 2 seconds.
+          yield* Scope.close(owner, Exit.void).pipe(Effect.timeout("5 seconds"));
         }),
       ),
     );

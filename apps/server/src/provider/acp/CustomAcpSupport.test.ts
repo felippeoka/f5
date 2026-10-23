@@ -38,8 +38,9 @@ async function fixture(copilot = false) {
   let command = wrapper;
   if (copilot) {
     command = path.join(cwd, process.platform === "win32" ? "copilot.cmd" : "copilot");
+    // The resolver runs only standard npm shims, which name a script next to the shim.
     if (process.platform === "win32")
-      await writeFile(command, `@"${process.execPath}" "${wrapper}" %*\r\n`);
+      await writeFile(command, `@echo off\r\nnode "%~dp0\\${path.basename(wrapper)}" %*\r\n`);
     else await copyFile(wrapper, command);
   }
   const config = Schema.decodeUnknownSync(AcpSettings)({
