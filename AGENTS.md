@@ -5,9 +5,7 @@
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
 - Run `bun run test:full` at least once before considering a task completed. It includes the fast workspace suite and the exhaustive real-Git matrix.
 - NEVER run `bun test`. Always use `bun run test` or `bun run test:full` (runs Vitest).
-- `bun run upstream-ports:check` must pass for upstream-port work. The single ledger’s pinned first-parent
-  intervals define coverage; refresh it only from the read-only `upstream` remote with
-  `bun scripts/check-upstream-ports.ts --refresh`.
+- `bun run upstream-ports:check` must pass. Upstream coverage refresh is paused until F5's Upstream page ships; never hand-edit `upstream/intervals`, `upstream/legacy` or `upstream/topics`.
 
 ## Claude Token Usage and Sub-agents
 

@@ -63,6 +63,8 @@ export * from "./workflowSummary";
 export * from "./worktrees";
 
 export * from "./scheduledTasks";
+export * from "./upstreamPorts";
+
 export * from "./threadSettlement";
 
 export * from "./mcpApps";

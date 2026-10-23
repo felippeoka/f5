@@ -418,6 +418,18 @@
     "./turnStateTransitions": {
       "types": "./src/turnStateTransitions.ts",
       "import": "./src/turnStateTransitions.ts"
+    },
+    "./upstreamPorts": {
+      "types": "./src/upstreamPorts.ts",
+      "import": "./src/upstreamPorts.ts"
+    },
+    "./upstreamPortsArchive": {
+      "types": "./src/upstreamPortsArchive.ts",
+      "import": "./src/upstreamPortsArchive.ts"
+    },
+    "./upstreamPortsPrompts": {
+      "types": "./src/upstreamPortsPrompts.ts",
+      "import": "./src/upstreamPortsPrompts.ts"
     }
   },
   "scripts": {

@@ -110,12 +110,12 @@
     {
       "upstreamSha": "0109670411d13b9e380766e98b386b2f756ecf5b",
       "subject": "feat(threads): add per-thread auto-settle switch (#11846)",
-      "reason": "Equivalent: the persisted per-thread Auto-settle command is retained, and automatic settlement rejects a thread that has it off. Upstream change: feat(threads): add per-thread auto-settle switch (#11846)",
+      "reason": "Equivalent: the thread header has a persisted per-thread Auto-settle switch, and automatic settlement rejects a thread that has it off. Upstream change: feat(threads): add per-thread auto-settle switch (#11846)",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "f5Shas": ["8f0e182ac6a77c5bbbbbbaeb3ecad8454ecf00ca"],
       "evidence": [
-        "apps/server/src/orchestration/decider.ts:857",
+        "apps/web/src/components/thread/ThreadSettlementControl.tsx:42",
         "apps/web/src/components/thread/ThreadSettlementControl.browser.tsx:68",
         "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:161"
       ]
@@ -3073,7 +3073,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/orchestration/projectSkills.ts:499",
-        "packages/shared/src/slashCommands.ts:70"
+        "apps/web/src/components/ChatView.logic.ts:80"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -17860,7 +17860,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/orchestration/projectSkills.ts:499",
-        "packages/shared/src/slashCommands.ts:245"
+        "apps/web/src/components/ChatView.logic.ts:257"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -19186,7 +19186,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "packages/shared/src/slashCommands.ts:70",
+        "apps/web/src/components/ChatView.logic.ts:80",
         "apps/server/src/provider/supportedSlashCommands.ts:14"
       ],
       "f5Shas": [
@@ -21760,7 +21760,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "packages/shared/src/slashCommands.ts:70",
+        "apps/web/src/components/ChatView.logic.ts:80",
         "apps/web/src/components/ChatView.tsx:2275"
       ],
       "f5Shas": [
@@ -25585,7 +25585,7 @@
       "reason": "Only valid, host-compatible, non-reserved skill names become slash completions.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
-      "evidence": ["packages/shared/src/slashCommands.ts:70"],
+      "evidence": ["apps/web/src/components/ChatView.logic.ts:80"],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
         "9c562a4c2868e31caad697b11c56a6fba633a6ff",
@@ -25711,7 +25711,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/orchestration/projectSkills.ts:499",
-        "packages/shared/src/slashCommands.ts:245"
+        "apps/web/src/components/ChatView.logic.ts:257"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -28244,7 +28244,7 @@
       "disposition": "ported",
       "evidence": [
         "apps/server/src/provider/Layers/OpenCodeAdapter.ts:1412",
-        "packages/shared/src/slashCommands.ts:70"
+        "apps/web/src/components/ChatView.logic.ts:80"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -29618,8 +29618,8 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/web/src/components/ChatView.logic.ts:745",
-        "apps/web/src/components/ChatView.logic.test.ts:1327"
+        "apps/web/src/components/ChatView.logic.ts:904",
+        "apps/web/src/components/ChatView.logic.test.ts:1184"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -31599,7 +31599,7 @@
       "reason": "Combine native slash commands with discovered project and provider skills in the composer.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
-      "evidence": ["packages/shared/src/slashCommands.ts:70"],
+      "evidence": ["apps/web/src/components/ChatView.logic.ts:80"],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
         "9c562a4c2868e31caad697b11c56a6fba633a6ff",
@@ -32000,7 +32000,7 @@
       "reason": "Composer skill selections retain structured invocation metadata and explicit source paths when the provider has no matching native skill.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
-      "evidence": ["packages/shared/src/slashCommands.ts:170"],
+      "evidence": ["apps/web/src/components/ChatView.logic.ts:183"],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
         "9c562a4c2868e31caad697b11c56a6fba633a6ff",

@@ -32,6 +32,7 @@ describe("cached draft defaults", () => {
       sourceFile: "f5.json" as const,
       defaultThreadEnvMode: null,
       iconPath: null,
+      upstream: null,
       diagnostics: [],
     };
     expect(cachedProjectThreadEnvModeSource(id, undefined)).toBeNull();
