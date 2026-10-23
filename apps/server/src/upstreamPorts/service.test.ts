@@ -227,6 +227,33 @@ layer("upstream ports service", (it) => {
     }),
   );
 
+  it.effect("starts one run when two starts race, and the database allows one running row", () =>
+    Effect.gen(function* () {
+      const fixture = yield* setup();
+      const service = yield* fixture.make();
+      const start = service
+        .run({ projectId: PROJECT_ID, kind: "upstream", triage: "rules-only" })
+        .pipe(Effect.result);
+      const results = yield* Effect.all([start, start], { concurrency: "unbounded" });
+      yield* service.testing.awaitIdle;
+      assert.deepStrictEqual(
+        results.map((result) => result._tag),
+        ["Success", "Failure"],
+      );
+      const failure = results[1]!;
+      assert.strictEqual(failure._tag === "Failure" ? failure.failure.code : null, "busy");
+      const sql = yield* SqlClient.SqlClient;
+      const runs = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM upstream_port_runs`;
+      assert.strictEqual(runs[0]!.count, 1);
+
+      const insert = (runId: string) =>
+        sql`INSERT INTO upstream_port_runs (run_id, project_id, kind, trigger, triage, started_at, status)
+          VALUES (${runId}, 'other', 'upstream', 'manual', 'rules-only', '2026-10-22', 'running')`;
+      yield* insert("running-1");
+      assert.strictEqual((yield* insert("running-2").pipe(Effect.result))._tag, "Failure");
+    }),
+  );
+
   it.effect("auto-skips confident LLM skips and keeps the rest in the inbox", () =>
     Effect.gen(function* () {
       const fixture = yield* setup({ count: 3 });
@@ -435,6 +462,36 @@ layer("upstream ports service", (it) => {
         const ready = yield* service.listTopics({ projectId: PROJECT_ID, list: "ready" });
         assert.strictEqual(ready.topics[0]!.topic.scope, "API only");
       }),
+  );
+
+  it.effect("refuses to record or publish over a base ledger file it cannot parse", () =>
+    Effect.gen(function* () {
+      const fixture = yield* setup();
+      const service = yield* fixture.make();
+      yield* service.decide({
+        projectId: PROJECT_ID,
+        topicIds: ["pr-1"],
+        decision: { kind: "port" },
+      });
+      const base = fixture.repo.refs.get("refs/remotes/origin/main")!;
+      const broken = fixture.repo.commit({
+        parent: base,
+        subject: "Break the ledger",
+        files: new Map([["upstream/topics/2026-10.json", "{not json"]]),
+      });
+      fixture.repo.refs.set("refs/remotes/origin/main", broken);
+      const refused = yield* service
+        .decide({ projectId: PROJECT_ID, topicIds: ["pr-1"], decision: { kind: "watch" } })
+        .pipe(Effect.flip);
+      assert.strictEqual(refused.code, "unavailable");
+      assert.include(refused.message, "upstream/topics/2026-10.json");
+      yield* service.testing.publishNow(PROJECT_ID);
+      const publication = (yield* service.getOverview(PROJECT_ID)).publication;
+      assert.strictEqual(publication.pausedReason, "conflict");
+      assert.include(publication.lastError ?? "", "upstream/topics/2026-10.json");
+      assert.isFalse(fixture.repo.calls.some((call) => call.startsWith("push")));
+      assert.deepStrictEqual(fixture.gh.prs, []);
+    }),
   );
 
   it.effect("pauses on a closed PR until republish, and on push failures until retry", () =>

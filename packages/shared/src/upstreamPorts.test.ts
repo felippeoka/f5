@@ -13,6 +13,7 @@ import {
   intervalPath,
   legacyPath,
   matchAutoSkipRule,
+  membersByTopic,
   opEffectPresent,
   parseLedgerFiles,
   parseRules,
@@ -144,9 +145,11 @@ describe("canonicalJson", () => {
     value.topics[0].reason = null;
     const withNull = new Map(files).set(path, canonicalJson(value));
     expect(parseLedgerFiles(withNull).errors.join("\n")).toContain(path);
+    expect(parseLedgerFiles(withNull).unparsed).toEqual([path]);
 
     const reformatted = new Map(files).set(path, JSON.stringify(JSON.parse(files.get(path)!)));
     expect(parseLedgerFiles(reformatted).errors.join("\n")).toContain("not canonical");
+    expect(parseLedgerFiles(reformatted).unparsed).toEqual([]);
   });
 
   it("checks file names and month membership", () => {
@@ -584,6 +587,36 @@ describe("applyOps and opEffectPresent", () => {
       { kind: "interval", file: next, topics: [topic("pr-1", { title: "different" })] },
     ]);
     expect(applied.conflicts.join("\n")).toContain("topic id pr-1");
+  });
+});
+
+describe("membersByTopic", () => {
+  it("lists a topic spanning legacy batches and intervals oldest first", () => {
+    const ledger: UpstreamLedger = {
+      intervals: [
+        interval(1, ARCHIVE_TARGET, [
+          { sha: sha("b2"), topic: "pr-1" },
+          { sha: sha("b1"), topic: "pr-1" },
+        ]),
+        interval(2, sha("b2"), [
+          { sha: sha("c2"), topic: "pr-1" },
+          { sha: sha("c1"), topic: "pr-1" },
+        ]),
+      ],
+      legacy: [legacyBatch(1, [{ sha: sha("d1"), topic: "pr-1" }])],
+      topics: [topic("pr-1")],
+    };
+    expect(
+      membersByTopic(ledger)
+        .get("pr-1")!
+        .map((member) => [member.sha, member.source]),
+    ).toEqual([
+      [sha("d1"), "legacy batch 1"],
+      [sha("b1"), "interval 1"],
+      [sha("b2"), "interval 1"],
+      [sha("c1"), "interval 2"],
+      [sha("c2"), "interval 2"],
+    ]);
   });
 });
 

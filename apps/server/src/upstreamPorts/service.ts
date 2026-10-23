@@ -98,6 +98,7 @@ import {
   PUBLISH_DEBOUNCE_MS,
   PUBLISH_INTERVAL_MS,
   publishStep,
+  unparsedLedgerMessage,
 } from "./publisher.ts";
 import { runTriage, type ViewSnapshot } from "./runs.ts";
 import {
@@ -229,6 +230,8 @@ interface BaseState {
   readonly archive: Schema6Archive | null;
   readonly trailers: TrailerIndex;
   readonly errors: ReadonlyArray<string>;
+  /** Repo-relative ledger files that failed to decode and are missing from `ledger`. */
+  readonly unparsed: ReadonlyArray<string>;
 }
 
 const decodeSettings = Schema.decodeUnknownSync(UpstreamPortsSettings);
@@ -466,6 +469,7 @@ export function makeUpstreamPortsService(
             archive: null,
             trailers: EMPTY_TRAILERS,
             errors: [`origin/${baseBranch} is missing; fetch the repository first.`],
+            unparsed: [],
           };
           baseCache.set(context.projectId, empty);
           return empty;
@@ -506,6 +510,7 @@ export function makeUpstreamPortsService(
           archive,
           trailers,
           errors,
+          unparsed: parsed.unparsed.map((file) => `${prefix}${file}`),
         };
         baseCache.set(context.projectId, next);
         viewCache.delete(context.projectId);
@@ -542,6 +547,12 @@ export function makeUpstreamPortsService(
         return { base, view, rows, links, publication, revision, maxSeq };
       });
 
+    /** Recording over a partial ledger would drop or rewrite the files that failed to parse. */
+    const requireParsedLedger = (base: BaseState) =>
+      base.unparsed.length === 0
+        ? Effect.void
+        : fail("unavailable", unparsedLedgerMessage(base.baseBranch, base.unparsed));
+
     const requireRules = (base: BaseState) =>
       base.rules
         ? Effect.succeed(base.rules)
@@ -564,6 +575,7 @@ export function makeUpstreamPortsService(
           Effect.gen(function* () {
             yield* requireWriter(context.cwd);
             const snapshot = yield* currentView(context);
+            yield* requireParsedLedger(snapshot.base);
             const check = buildView(
               snapshot.base.baseSha,
               snapshot.view.ledger,
@@ -628,7 +640,11 @@ export function makeUpstreamPortsService(
               today,
               loadBase: ({ refresh }) =>
                 loadBase(context, { fetch: true, refresh }).pipe(
-                  Effect.map((base) => ({ baseSha: base.baseSha, ledger: base.ledger })),
+                  Effect.map((base) => ({
+                    baseSha: base.baseSha,
+                    ledger: base.ledger,
+                    unparsed: base.unparsed,
+                  })),
                 ),
               deriveRows: (view) =>
                 Effect.gen(function* () {
@@ -769,114 +785,116 @@ export function makeUpstreamPortsService(
         yield* requireWriter(context.cwd);
         if (activeRuns.has(context.projectId))
           return yield* fail("busy", "A run is already in progress for this project.");
-        const active = yield* store.activeRun(context.projectId).pipe(Effect.mapError(internal));
-        if (active) return yield* fail("busy", "A run is already in progress for this project.");
-        if (input.kind === "upstream") {
-          const remote = yield* remoteStatus(context, config);
-          if (remote.status !== "ok")
-            return yield* fail(
-              "invalid",
-              remote.status === "missing"
-                ? `The ${config.remote} remote is missing; add it first.`
-                : `The ${config.remote} remote points at ${remote.url}, not ${config.repository}.`,
-            );
-        }
-        let triage: TriageCall | null = null;
-        let model = "rules";
-        if (input.triage === "llm") {
-          const selection = yield* resolveTriageModel(context);
-          triage = selection ? triageCallFor(selection) : null;
-          if (!selection || !triage)
-            return yield* fail(
-              "unavailable",
-              "No Claude instance is available for triage. Run rules only instead.",
-            );
-          model = selection.model;
-        }
-        const snapshot = yield* currentView(context);
-        const rules = yield* requireRules(snapshot.base);
-        const runId = mintId();
-        const record: RunRecord = {
-          runId,
-          projectId: context.projectId,
-          kind: input.kind,
-          trigger: input.trigger,
-          triage: input.triage,
-          occurrenceDueAt: input.occurrenceDueAt ?? null,
-          status: "running",
-          startedAt: now().toISOString(),
-          finishedAt: null,
-          failureKind: null,
-          targetSha: null,
-          commitCount: 0,
-          inboxCount: 0,
-          autoDecidedCount: 0,
-          remainingCount: 0,
-          llmCalls: 0,
-          errorMessage: null,
-        };
+        // Reserve before anything yields, so a double click or a racing scheduler
+        // tick cannot start a second run. The forked run releases it when it ends.
         activeRuns.add(context.projectId);
-        yield* store.insertRun(record).pipe(
-          Effect.mapError(internal),
-          Effect.tapError(() => Effect.sync(() => activeRuns.delete(context.projectId))),
-        );
-        if (record.occurrenceDueAt) {
-          const occurrence = yield* store
-            .getOccurrence(context.projectId, record.occurrenceDueAt)
-            .pipe(Effect.orElseSucceed(() => null));
-          if (occurrence)
-            yield* store
-              .saveOccurrence({ ...occurrence, status: "running", lastRunId: runId })
-              .pipe(Effect.ignore);
-        }
-        yield* emit(context.projectId, "run-started");
-        const prBodies =
-          deps.github && parseGitHubRepo(config.repository)
-            ? (numbers: ReadonlyArray<number>) =>
-                deps.github!.fetchPullRequestBodies({
-                  cwd: context.cwd,
-                  repo: parseGitHubRepo(config.repository)!,
-                  numbers,
-                })
-            : null;
-        const viewSnapshot = (fetch: boolean) =>
-          currentView(context, { fetch }).pipe(
-            Effect.map((value): ViewSnapshot => ({ view: value.view, rows: value.rows })),
+        return yield* Effect.gen(function* () {
+          const active = yield* store.activeRun(context.projectId).pipe(Effect.mapError(internal));
+          if (active) return yield* fail("busy", "A run is already in progress for this project.");
+          if (input.kind === "upstream") {
+            const remote = yield* remoteStatus(context, config);
+            if (remote.status !== "ok")
+              return yield* fail(
+                "invalid",
+                remote.status === "missing"
+                  ? `The ${config.remote} remote is missing; add it first.`
+                  : `The ${config.remote} remote points at ${remote.url}, not ${config.repository}.`,
+              );
+          }
+          let triage: TriageCall | null = null;
+          let model = "rules";
+          if (input.triage === "llm") {
+            const selection = yield* resolveTriageModel(context);
+            triage = selection ? triageCallFor(selection) : null;
+            if (!selection || !triage)
+              return yield* fail(
+                "unavailable",
+                "No Claude instance is available for triage. Run rules only instead.",
+              );
+            model = selection.model;
+          }
+          const snapshot = yield* currentView(context);
+          yield* requireParsedLedger(snapshot.base);
+          const rules = yield* requireRules(snapshot.base);
+          const runId = mintId();
+          const record: RunRecord = {
+            runId,
+            projectId: context.projectId,
+            kind: input.kind,
+            trigger: input.trigger,
+            triage: input.triage,
+            occurrenceDueAt: input.occurrenceDueAt ?? null,
+            status: "running",
+            startedAt: now().toISOString(),
+            finishedAt: null,
+            failureKind: null,
+            targetSha: null,
+            commitCount: 0,
+            inboxCount: 0,
+            autoDecidedCount: 0,
+            remainingCount: 0,
+            llmCalls: 0,
+            errorMessage: null,
+          };
+          yield* store.insertRun(record).pipe(Effect.mapError(internal));
+          if (record.occurrenceDueAt) {
+            const occurrence = yield* store
+              .getOccurrence(context.projectId, record.occurrenceDueAt)
+              .pipe(Effect.orElseSucceed(() => null));
+            if (occurrence)
+              yield* store
+                .saveOccurrence({ ...occurrence, status: "running", lastRunId: runId })
+                .pipe(Effect.ignore);
+          }
+          yield* emit(context.projectId, "run-started");
+          const prBodies =
+            deps.github && parseGitHubRepo(config.repository)
+              ? (numbers: ReadonlyArray<number>) =>
+                  deps.github!.fetchPullRequestBodies({
+                    cwd: context.cwd,
+                    repo: parseGitHubRepo(config.repository)!,
+                    numbers,
+                  })
+              : null;
+          const viewSnapshot = (fetch: boolean) =>
+            currentView(context, { fetch }).pipe(
+              Effect.map((value): ViewSnapshot => ({ view: value.view, rows: value.rows })),
+            );
+          const work = runTriage(
+            {
+              cwd: context.cwd,
+              config,
+              baseBranch: snapshot.base.baseBranch,
+              git,
+              prBodies,
+              rules,
+              policy: snapshot.base.policy,
+              archive: snapshot.base.archive,
+              triage,
+              model,
+              now,
+              today,
+              refreshView: viewSnapshot(true),
+              currentView: viewSnapshot(false),
+              record: (op, newInbox) => recordOps(context, [op], "background", newInbox),
+              progress: (run) => store.updateRun(run).pipe(Effect.ignore),
+              ...(deps.runLimits ? { limits: deps.runLimits } : {}),
+            },
+            record,
+          ).pipe(
+            Effect.tap((finished) =>
+              Effect.gen(function* () {
+                yield* store.updateRun(finished).pipe(Effect.ignore);
+                yield* finishScheduled(finished).pipe(Effect.ignore);
+                yield* emit(context.projectId, "run-finished", finished.inboxCount);
+                schedulePublish(context.projectId, 0);
+              }),
+            ),
+            Effect.ensuring(Effect.sync(() => activeRuns.delete(context.projectId))),
           );
-        const work = runTriage(
-          {
-            cwd: context.cwd,
-            config,
-            baseBranch: snapshot.base.baseBranch,
-            git,
-            prBodies,
-            rules,
-            policy: snapshot.base.policy,
-            archive: snapshot.base.archive,
-            triage,
-            model,
-            now,
-            today,
-            refreshView: viewSnapshot(true),
-            currentView: viewSnapshot(false),
-            record: (op, newInbox) => recordOps(context, [op], "background", newInbox),
-            progress: (run) => store.updateRun(run).pipe(Effect.ignore),
-            ...(deps.runLimits ? { limits: deps.runLimits } : {}),
-          },
-          record,
-        ).pipe(
-          Effect.tap((finished) =>
-            Effect.gen(function* () {
-              yield* store.updateRun(finished).pipe(Effect.ignore);
-              yield* finishScheduled(finished).pipe(Effect.ignore);
-              yield* emit(context.projectId, "run-finished", finished.inboxCount);
-              schedulePublish(context.projectId, 0);
-            }),
-          ),
-          Effect.ensuring(Effect.sync(() => activeRuns.delete(context.projectId))),
-        );
-        yield* track(work);
-        return { runId };
+          yield* track(work);
+          return { runId };
+        }).pipe(Effect.onError(() => Effect.sync(() => activeRuns.delete(context.projectId))));
       });
 
     // ── Scheduler ──
@@ -1039,9 +1057,10 @@ export function makeUpstreamPortsService(
       Effect.gen(function* () {
         const rowsById = new Map(snapshot.rows.map((row) => [row.topic.id, row]));
         const commitsFor = (topic: UpstreamTopic) =>
-          [...(snapshot.view.members.get(topic.id) ?? [])]
-            .toReversed()
-            .map((member) => ({ sha: member.sha, subject: member.subject }));
+          (snapshot.view.members.get(topic.id) ?? []).map((member) => ({
+            sha: member.sha,
+            subject: member.subject,
+          }));
         const shas = topics.flatMap((topic) => commitsFor(topic).map((commit) => commit.sha));
         const topicPaths = yield* git
           .topicPaths(context.cwd, shas)
@@ -1135,6 +1154,7 @@ export function makeUpstreamPortsService(
         yield* requireConfig(context);
         yield* requireWriter(context.cwd);
         const snapshot = yield* currentView(context);
+        yield* requireParsedLedger(snapshot.base);
         const rules = yield* requireRules(snapshot.base);
         const rowsById = new Map(snapshot.rows.map((row) => [row.topic.id, row]));
         const ops: UpstreamLedgerOp[] = [];

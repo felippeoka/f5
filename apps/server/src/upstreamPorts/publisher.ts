@@ -133,6 +133,10 @@ export function mergedOpIds(base: UpstreamLedger, ops: ReadonlyArray<OpRecord>):
 }
 
 /** The pause a push failure needs, or null when retrying later may succeed. */
+export function unparsedLedgerMessage(baseBranch: string, files: ReadonlyArray<string>): string {
+  return `Fix the ledger files on origin/${baseBranch} that F5 cannot read: ${files.slice(0, 3).join(", ")}${files.length > 3 ? ", …" : ""}.`;
+}
+
 export function classifyPushFailure(detail: string): UpstreamPublicationPauseReason | null {
   if (
     /non-fast-forward|\[rejected\]|fetch first|stale info|protected branch|pre-receive hook declined/iu.test(
@@ -166,9 +170,15 @@ export interface PublisherContext {
    * Fetches `origin/<base>` and returns its ledger. The caller throttles
    * fetches unless `refresh` is set.
    */
-  readonly loadBase: (options: {
-    readonly refresh: boolean;
-  }) => Effect.Effect<{ readonly baseSha: string | null; readonly ledger: UpstreamLedger }, Error>;
+  readonly loadBase: (options: { readonly refresh: boolean }) => Effect.Effect<
+    {
+      readonly baseSha: string | null;
+      readonly ledger: UpstreamLedger;
+      /** Ledger files that failed to parse; publishing would drop their content. */
+      readonly unparsed: ReadonlyArray<string>;
+    },
+    Error
+  >;
   readonly deriveRows: (view: LedgerView) => Effect.Effect<DerivedRow[]>;
   readonly isWriter: Effect.Effect<boolean>;
   readonly resolveBranchName: (name: string) => Effect.Effect<string, Error>;
@@ -262,6 +272,11 @@ export function publishStep(
     const baseSha = base.success.baseSha;
     if (baseSha === null)
       return yield* pause("conflict", `origin/${context.baseBranch} is missing.`);
+    if (base.success.unparsed.length > 0)
+      return yield* pause(
+        "conflict",
+        unparsedLedgerMessage(context.baseBranch, base.success.unparsed),
+      );
 
     const view = buildView(baseSha, base.success.ledger, open);
     if (view.conflicts.length)
