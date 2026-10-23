@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { applyArchiveTestCommand } from "../workflowArchive.testUtils.ts";
 import {
   CheckpointRef,
@@ -634,6 +636,7 @@ async function createHarness(
       Layer.provideMerge(Layer.succeed(OrchestrationEngineService, engine)),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
+          searchThread: () => Effect.die("unused thread search"),
           getSnapshot: () =>
             Effect.suspend(() => {
               projectionSnapshotCallCount += 1;
@@ -1851,6 +1854,220 @@ describe("WorkflowService", () => {
       ).toContain("# Retry safety");
     },
   );
+  // Mirrors WorkflowService's stable review thread id for a reviewed draft turn.
+  function reviewThreadIdForDraft(branchId: "a" | "b", slot: "cross" | "self", turn: string) {
+    const digest = createHash("sha256")
+      .update(["plan-review-thread", "workflow-1", branchId, slot, turn].join("\0"))
+      .digest("hex");
+    return ThreadId.makeUnsafe(
+      `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`,
+    );
+  }
+  function completedReviewsForDraft(branchId: "a" | "b", turn: string) {
+    return (["cross", "self"] as const).map((slot) => ({
+      slot,
+      threadId: reviewThreadIdForDraft(branchId, slot, turn),
+      outputFilePath: null,
+      status: "completed" as const,
+      error: null,
+      retryCount: 0,
+      lastRetryAt: null,
+      updatedAt: NOW,
+    }));
+  }
+  // An author thread holding the reviewed draft and a later revised document.
+  function draftAndRevisionThread(
+    id: ThreadId,
+    draftTurn: string,
+    revisionTurn: string,
+    revisionMarkdown: string,
+    revisedAt: string,
+  ) {
+    const thread = completedDocumentThread(id, revisionTurn, revisionMarkdown, revisedAt);
+    return {
+      ...thread,
+      proposedPlans: [
+        {
+          id: `plan-${draftTurn}`,
+          turnId: TurnId.makeUnsafe(draftTurn),
+          planMarkdown: documentMarkdown,
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+        ...thread.proposedPlans,
+      ],
+    };
+  }
+
+  it("records an author turn after completed reviews as a revision despite a stale authoring stage", async () => {
+    const base = documentWorkflow({ readerReviewEnabled: false });
+    const failedAt = new Date(Date.now() + 1_000).toISOString();
+    const revisedAt = new Date(Date.now() + 2_000).toISOString();
+    const revisedMarkdown = documentMarkdown.replace("# Retry safety", "# Revised A");
+    harness = await createHarness(
+      makeReadModel({
+        workflow: {
+          ...base,
+          branchA: {
+            ...base.branchA,
+            status: "error",
+            errorStage: "authoring",
+            error: "Invalid document: The response must start with a # title heading.",
+            planTurnId: "draft-a",
+            revisionTurnId: null,
+            reviews: completedReviewsForDraft("a", "draft-a"),
+            updatedAt: failedAt,
+          },
+          branchB: {
+            ...base.branchB,
+            status: "error",
+            errorStage: "authoring",
+            error: "Paused for test",
+          },
+          merge: { ...base.merge, threadId: null, status: "not_started" },
+        },
+        threads: [
+          draftAndRevisionThread(
+            base.branchA.authorThreadId,
+            "draft-a",
+            "revision-a2",
+            revisedMarkdown,
+            revisedAt,
+          ),
+        ],
+      }),
+    );
+    await harness.start();
+    await waitFor(() => harness!.getSnapshot().planningWorkflows[0]!.branchA.status === "revised");
+    const branchA = harness.getSnapshot().planningWorkflows[0]!.branchA;
+    expect(branchA.planTurnId).toBe("draft-a");
+    expect(branchA.revisionTurnId).toBe("revision-a2");
+    expect(turnStartsForThread(harness.dispatched, base.branchA.authorThreadId)).toHaveLength(0);
+  });
+
+  it("repairs revisions recorded as fresh drafts on startup and starts the merge", async () => {
+    const base = documentWorkflow({ readerReviewEnabled: false });
+    const revisedAt = new Date(Date.now() + 2_000).toISOString();
+    const revised = (label: string) => documentMarkdown.replace("# Retry safety", `# ${label}`);
+    harness = await createHarness(
+      makeReadModel({
+        workflow: {
+          ...base,
+          branchA: {
+            ...base.branchA,
+            status: "plan_saved",
+            planTurnId: "revision-a2",
+            revisionTurnId: null,
+            reviews: completedReviewsForDraft("a", "draft-a"),
+          },
+          branchB: {
+            ...base.branchB,
+            status: "plan_saved",
+            planTurnId: "revision-b2",
+            revisionTurnId: null,
+            reviews: completedReviewsForDraft("b", "draft-b"),
+          },
+          merge: { ...base.merge, threadId: null, status: "not_started" },
+        },
+        threads: [
+          draftAndRevisionThread(
+            base.branchA.authorThreadId,
+            "draft-a",
+            "revision-a2",
+            revised("Revised A"),
+            revisedAt,
+          ),
+          draftAndRevisionThread(
+            base.branchB.authorThreadId,
+            "draft-b",
+            "revision-b2",
+            revised("Revised B"),
+            revisedAt,
+          ),
+        ],
+      }),
+    );
+    await harness.start();
+    await waitFor(
+      () => harness!.getSnapshot().planningWorkflows[0]!.merge.status === "in_progress",
+    );
+    const current = harness.getSnapshot().planningWorkflows[0]!;
+    expect(current.branchA).toMatchObject({
+      status: "revised",
+      planTurnId: "draft-a",
+      revisionTurnId: "revision-a2",
+    });
+    expect(current.branchB).toMatchObject({
+      status: "revised",
+      planTurnId: "draft-b",
+      revisionTurnId: "revision-b2",
+    });
+    await waitFor(
+      () => turnStartsForThread(harness!.dispatched, current.merge.threadId!).length > 0,
+    );
+    const mergePrompt = turnStartsForThread(harness.dispatched, current.merge.threadId!)[0]!.message
+      .text;
+    expect(mergePrompt).toContain("# Revised A");
+    expect(mergePrompt).toContain("# Revised B");
+    expect(turnStartsForThread(harness.dispatched, base.branchA.authorThreadId)).toHaveLength(0);
+    expect(turnStartsForThread(harness.dispatched, base.branchB.authorThreadId)).toHaveLength(0);
+  });
+
+  it.each([
+    ["reviews of the current draft", "revision-a2", "completed"],
+    ["no reviews", null, "completed"],
+    ["unfinished reviews", "draft-a", "running"],
+  ] as const)(
+    "leaves a plan_saved branch with %s unrepaired",
+    async (_case, reviewedTurn, status) => {
+      const base = documentWorkflow({ readerReviewEnabled: false });
+      const revisedAt = new Date(Date.now() + 2_000).toISOString();
+      const reviews = reviewedTurn
+        ? completedReviewsForDraft("a", reviewedTurn).map((review, index) =>
+            index === 0 ? { ...review, status } : review,
+          )
+        : [];
+      harness = await createHarness(
+        makeReadModel({
+          workflow: {
+            ...base,
+            branchA: {
+              ...base.branchA,
+              status: "plan_saved",
+              planTurnId: "revision-a2",
+              revisionTurnId: null,
+              reviews,
+            },
+            branchB: {
+              ...base.branchB,
+              status: "error",
+              errorStage: "authoring",
+              error: "Paused for test",
+            },
+            merge: { ...base.merge, threadId: null, status: "not_started" },
+          },
+          threads: [
+            draftAndRevisionThread(
+              base.branchA.authorThreadId,
+              "draft-a",
+              "revision-a2",
+              documentMarkdown,
+              revisedAt,
+            ),
+          ],
+        }),
+      );
+      await harness.start();
+      await harness.drain();
+      const branchA = harness.getSnapshot().planningWorkflows[0]!.branchA;
+      expect(branchA.status).not.toBe("revised");
+      expect(branchA.planTurnId).toBe("revision-a2");
+      expect(branchA.revisionTurnId).toBeNull();
+    },
+  );
+
   it("preserves an errored merge when late output cannot be captured", async () => {
     const base = documentWorkflow({ readerReviewEnabled: false });
     const mergeId = ThreadId.makeUnsafe("late-invalid-merge");

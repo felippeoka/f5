@@ -119,6 +119,48 @@ describe("profile account execution", () => {
     expect(env.CODEX_HOME).toBe("machine-home");
     expect(env.F5_PROFILE_ISOLATED).toBeUndefined();
   });
+  it("passes project script variables to isolated terminals", () => {
+    const env = buildAccountExecutionEnvironment({
+      purpose: "terminal",
+      stateDir,
+      profile,
+      baseEnv: { ...baseEnv, T3CODE_FOO: "inherited" },
+      overrides: { T3CODE_PROJECT_ROOT: "/repo", T3CODE_WORKTREE_PATH: "/repo-worktree" },
+    });
+    expect(env.T3CODE_PROJECT_ROOT).toBe("/repo");
+    expect(env.T3CODE_WORKTREE_PATH).toBe("/repo-worktree");
+    expect(env.T3CODE_FOO).toBeUndefined();
+    expect(env.HOME).toBe(Path.join(stateDir, "provider-homes", "claude"));
+  });
+  it("still rejects other reserved overrides and instance project script variables", () => {
+    expect(() =>
+      buildAccountExecutionEnvironment({
+        purpose: "terminal",
+        stateDir,
+        profile,
+        baseEnv,
+        overrides: { T3CODE_PROJECT_ROOT: "/repo", HOME: "escape" },
+      }),
+    ).toThrow(/HOME is reserved/);
+    expect(() =>
+      buildAccountExecutionEnvironment({
+        purpose: "terminal",
+        stateDir,
+        profile,
+        baseEnv,
+        overrides: { T3CODE_OTHER: "escape" },
+      }),
+    ).toThrow(/reserved/);
+    expect(() =>
+      buildAccountExecutionEnvironment({
+        purpose: "provider",
+        stateDir,
+        profile,
+        baseEnv,
+        instance: [{ name: "T3CODE_PROJECT_ROOT", value: "/repo", sensitive: false }],
+      }),
+    ).toThrow(/reserved/);
+  });
   it.each([
     "home",
     "UsErPrOfIlE",
@@ -187,4 +229,29 @@ it("removes standalone launcher state from inherited and overridden provider env
     F5_UPDATE_ID: "update",
   };
   expect(buildProviderChildProcessEnv(values, values)).toEqual({ PATH: "/user/node" });
+});
+
+it("isolates Pi configuration and multi-provider credentials while retaining explicit instance keys", () => {
+  const stateDir = Path.join(Path.sep, "tmp", "pi-profile");
+  const input = {
+    purpose: "provider" as const,
+    profile: { ...fallbackDefaultProfile(stateDir), isDefault: false },
+    stateDir,
+    baseEnv: {
+      PI_CODING_AGENT_DIR: "/private/other-account",
+      OPENROUTER_API_KEY: "ambient",
+      AWS_PROFILE: "ambient",
+    },
+    instance: [{ name: "OPENROUTER_API_KEY", value: "explicit", sensitive: true }],
+  };
+  const env = buildAccountExecutionEnvironment(input);
+  expect(env.PI_CODING_AGENT_DIR).toBeUndefined();
+  expect(env.AWS_PROFILE).toBeUndefined();
+  expect(env.OPENROUTER_API_KEY).toBe("explicit");
+  expect(() =>
+    buildAccountExecutionEnvironment({
+      ...input,
+      instance: [{ name: "PI_CODING_AGENT_DIR", value: "/other", sensitive: false }],
+    }),
+  ).toThrow("reserved");
 });

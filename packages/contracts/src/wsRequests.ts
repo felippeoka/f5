@@ -1,3 +1,18 @@
+import { ThreadSearchInput } from "./threadSearch";
+import {
+  MCP_APPS_WS_METHODS,
+  McpAppCallToolInput,
+  McpAppReadResourceInput,
+  McpAppToolInfoInput,
+  McpAppUpdateModelContextInput,
+} from "./mcpApps";
+import { THREAD_SETTLEMENT_WS_METHODS, SettleProjectIdleInput } from "./threadSettlement";
+import {
+  PR_WATCH_WS_METHODS,
+  PullRequestWatchInput,
+  PullRequestWatchListInput,
+} from "./pullRequestWatch";
+import { HTML_RENDER_WS_METHODS, HtmlPreviewHostInput, HtmlPreviewResponse } from "./threadTools";
 import { ReportClientDiagnosticsInput } from "./server";
 import { Schema, Struct, Tuple } from "effect";
 import { AttachmentCloneToUploadInput, AttachmentUploadsInput } from "./attachmentUpload";
@@ -202,6 +217,7 @@ import {
   PrHubDetailInput,
   PrHubFilesInput,
   PrHubGetAdvisoriesInput,
+  PrHubReviewGuideInput,
   PrHubIgnoreInput,
   PrHubListInput,
   PrHubLocalCandidatesInput,
@@ -227,6 +243,8 @@ import {
   ProjectCancelContentSearchInput,
   ProjectCloneCancelInput,
   ProjectCloneInput,
+  ProjectCreateNewInput,
+  ProjectFindByRepositoryInput,
   ProjectIssueAssetUrlInput,
   ProjectListDirectoryInput,
   ProjectListEntriesInput,
@@ -365,6 +383,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.inspect, NativeOperationInspectInput),
   tagRequestBody(ELICITATION_WS_METHODS.submit, ElicitationSubmitInput),
   // Orchestration methods
+  tagRequestBody(ORCHESTRATION_WS_METHODS.searchThread, ThreadSearchInput),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),
@@ -460,6 +479,9 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.projectsClone, ProjectCloneInput),
   tagRequestBody(WS_METHODS.projectsCloneCancel, ProjectCloneCancelInput),
   tagRequestBody(WS_METHODS.projectsCloneList, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.projectsEnsureScratch, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.projectsCreateNew, ProjectCreateNewInput),
+  tagRequestBody(WS_METHODS.projectsFindByRepository, ProjectFindByRepositoryInput),
   tagRequestBody(WS_METHODS.projectsListDirectory, ProjectListDirectoryInput),
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),
   tagRequestBody(WS_METHODS.projectsSearchContents, ProjectSearchContentsInput),
@@ -514,6 +536,8 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.previewClose, PreviewCloseInput),
   tagRequestBody(WS_METHODS.previewList, PreviewListInput),
   tagRequestBody(WS_METHODS.previewListLocalServers, PreviewListLocalServersInput),
+  tagRequestBody(HTML_RENDER_WS_METHODS.host, HtmlPreviewHostInput),
+  tagRequestBody(HTML_RENDER_WS_METHODS.respond, HtmlPreviewResponse),
   tagRequestBody(WS_METHODS.previewAutomationRespond, PreviewAutomationResponse),
   tagRequestBody(WS_METHODS.previewAutomationReportOwner, PreviewAutomationOwner),
   tagRequestBody(WS_METHODS.previewAutomationClearOwner, PreviewAutomationClearOwnerInput),
@@ -659,6 +683,14 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(PR_HUB_WS_METHODS.listAccountRouting, Schema.Struct({})),
   tagRequestBody(PR_HUB_WS_METHODS.setAccountRouting, ForgeAccountRouting),
   tagRequestBody(PR_HUB_WS_METHODS.removeAccountRouting, ForgeAccountRouting),
+  tagRequestBody(MCP_APPS_WS_METHODS.toolInfo, McpAppToolInfoInput),
+  tagRequestBody(MCP_APPS_WS_METHODS.callTool, McpAppCallToolInput),
+  tagRequestBody(MCP_APPS_WS_METHODS.readResource, McpAppReadResourceInput),
+  tagRequestBody(MCP_APPS_WS_METHODS.updateModelContext, McpAppUpdateModelContextInput),
+  tagRequestBody(THREAD_SETTLEMENT_WS_METHODS.settleProjectIdle, SettleProjectIdleInput),
+  tagRequestBody(PR_WATCH_WS_METHODS.list, PullRequestWatchListInput),
+  tagRequestBody(PR_WATCH_WS_METHODS.start, PullRequestWatchInput),
+  tagRequestBody(PR_WATCH_WS_METHODS.stop, PullRequestWatchInput),
   tagRequestBody(PR_HUB_WS_METHODS.peek, PrHubPeekInput),
   tagRequestBody(PR_HUB_WS_METHODS.getStack, PrHubStackInput),
   tagRequestBody(PR_HUB_WS_METHODS.getViewedFiles, PrHubViewedFilesInput),
@@ -694,6 +726,8 @@ const WebSocketRequestBody = Schema.Union([
   tagPrHubRequestBody(PR_HUB_WS_METHODS.markNotified, PrHubMarkNotifiedInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.analyzeAdvisories, PrHubAnalyzeAdvisoriesInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.getAdvisories, PrHubGetAdvisoriesInput),
+  tagPrHubRequestBody(PR_HUB_WS_METHODS.getReviewGuide, PrHubReviewGuideInput),
+  tagPrHubRequestBody(PR_HUB_WS_METHODS.generateReviewGuide, PrHubReviewGuideInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.listLocalCheckoutCandidates, PrHubLocalCandidatesInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.resolveLocalCheckout, PrHubResolveCheckoutInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.getDetail, PrHubDetailInput),

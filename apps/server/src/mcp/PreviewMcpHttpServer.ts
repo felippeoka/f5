@@ -1,3 +1,10 @@
+import {
+  ThreadMcpBroker,
+  callThreadTool,
+  THREAD_TOOL_DEFINITIONS,
+  THREAD_TOOL_TIMEOUT_MS,
+  threadToolInputJsonSchema,
+} from "./threadMcpTools.ts";
 import type { ComputerAgentProvider } from "@t3tools/shared/agentAutomationSupport";
 import {
   createComputerSessionScope,
@@ -64,10 +71,11 @@ const PREVIEW_MCP_SERVER_NAME = "__f5_preview";
 const PREVIEW_MCP_ENV_PREFIX = "F5_PREVIEW_MCP_TOKEN_";
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 
-type McpCatalog = "preview" | "computer" | "integration";
+type McpCatalog = "preview" | "computer" | "thread" | "integration";
 const CATALOG_PATHS: Record<McpCatalog, string> = {
   preview: MCP_ENDPOINT_PATH,
   computer: "/mcp/computer",
+  thread: "/mcp/thread",
   integration: "/mcp/integration",
 };
 
@@ -93,13 +101,14 @@ export interface PreviewMcpSessionConfig {
 }
 
 export interface PreviewMcpHttpServerShape {
+  readonly supportsThreadCatalog?: boolean;
   readonly getUrl: (catalog?: McpCatalog) => string;
   readonly createSessionConfig: (input: {
     readonly threadId: ThreadId;
     readonly providerInstanceId?: ProviderInstanceId;
     readonly existingServerNames?: ReadonlySet<string>;
     readonly catalog?: McpCatalog;
-    readonly provider?: ComputerAgentProvider;
+    readonly provider?: ComputerAgentProvider | "acp";
     readonly serverName?: string;
     /** Required for the `integration` catalog; disposed with the session config. */
     readonly integration?: IntegrationProxySession;
@@ -127,6 +136,7 @@ function makeToolCallHandler(
   broker: PreviewAutomationBrokerShape,
   resolveScope: (token: string) => PreviewMcpSessionScope | undefined,
   computer?: ComputerAutomationBrokerRuntime,
+  thread?: ThreadMcpBroker["Service"],
 ) {
   return async (
     token: string,
@@ -143,6 +153,11 @@ function makeToolCallHandler(
     if (scope.catalog === "integration") {
       if (!scope.integration) return previewToolErrorResult(new Error("Integration unavailable."));
       return scope.integration.callTool(name, rawArguments, invocationId);
+    }
+    if (scope.catalog === "thread") {
+      return thread
+        ? callThreadTool({ broker: thread, threadId: scope.threadId }, name, rawArguments)
+        : previewToolErrorResult(new Error("Thread tools unavailable."));
     }
     if (scope.catalog === "computer") {
       if (!computer) return previewToolErrorResult(new Error("Computer host unavailable."));
@@ -220,11 +235,13 @@ function handleRpcRequest(input: {
           },
           serverInfo: {
             name:
-              input.catalog === "computer"
-                ? "F5 Computer"
-                : input.catalog === "integration"
-                  ? "F5 Integration"
-                  : "F5 Preview",
+              input.catalog === "thread"
+                ? "F5 Thread"
+                : input.catalog === "computer"
+                  ? "F5 Computer"
+                  : input.catalog === "integration"
+                    ? "F5 Integration"
+                    : "F5 Preview",
             version: "0.0.0",
           },
         }),
@@ -246,14 +263,21 @@ function handleRpcRequest(input: {
       return Promise.resolve(
         jsonRpcSuccess(request.id, {
           tools:
-            input.catalog === "computer"
-              ? COMPUTER_TOOL_DEFINITIONS.map((tool) => ({
+            input.catalog === "thread"
+              ? THREAD_TOOL_DEFINITIONS.map((tool) => ({
                   name: tool.name,
                   description: tool.description,
-                  inputSchema: computerToolInputJsonSchema(tool),
-                  annotations: tool.annotations,
+                  inputSchema: threadToolInputJsonSchema(tool),
+                  annotations: { ...tool.annotations, title: tool.title },
                 }))
-              : PREVIEW_MCP_TOOL_LIST,
+              : input.catalog === "computer"
+                ? COMPUTER_TOOL_DEFINITIONS.map((tool) => ({
+                    name: tool.name,
+                    description: tool.description,
+                    inputSchema: computerToolInputJsonSchema(tool),
+                    annotations: tool.annotations,
+                  }))
+                : PREVIEW_MCP_TOOL_LIST,
         }),
       );
     case "tools/call": {
@@ -285,7 +309,13 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
   const computer = Option.getOrUndefined(computerOption);
   const sessionsByToken = new Map<string, PreviewMcpSessionScope>();
   const tokenByEnvVar = new Map<string, string>();
-  const callTool = makeToolCallHandler(broker, (token) => sessionsByToken.get(token), computer);
+  const thread = Option.getOrUndefined(yield* Effect.serviceOption(ThreadMcpBroker));
+  const callTool = makeToolCallHandler(
+    broker,
+    (token) => sessionsByToken.get(token),
+    computer,
+    thread,
+  );
   let expectedHostPort: number | null = null;
 
   const server = http.createServer((request, response) => {
@@ -432,23 +462,27 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
 
   const catalogUrl = (catalog: McpCatalog) => `http://127.0.0.1:${port}${CATALOG_PATHS[catalog]}`;
   return {
+    supportsThreadCatalog: !!thread,
     getUrl: (catalog = "preview") => catalogUrl(catalog),
     createSessionConfig: (input) => {
       const catalog = input.catalog ?? "preview";
+      if (catalog === "thread" && !thread) throw new Error("Thread tools unavailable.");
       if (catalog === "computer" && !computer) throw new Error("Computer host unavailable.");
       if (catalog === "integration" && (!input.integration || !input.serverName))
         throw new Error("Integration catalogs need a proxy session and a fixed server name.");
       const token = nextToken();
       const envVarName =
-        catalog === "computer"
-          ? `F5_COMPUTER_MCP_TOKEN_${randomUUID().replaceAll("-", "_").toUpperCase()}`
-          : catalog === "integration"
-            ? `F5_INTEGRATION_MCP_TOKEN_${randomUUID().replaceAll("-", "_").toUpperCase()}`
-            : nextEnvVarName();
+        catalog !== "preview"
+          ? `F5_${catalog.toUpperCase()}_MCP_TOKEN_${randomUUID().replaceAll("-", "_").toUpperCase()}`
+          : nextEnvVarName();
       const serverName =
         input.serverName ??
         chooseServerName(
-          catalog === "computer" ? "__f5_computer" : PREVIEW_MCP_SERVER_NAME,
+          catalog === "thread"
+            ? "f5_thread"
+            : catalog === "computer"
+              ? "__f5_computer"
+              : PREVIEW_MCP_SERVER_NAME,
           input.existingServerNames,
         );
       const computerScope =
@@ -456,7 +490,11 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
           ? createComputerSessionScope({
               broker: computer!,
               threadId: input.threadId,
-              provider: input.provider ?? "codex",
+              provider: (() => {
+                if (input.provider === "acp")
+                  throw new Error("Custom ACP computer access is not certified.");
+                return input.provider ?? "codex";
+              })(),
               serverName,
             })
           : undefined;
@@ -504,8 +542,11 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
           toolTimeoutSec:
             catalog === "integration"
               ? INTEGRATION_TOOL_TIMEOUT_SEC
-              : (catalog === "computer" ? COMPUTER_TOOL_TIMEOUT_MS : PREVIEW_TOOL_TIMEOUT_MS) /
-                1000,
+              : (catalog === "thread"
+                  ? THREAD_TOOL_TIMEOUT_MS
+                  : catalog === "computer"
+                    ? COMPUTER_TOOL_TIMEOUT_MS
+                    : PREVIEW_TOOL_TIMEOUT_MS) / 1000,
         },
         env: {
           [envVarName]: token,

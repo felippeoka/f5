@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import { randomUUID } from "node:crypto";
 import { killProcessTreeAsync } from "@t3tools/shared/processTree";
+import { PROJECT_SCRIPT_ENV_NAMES } from "@t3tools/shared/projectScripts";
 import { BoundedTerminalHistory } from "../BoundedTerminalHistory";
 import { readTerminalHistory } from "../historyPersistence";
 import { readTerminalProcessTable, type TerminalProcessTable } from "../processTable";
@@ -55,7 +56,9 @@ import {
 } from "../Services/Manager";
 
 const DEFAULT_HISTORY_LINE_LIMIT = 5_000;
-const DEFAULT_PERSIST_DEBOUNCE_MS = 40;
+// Busy terminals write their whole retained history each flush; batching keeps
+// that bounded while close and restart still flush the latest output.
+const DEFAULT_PERSIST_DEBOUNCE_MS = 250;
 const DEFAULT_SUBPROCESS_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
@@ -226,6 +229,17 @@ function createTerminalSpawnEnv(
   return spawnEnv;
 }
 
+function projectScriptEnvOf(
+  runtimeEnv: Record<string, string> | null,
+): Record<string, string> | null {
+  if (!runtimeEnv) return null;
+  return Object.fromEntries(
+    Object.entries(runtimeEnv).filter(([key]) =>
+      PROJECT_SCRIPT_ENV_NAMES.some((name) => name === key.toUpperCase()),
+    ),
+  );
+}
+
 function normalizedRuntimeEnv(
   env: Record<string, string> | undefined,
 ): Record<string, string> | null {
@@ -270,6 +284,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   private readonly revisions = new Map<string, { generation: number; revision: number }>();
   private readonly sessions = new Map<string, TerminalSessionState>();
   private readonly accountConfig: ServerConfigShape | undefined;
+  private readonly inputRevisions = new WeakMap<TerminalSessionState, number>();
   private readonly logsDir: string;
   private readonly historyLineLimit: number;
   private readonly ptyAdapter: PtyAdapterShape;
@@ -423,6 +438,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         `Terminal is not running for thread: ${input.threadId}, terminal: ${input.terminalId}`,
       );
     }
+    this.inputRevisions.set(session, (this.inputRevisions.get(session) ?? 0) + 1);
     session.process.write(input.data);
   }
 
@@ -538,6 +554,31 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
 
       if (input.deleteHistory) {
         await this.deleteAllHistoryForThread(input.threadId);
+      }
+      this.updateSubprocessPollingState();
+    });
+  }
+
+  async closeIdleForThread(threadId: string): Promise<void> {
+    await this.runWithThreadLock(threadId, async () => {
+      const captured = this.sessionsForThread(threadId).map((session) => ({
+        session,
+        pid: session.pid,
+        revision: this.inputRevisions.get(session) ?? 0,
+      }));
+      if (!captured.length) return;
+      // Probe failure leaves every session intact. A cached activity bit cannot prove idle.
+      const table = await this.processTableReader();
+      for (const { session, pid, revision } of captured) {
+        if (
+          this.sessions.get(toSessionKey(threadId, session.terminalId)) !== session ||
+          session.pid !== pid ||
+          session.status === "starting" ||
+          (this.inputRevisions.get(session) ?? 0) !== revision ||
+          (pid !== null && table.has(pid))
+        )
+          continue;
+        await this.closeSession(threadId, session.terminalId, false);
       }
       this.updateSubprocessPollingState();
     });
@@ -660,7 +701,9 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
               ...(session.runtimeEnv ? { overrides: session.runtimeEnv } : {}),
             })
           : process.env,
-        this.accountConfig ? null : session.runtimeEnv,
+        // The account environment already holds the runtime env, but the spawn
+        // filter drops T3CODE_* keys, so restore the project script variables.
+        this.accountConfig ? projectScriptEnvOf(session.runtimeEnv) : session.runtimeEnv,
       );
       let lastSpawnError: unknown = null;
 
@@ -1558,6 +1601,12 @@ export const TerminalManagerLive = Layer.effect(
         Effect.tryPromise({
           try: () => runtime.close(input),
           catch: (cause) => new TerminalError({ message: "Failed to close terminal", cause }),
+        }),
+      closeIdleForThread: (threadId) =>
+        Effect.tryPromise({
+          try: () => runtime.closeIdleForThread(threadId),
+          catch: (cause) =>
+            new TerminalError({ message: "Could not verify and close idle terminals", cause }),
         }),
       createAccountProcess: (input) =>
         ptyAdapter

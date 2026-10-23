@@ -1,11 +1,5 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import {
-  GitForkIcon,
-  GaugeIcon,
-  GitPullRequestIcon,
-  HomeIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { GaugeIcon, GitPullRequestIcon, HomeIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { readNativeApi } from "../../nativeApi";
@@ -81,7 +75,6 @@ export function SidebarNav(props: {
   const navigate = useNavigate();
   const isOnHome = useLocation({ select: (loc) => loc.pathname === "/" });
   const isOnPullRequests = useLocation({ select: (loc) => loc.pathname === "/pull-requests" });
-  const isOnWorktrees = useLocation({ select: (loc) => loc.pathname === "/worktrees" });
   const isOnUsage = useLocation({ select: (loc) => loc.pathname === "/usage" });
   const prHubNeedsYouCount = usePrHubNeedsYouCount();
 
@@ -125,14 +118,6 @@ export function SidebarNav(props: {
                 </>
               ) : undefined
             }
-          />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <NavRow
-            icon={GitForkIcon}
-            label="Worktrees"
-            isActive={isOnWorktrees}
-            onSelect={() => void navigate({ to: "/worktrees" })}
           />
         </SidebarMenuItem>
         <SidebarMenuItem>

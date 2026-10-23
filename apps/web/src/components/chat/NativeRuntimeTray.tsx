@@ -27,6 +27,11 @@ import { createPortal } from "react-dom";
 import { cn } from "~/lib/utils";
 import { readNativeApi } from "../../nativeApi";
 import {
+  selectSurfaceHeaderState,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "../../rightPanelStore";
+import {
   AlertDialog,
   AlertDialogClose,
   AlertDialogDescription,
@@ -102,6 +107,7 @@ interface NativeRuntimeTrayProps {
   prompt: string;
   latestMessageAt?: string | undefined;
   onSuggestion: (text: string) => void;
+  onViewAgents?: (() => void) | undefined;
   /**
    * `chip` moves background tasks out of the tray into a status-strip chip
    * (portalled into the strip's slot); without a mounted strip they stay rows.
@@ -141,6 +147,20 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
   const canInspectTasks = supported("childTaskInspection");
   const canStopTasks = supported("childTaskStop");
+  // Hidden once the Agents surface is on screen; the link would point at nothing.
+  const agentsOpen = useRightPanelStore(
+    (store) =>
+      selectSurfaceHeaderState(
+        selectThreadRightPanelState(store.byThreadId, threadId),
+        "agents",
+      ) === "active",
+  );
+  const viewAgents =
+    props.onViewAgents && !agentsOpen ? (
+      <Button size="xs" variant="ghost" aria-label="View agents" onClick={props.onViewAgents}>
+        View
+      </Button>
+    ) : null;
   // The server holds one native-operation reservation per thread until a stop
   // settles, so a second stop sent earlier is refused.
   const stopBlocked =
@@ -403,6 +423,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
             .filter(Boolean)
             .join(" · ")}
         </span>
+        {indented ? null : viewAgents}
         {canInspectTasks && (
           <Button
             size="xs"
@@ -667,6 +688,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
                     </span>
                     <ToggleIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
                   </button>
+                  {viewAgents}
                   {tasksExpanded && canStopTasks && (
                     <Button
                       size="xs"
