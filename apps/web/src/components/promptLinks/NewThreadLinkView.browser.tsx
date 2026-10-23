@@ -195,7 +195,7 @@ it("handles the same link again when it is opened again, for example after cloni
   createDraftThread.mockResolvedValueOnce({ threadId, projectId: project.projectId });
   await screen.rerender(<NewThreadLinkView search={link} delivery="second" />);
   await vi.waitFor(() => expect(draftPrompt(threadId)).toBe("Add tests"));
-  expect(createDraftThread).toHaveBeenCalledWith(project.projectId);
+  expect(createDraftThread).toHaveBeenCalledWith(project.projectId, expect.anything());
 });
 
 it("opens a link in the project whose remote matches its repository", async () => {
@@ -208,7 +208,10 @@ it("opens a link in the project whose remote matches its repository", async () =
 
   await vi.waitFor(() => expect(draftPrompt(threadId)).toBe("Add tests"));
   expect(api.projects.findByRepository).toHaveBeenCalledWith({ owner: "lopes-felipe", name: "f5" });
-  expect(createDraftThread).toHaveBeenCalledWith(project.projectId);
+  // The draft is filled before it opens: opening it leaves this view.
+  const [, options] = createDraftThread.mock.calls[0]!;
+  expect(options.canNavigate()).toBe(false);
+  expect(navigate).toHaveBeenCalledWith({ to: "/$threadId", params: { threadId } });
   expect(startScratchThread).not.toHaveBeenCalled();
 });
 

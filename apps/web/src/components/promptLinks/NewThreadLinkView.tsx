@@ -195,8 +195,13 @@ export function NewThreadLinkView({
               .then((config) => config.providers)
               .catch(() => []);
       if (!operation.current()) return;
+      // Navigating unmounts this view, so the draft is created in place, filled, and only then
+      // opened.
+      const stay = { canNavigate: () => false };
       const created =
-        projectId === null ? await startScratchThread() : await createDraftThread(projectId);
+        projectId === null
+          ? await startScratchThread(stay)
+          : await createDraftThread(projectId, stay);
       if (!created) {
         operation.setState({
           kind: "failed",
@@ -207,8 +212,9 @@ export function NewThreadLinkView({
       if (!operation.current()) return;
       const { selection, note } = resolveLinkedModel(link, providers);
       placeLinkedPrompt(created.threadId, link.prompt, { notes: note ? [note] : [], selection });
+      await navigate({ to: "/$threadId", params: { threadId: created.threadId } });
     },
-    [createDraftThread, startScratchThread],
+    [createDraftThread, navigate, startScratchThread],
   );
 
   const showThread = useCallback(
