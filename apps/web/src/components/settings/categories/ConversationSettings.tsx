@@ -197,7 +197,7 @@ export function ConversationSettings() {
         />
         <SettingsRow
           title="Load remote images in chat"
-          description="Allow HTTPS images from external websites, and HTTPS images and scripts in HTML pages agents show."
+          description="Allow HTTPS images from external websites, and HTTPS images and scripts in HTML pages agents show. Even when off, an HTML page opened in a web browser rather than the desktop app can still navigate away, taking what it shows with it."
           control={
             <Switch
               aria-label="Load remote images in chat"

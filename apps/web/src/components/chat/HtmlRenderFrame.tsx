@@ -219,6 +219,9 @@ export function HtmlRenderFrame({
         : htmlRenderDocument(html, initialTheme.current, bridgeId, { allowRemoteContent }),
     [html, bridgeId, allowRemoteContent],
   );
+  // The CSP limits what the page loads, not where it navigates. The desktop app blocks a srcdoc
+  // frame from navigating anywhere else (appFramePolicy); a plain browser has no such hook, so
+  // there a page can still leave with its contents in the URL.
   const iframe = document ? (
     <iframe
       ref={setFrame}

@@ -364,6 +364,9 @@ export function McpAppFrame({ app, threadId }: { app: McpAppView; threadId: Thre
             </Button>
           </div>
         ) : srcDoc ? (
+          // The desktop app blocks this frame from navigating anywhere else (appFramePolicy). A
+          // plain browser cannot, so there the onLoad check below only notices a navigation after
+          // its request has gone out.
           <iframe
             key={nonce}
             ref={frame}

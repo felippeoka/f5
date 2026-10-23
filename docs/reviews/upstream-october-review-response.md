@@ -3254,3 +3254,33 @@ Validation:
 - The desktop app was not launched. Dev Electron does not start in this
   environment, so the OS handoff (`open-url`, second instance) is covered only
   by unit tests.
+
+## Third and fourth reviews: known limits left as documented
+
+These findings stay as they are, with the reason recorded here.
+
+- HTML renders and MCP apps in a plain browser. The frame CSP limits what a
+  page loads, not where it navigates. The desktop app blocks a `srcdoc` frame
+  from navigating anywhere else (`appFramePolicy`, now keyed by frame identity
+  so a fragment change no longer escapes it). A browser offers no such hook, so
+  there a page can still leave with its contents in the URL. Rendering with
+  `sandbox=""` in browser builds would remove the interactivity these frames
+  exist for. The limit is noted in both frame components and in the "Load
+  remote images in chat" description, which used to read as "no network
+  access".
+- Checkpoints keep rewritten history reachable. A checkpoint commit records
+  HEAD at capture as its parent, so `refs/t3/checkpoints/*` keeps a commit that
+  was later amended or reset away, for example one holding a secret, alive
+  through `git gc`, and `git push --mirror` would publish it. The refs go when
+  storage maintenance purges a deleted or archived thread, and when a rewind
+  prunes them. Release notes should say this; to drop such a commit sooner,
+  delete or archive the thread and run storage cleanup, or delete the refs.
+- Scratch folders stay under the state directory. Provider shells are not
+  sandboxed, so a full-access agent can read the state directory from any
+  folder, not only from below it; moving the root would not change that, and
+  it would need a migration of existing folders. Deleting a thread now removes
+  its folder.
+- Packaged backend startup. The backend's `--require` of `compileCache.js` is
+  now added only when the file is packaged. The backend entry is loaded from the
+  same asar, so asar resolution in run-as-node mode is already required for the
+  backend to start at all. The packaged smoke test has still not been run.
