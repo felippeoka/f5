@@ -389,6 +389,9 @@ export const SETTINGS_ITEM_ROUTES = defineItemRoutes({
   "git.review-guide-model": {
     category: "git",
   },
+  "git.manage-worktrees": {
+    category: "git",
+  },
   "git.submodules": {
     category: "git",
     scope: "both",

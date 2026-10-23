@@ -18,6 +18,13 @@ export const GIT_SETTINGS_DESCRIPTORS = [
     targetSelector: '[data-settings-search-target="git.review-guide-model"]',
   },
   {
+    ...SETTINGS_ITEM_ROUTES["git.manage-worktrees"],
+    label: "Manage worktrees",
+    description: "Browse, switch, and remove worktree checkouts for each project.",
+    keywords: ["worktree", "worktrees", "checkout", "branches", "manage"],
+    targetSelector: '[data-settings-search-target="git.manage-worktrees"]',
+  },
+  {
     ...SETTINGS_ITEM_ROUTES["git.submodules"],
     label: "Worktree submodules",
     description: "Choose which git submodules a new worktree checks out.",
