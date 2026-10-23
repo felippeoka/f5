@@ -4055,7 +4055,9 @@ function cancelQuit(): void {
 async function cleanupBeforeExit(): Promise<void> {
   writeDesktopLogHeader("cleanup: closing computer control");
   // Normal shutdown: 2 s grace, then SIGTERM and SIGKILL for registered integration groups.
-  computerSystem?.supervisor.stop(() => true, "shutdown");
+  // Awaited below (exit, or persisted recovery by 5 s) so no group outlives F5 untracked.
+  const integrationsStopped =
+    computerSystem?.supervisor.stopAndWait(() => true, "shutdown") ?? Promise.resolve();
   computerSystem?.channel.close();
   computerSystem?.controller.close();
   computerSystem?.overlay.close();
@@ -4068,6 +4070,7 @@ async function cleanupBeforeExit(): Promise<void> {
       Promise.allSettled([
         ...[...backends.values()].map((runtime) => stopBackendAndWaitForExit(5000, runtime)),
         previewRuntime.dispose(),
+        integrationsStopped,
       ]),
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, 6000);

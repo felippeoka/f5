@@ -183,11 +183,24 @@ describe.skipIf(!optedIn)("Claude in Chrome live certification", () => {
           content: "Call tabs_context_mcp once, then reply DONE. Use no other tool.",
         },
       });
+      // Only a successful result of the allowed tab listing counts: a denied or failed
+      // call also comes back as a `tool_result`, with `is_error`.
+      const tabListingIds = new Set<string>();
       for (;;) {
         const next = await first.q.next();
         if (next.done || next.value.type === "result") break;
-        if (next.value.type === "user" && JSON.stringify(next.value).includes("tool_result"))
-          assertions["read-only-call"] = true;
+        const content = (next.value as { message?: { content?: unknown } }).message?.content;
+        if (!Array.isArray(content)) continue;
+        for (const block of content as Array<Record<string, unknown>>) {
+          if (block.type === "tool_use" && block.name === "mcp__claude-in-chrome__tabs_context_mcp")
+            tabListingIds.add(String(block.id));
+          if (
+            block.type === "tool_result" &&
+            block.is_error !== true &&
+            tabListingIds.has(String(block.tool_use_id))
+          )
+            assertions["read-only-call"] = true;
+        }
       }
     } finally {
       first.q.close();

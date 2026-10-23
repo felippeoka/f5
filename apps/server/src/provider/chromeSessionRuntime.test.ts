@@ -119,7 +119,8 @@ async function connected(h: Awaited<ReturnType<typeof setup>>) {
   expect(await h.runtime.connected("t", "g1", verifiedStatus())).toBe(true);
 }
 
-describe("Claude in Chrome session runtime", () => {
+// Claude in Chrome is macOS only; the fixtures use macOS browser paths.
+describe.skipIf(process.platform === "win32")("Claude in Chrome session runtime", () => {
   it("asks before replacing foreign setup and journals it before launch", async () => {
     await writeFile(manifestPath, manifest("/Applications/Other.app/host"));
     const h = await setup();

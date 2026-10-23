@@ -5,7 +5,7 @@ import {
   type CodexChromeRecord,
   type CodexComputerRecord,
 } from "@t3tools/shared/providerIntegrationCertification";
-import { verifyCodeSignature, type CodeSignatureResult } from "@t3tools/shared/codeSignature";
+import { CodeSignatureCache, type CodeSignatureResult } from "@t3tools/shared/codeSignature";
 import {
   codexChromeDescriptor,
   type ChromeNativeHostDescriptor,
@@ -54,6 +54,7 @@ export interface CodexInspectionIo {
     userHome: string,
   ) => Promise<ReadonlyArray<ChromeNativeHostRegistration>>;
 }
+const signatureCache = new CodeSignatureCache();
 export const defaultCodexInspectionIo: CodexInspectionIo = {
   readText: readBoundedText,
   isFile: (path) =>
@@ -66,7 +67,9 @@ export const defaultCodexInspectionIo: CodexInspectionIo = {
     const info = await stat(path);
     return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
   },
-  verify: (path, requirement) => verifyCodeSignature(path, requirement),
+  // Deep verification of ChatGPT.app is slow; a result is reused only while the bundle's
+  // identity and signature seal are unchanged, so an update is always verified again.
+  verify: (path, requirement) => signatureCache.probe(path, requirement),
   inspectRegistrations: (descriptor, userHome) =>
     inspectChromeNativeHosts(descriptor.locations("", userHome)),
 };
@@ -325,6 +328,20 @@ export async function codexChromeRegistrationsUnchanged(
   } catch {
     return false;
   }
+}
+
+/** The same app, plugin, runtime and helper a session was verified with. */
+export function codexChromeInstallationUnchanged(
+  verified: CodexChromeInstallation,
+  current: CodexChromeInstallation,
+): boolean {
+  return (
+    verified.appVersion === current.appVersion &&
+    verified.pluginVersion === current.pluginVersion &&
+    verified.nodeRepl === current.nodeRepl &&
+    verified.hostTarget === current.hostTarget &&
+    verified.hostFingerprint === current.hostFingerprint
+  );
 }
 
 /** Environment for the browser runtime child; no credentials and no F5 secrets. */

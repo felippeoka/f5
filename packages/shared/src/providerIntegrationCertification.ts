@@ -72,6 +72,12 @@ interface RecordBase<I extends ProviderIntegration, Identity> {
   readonly profileIsolation: "isolated" | "shared-disclosed";
   /** Names `docs/computer-certification/<evidenceId>.json`. Absent: not certified. */
   readonly evidenceId?: string;
+  /**
+   * Digest of the packaged, signed candidate build the live run exercised, copied from
+   * its report. Stamping changes the bundle, so this names the certified candidate, not
+   * the release that embeds the record.
+   */
+  readonly artifactSha256?: string;
   /** Withdrawn records stay for restore but certify nothing; CHANGELOG explains why. */
   readonly withdrawn?: string;
 }
@@ -110,12 +116,36 @@ export const PROVIDER_INTEGRATION_RECORDS: {
   "codex-computer": freezeRecords<CodexComputerRecord>("codex-computer", codexComputerRecords),
 });
 
+const SHA256 = /^[a-f0-9]{64}$/;
+
+/** What each integration's runtime needs from a record to actually work once certified. */
+function runtimeComplete(record: ProviderIntegrationRecord): boolean {
+  switch (record.integration) {
+    case "claude-chrome":
+      // Admission checks the live server's tools against the stamped names.
+      return (record.toolNames?.length ?? 0) > 0;
+    case "codex-chrome": {
+      // The proxy verifies the live inventory against the digest and lists the advertised
+      // tools before consent; without both, every call would be denied.
+      const advertised = new Set(record.identity.advertisedTools?.map((tool) => tool.name));
+      return (
+        SHA256.test(record.toolInventorySha256 ?? "") &&
+        record.identity.allowedTools.length > 0 &&
+        record.identity.allowedTools.every((name) => advertised.has(name))
+      );
+    }
+    case "codex-computer":
+      return SHA256.test(record.toolInventorySha256 ?? "");
+  }
+}
+
 export function recordCertifies(record: ProviderIntegrationRecord): boolean {
   return (
     !record.withdrawn &&
     typeof record.evidenceId === "string" &&
     record.evidenceId.length > 0 &&
-    ((record.toolNames?.length ?? 0) > 0 || /^[a-f0-9]{64}$/.test(record.toolInventorySha256 ?? ""))
+    SHA256.test(record.artifactSha256 ?? "") &&
+    runtimeComplete(record)
   );
 }
 
@@ -274,8 +304,10 @@ export function evidenceMismatches(
     problems.push("toolNames");
   if (record.toolInventorySha256 && record.toolInventorySha256 !== report.toolInventorySha256)
     problems.push("toolInventorySha256");
-  // Certification evidence comes from the packaged, signed build that is promoted.
-  if (!/^[a-f0-9]{64}$/.test(report.artifactSha256 ?? "")) problems.push("artifactSha256");
+  // Certification evidence comes from the packaged, signed candidate build, and the
+  // record names that exact build.
+  if (!SHA256.test(report.artifactSha256 ?? "") || report.artifactSha256 !== record.artifactSha256)
+    problems.push("artifactSha256");
   return problems;
 }
 

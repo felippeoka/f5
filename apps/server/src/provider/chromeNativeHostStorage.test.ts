@@ -120,7 +120,8 @@ describe("Chrome journal storage", () => {
   });
 });
 
-describe("Chrome journal lifecycle", () => {
+// Restore checks POSIX file modes, which Windows does not keep.
+describe.skipIf(process.platform === "win32")("Chrome journal lifecycle", () => {
   it("records original bytes and absence before launch, then restores exactly", async () => {
     await writeFile(manifestPath, manifest("/foreign"), { mode: 0o640 });
     const storage = await create();

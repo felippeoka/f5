@@ -25,6 +25,7 @@ const certified: ClaudeChromeRecord = {
   ...base,
   evidenceId: "fixture-evidence",
   toolNames: ["read_page"],
+  artifactSha256: "a".repeat(64),
 };
 
 let root: string;

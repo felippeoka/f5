@@ -18,7 +18,8 @@ const collect = (stream: NodeJS.ReadableStream) =>
 const exit = (child: ReturnType<typeof spawnRegisteredProcess>) =>
   new Promise<void>((resolve) => child.once("exit", () => resolve()));
 
-describe("registered integration process", () => {
+// Process groups and group signals are POSIX only; integrations run on macOS.
+describe.skipIf(process.platform === "win32")("registered integration process", () => {
   it("leads its own group and exchanges no stdio before main accepts it", async () => {
     let accept!: () => void;
     const registrations: ChromeProcessRegistration[] = [];
@@ -66,5 +67,26 @@ describe("registered integration process", () => {
     expect(await output).toBe("");
     await done;
     expect(child.signalCode).toBe("SIGKILL");
+  });
+
+  it("reports a group kill as killed and survives writes after it", async () => {
+    const child = spawnRegisteredProcess({
+      command: "/bin/cat",
+      args: [],
+      env: {},
+      identity,
+      register: async () => {},
+    });
+    const done = exit(child);
+    await child.registered;
+    expect(child.killed).toBe(false);
+    expect(child.kill("SIGKILL")).toBe(true);
+    // `process.kill(-pgid)` doesn't set ChildProcess.killed; the wrapper does.
+    expect(child.killed).toBe(true);
+    // Writes racing the exit hit a closed pipe (EPIPE) and must not escape as errors.
+    for (let index = 0; index < 64; index += 1) child.stdin.write("x".repeat(64 * 1024));
+    await done;
+    for (let index = 0; index < 8; index += 1) child.stdin.write("after exit\n");
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 });

@@ -1323,6 +1323,7 @@ describe("ClaudeAdapter agent browser", () => {
         ...PROVIDER_INTEGRATION_RECORDS["claude-chrome"][0]!,
         evidenceId: "fixture-evidence",
         toolNames: ["navigate"],
+        artifactSha256: "a".repeat(64),
       };
       const descriptor: ChromeNativeHostDescriptor = {
         ...claudeChromeDescriptor(record),

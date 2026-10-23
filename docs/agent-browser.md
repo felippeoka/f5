@@ -574,7 +574,7 @@ keeps these references when creating activities and still extracts other MCP ima
 | Integration      | Record           | Path                                                       | Lease                | Status         |
 | ---------------- | ---------------- | ---------------------------------------------------------- | -------------------- | -------------- |
 | Claude in Chrome | `claude-chrome`  | CLI `--chrome`, native host registered by the CLI          | Whole session        | Gate closed    |
-| Codex Chrome     | `codex-chrome`   | F5 HTTP MCP `node_repl` proxying ChatGPT.app's `node_repl` | Per call             | Gate closed    |
+| Codex Chrome     | `codex-chrome`   | F5 HTTP MCP `node_repl` proxying ChatGPT.app's `node_repl` | Child's lifetime     | Gate closed    |
 | Codex Sky        | `codex-computer` | Proxy to `SkyComputerUseClient mcp` (spike only)           | Foreground, per call | No record      |
 | Claude built-in  | none             | The CLI starts computer use only in interactive terminals  | n/a                  | Not applicable |
 
@@ -585,20 +585,26 @@ keeps these references when creating activities and still extracts other MCP ima
 platform, arch)` is the only gate; desktop main's Chrome lease, the server's availability
 checks and computer backend selection all call it, so they cannot disagree. A record
 certifies only with an `evidenceId` naming a scrubbed report in
-`docs/computer-certification/<evidenceId>.json` plus `toolNames` or a
-`toolInventorySha256`. Runtime never reads `docs/`; the desktop smoke test asserts the
-records are bundled into main. No record in this build carries an `evidenceId`, so every
-gate is closed and each surface shows the specific reason (platform, architecture,
-custom binary, home mismatch, isolated profile, awaiting certification). A report supports
-a record only when every required assertion is `true`, versions and inventory match, and
-it carries the packaged artifact's `artifactSha256`; a unit test re-checks every cited
-report with `evidenceMismatches`.
+`docs/computer-certification/<evidenceId>.json`, the `artifactSha256` of the packaged
+candidate build that run exercised, and what its runtime needs to work: `toolNames` for
+Claude, `toolInventorySha256` plus advertised definitions for every allowed tool for
+Codex Chrome, and `toolInventorySha256` for Sky. Runtime never reads `docs/`; the desktop
+smoke test asserts the records are bundled into main. No record in this build carries an
+`evidenceId`, so every gate is closed and each surface shows the specific reason
+(platform, architecture, custom binary, home mismatch, isolated profile, awaiting
+certification). A report supports a record only when every required assertion is `true`,
+versions and inventory match, and its `artifactSha256` equals the record's; a unit test
+re-checks every cited report with `evidenceMismatches`. Stamping a record changes the
+bundle, so the digest names the certified candidate; nothing compares it to the release
+that embeds the record.
 
 `bun apps/server/scripts/generate-claude-chrome-descriptor.ts --check` (CI job
 `macos-descriptor-drift`) re-extracts the Claude descriptor from the pinned CLI and fails
 on drift, comparing parsed JSON so formatting never counts. Writing runs the repository
-formatter. Regenerating keeps older records, because journals reference them; retiring
-one takes `--withdraw <id> --reason <note>`. `bun run sdk:audit` fails when a
+formatter. Regenerating keeps older records, because journals reference them, and keeps
+any withdrawal. `--withdraw <id> --reason <note>` retires any record, including the
+current CLI's (the emergency off-switch); `--evidence` refuses a withdrawn record unless
+`--reinstate` is passed. `bun run sdk:audit` fails when a
 non-withdrawn `claude-chrome` record names an SDK version other than the pin, so support
 never disappears silently on an SDK bump.
 `COMPUTER_CHROME_APP_IDS` is the union of every record's browser bundle IDs; native
@@ -648,12 +654,18 @@ disconnect, backend replacement or shutdown, main invalidates the generation
 synchronously, sends `SIGTERM` to the group and `SIGKILL` after 1 s (normal shutdown gives
 2 s), even when the server is frozen. Exit means the whole group is gone: the lease is
 released only once no live member remains (zombies excluded), or the leader's PID now
-belongs to a different process. A failed or unparsable `ps` read counts as unknown and
-never as exit. If no exit is seen within 5 s the holder becomes `recovery-required`,
+belongs to a different process. A failed `ps` read, or a row whose IDs are unreadable,
+counts as unknown and never as exit; a row with an unreadable start time still counts as a
+live member. If no exit is seen within 5 s the holder becomes `recovery-required`,
 persisted by desktop main, and new Chrome ownership and conflicting native control are
-refused. ⌃⌘Esc also stops idle Chrome-enabled sessions; their generation stays
-invalidated, refusing new registrations and leases, until the user resumes. Main never signals Chrome, unrelated native hosts
-or terminal Claude. Server-side cleanup is an idempotent finalizer that runs even when
+refused. Main keeps sending `SIGKILL` to a recovery group (start time re-checked each time)
+and clears it once the group is gone. Live registrations are persisted too: after a
+crash, the next launch treats them as orphans, stops them the same way (`SIGTERM`, then
+`SIGKILL`) and blocks Chrome until they are gone. Quitting awaits the shutdown stop, until
+every group has exited or been persisted for recovery, within the 6 s cleanup budget.
+⌃⌘Esc also stops idle Chrome-enabled sessions; their generation stays invalidated,
+refusing new registrations and leases, until the user resumes. Main never signals Chrome,
+unrelated native hosts or terminal Claude. Server-side cleanup is an idempotent finalizer that runs even when
 event publication or SDK cleanup throws.
 
 ### Journal and restore
@@ -693,23 +705,33 @@ child. Every call is admitted in F5's own transport:
   `node_repl`; only `js` and `js_reset` are exposed;
 - the user consents once per session generation (consent kind `chrome-session`) before
   the child is first spawned; declining never starts it;
+- the app, plugin, `node_repl` and helper are inspected again (signatures through a cache
+  keyed by the bundle's identity and seal) right before each spawn, which can be hours
+  after session start; a change refuses the spawn;
 - the paged live inventory hashes to the record's `toolInventorySha256` and its schemas
   match the advertised ones; until then every call is denied, and `tools/list_changed`
-  re-verifies;
+  re-lists (without a second `initialize`) and re-verifies;
+- a call is tracked from its first await, so a cancel during consent, checks or
+  verification stops it before it is forwarded;
 - live policy, session generation and pause are checked on every call, and again after
   the lease wait and immediately before forwarding;
 - the native-host registrations, the helper link's realpath and the helper binary's file
   fingerprint still match the snapshot taken at session start;
-- a Chrome lease is acquired for the call and released when the session's last call
-  settles (parallel calls share it), so an idle Codex session never blocks Chrome or
-  native control.
+- a Chrome lease is acquired before the first forwarded call and held for the child's
+  whole life, because `node_repl` keeps state and code a call started (timers,
+  listeners) can outlive it. An idle child is stopped after 60 s, like an idle native
+  lease. The proxy releases when the child exits, and main keeps the lease until every
+  process in its group is gone, stopping whatever remains.
 
-Pause, interrupts, the client's own `notifications/cancelled` and a 120 s per-call
-deadline cancel the call, keep the lease while it drains for up to 10 s, then kill the
-child; leases of orphaned calls are released on the observed exit. Late responses after a
-generation change are discarded. Requests the child sends to F5 get "method not found",
-and an output line over 16 MB kills the child. The `node_repl` source and output are
-fully masked in F5's activity.
+Pause, interrupts and turning the integration off cancel in-flight calls and stop the
+child (`SIGTERM`, then `SIGKILL` after 3 s), so background work stops too. The client's
+own `notifications/cancelled` and a 120 s per-call deadline cancel just that call; a
+child that doesn't answer within 10 s is killed. Late responses after a generation change
+are discarded. Requests the child sends to F5 get "method not found", and an output line
+over 16 MB kills the child. Each MCP connection has its own id space, so a late
+cancellation from a previous connection never names a live call. Stdio errors on a dead
+child's pipes are absorbed rather than crashing the server. The `node_repl` source and
+output are fully masked in F5's activity.
 
 Requirements: an isolated effective Codex home (the instance's `homePath`, else an
 inherited `CODEX_HOME`, else `~/.codex`, which never qualifies), Full access (`node_repl` runs

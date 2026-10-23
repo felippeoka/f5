@@ -20,7 +20,8 @@ const execCodesign: CodeSignatureExec = (file, args) =>
     execFile(
       file,
       [...args],
-      { timeout: 10_000, maxBuffer: 1024 * 1024 },
+      // `--deep` over a large app bundle can take well over 10 s on a cold disk.
+      { timeout: 60_000, maxBuffer: 1024 * 1024 },
       (error, stdout, stderr) => (error ? reject(error) : resolve({ stdout, stderr })),
     ),
   );
@@ -102,8 +103,9 @@ export async function codeSignatureFingerprint(path: string): Promise<string> {
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 /**
- * Availability probes may reuse a result for 10 minutes while the bundle's metadata is
- * unchanged. Session start must call `verifyCodeSignature` directly, uncached.
+ * Reuses a result for 10 minutes while the bundle's identity (realpath, inode, size,
+ * mtime) and its signature seal are unchanged; a replaced or updated bundle is always
+ * verified again.
  */
 export class CodeSignatureCache {
   private readonly entries = new Map<

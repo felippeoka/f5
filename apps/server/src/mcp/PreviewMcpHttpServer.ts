@@ -348,7 +348,19 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
           writeJson(response, 404, { error: "expired_mcp_session" });
           return;
         }
+      } else if (catalog === "integration") {
+        // Each connection gets its own id space, so a late `notifications/cancelled` from a
+        // previous connection can never name a live call after Codex reconnects.
+        if (requests.some((entry) => asObject(entry).method === "initialize")) {
+          scope.rpcIncarnation = randomUUID();
+          response.setHeader("Mcp-Session-Id", scope.rpcIncarnation);
+        }
       }
+      const requestIncarnation = request.headers["mcp-session-id"];
+      const incarnation =
+        catalog === "integration" && typeof requestIncarnation === "string"
+          ? requestIncarnation
+          : (scope.rpcIncarnation ?? scope.automationSessionId);
       const results = (
         await Promise.all(
           requests.map((entry) =>
@@ -357,7 +369,7 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
               token,
               catalog,
               ...(scope.integration ? { integration: scope.integration } : {}),
-              invocationKey: (id) => `${scope.rpcIncarnation ?? scope.automationSessionId}:${id}`,
+              invocationKey: (id) => `${incarnation}:${id}`,
               callTool,
             }),
           ),
@@ -486,8 +498,8 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
           enabled: true,
           bearerTokenEnvVar: envVarName,
           supportsParallelToolCalls: false,
-          // The integration spawns and verifies its child on the first list.
-          startupTimeoutSec: catalog === "integration" ? 60 : 10,
+          // Listing answers from the record; the child starts on the first admitted call.
+          startupTimeoutSec: 10,
           // Explicit, above the longest broker deadline (60 s executor + 2 s grace).
           toolTimeoutSec:
             catalog === "integration"

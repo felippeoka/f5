@@ -84,6 +84,16 @@ afterEach(() => {
 });
 
 describe("process listing", () => {
+  it("keeps a row with an unreadable start time; only unreadable IDs make the listing unknown", () => {
+    expect(parseProcessListing("  100 50 100 S garbage\n  7 1 7 S\n")).toEqual([
+      { pid: 100, ppid: 50, pgid: 100, zombie: false, startTime: undefined },
+      { pid: 7, ppid: 1, pgid: 7, zombie: false, startTime: undefined },
+    ]);
+    expect(
+      parseProcessListing("  100 50 100 Ss Wed Oct 22 17:29:15 2026\n  ?? 1 7 S\n"),
+    ).toBeNull();
+  });
+
   it("reads lstart as UTC whatever the local zone, and refuses partial listings", () => {
     expect(
       parseProcessListing(
@@ -99,7 +109,6 @@ describe("process listing", () => {
       },
       { pid: 101, ppid: 100, pgid: 100, zombie: true, startTime: Date.UTC(2026, 9, 2, 3, 4, 5) },
     ]);
-    expect(parseProcessListing("  100 50 100 S garbage\n")).toBeNull();
     expect(parseProcessListing("")).toBeNull();
   });
 
@@ -116,7 +125,7 @@ describe("process listing", () => {
       const rows = await defaultChromeProcessIo.snapshot();
       const row = rows?.find((entry) => entry.pid === child.pid);
       expect(row).toMatchObject({ ppid: process.pid, pgid: child.pid, zombie: false });
-      expect(Math.abs(row!.startTime - startTime)).toBeLessThan(2_000);
+      expect(Math.abs(row!.startTime! - startTime)).toBeLessThan(2_000);
       const supervisor = new ChromeProcessSupervisor();
       await supervisor.register(
         registration({ pid: child.pid!, pgid: child.pid!, startTime }),
@@ -291,10 +300,87 @@ describe("ChromeProcessSupervisor", () => {
     h.state.listing = true;
     await h.advance(500);
     expect(restarted.recoveryRequired()).toBe(true);
+    // Main keeps stopping it itself, with the start time re-checked each time.
+    expect(h.signals.filter(([pgid]) => pgid === 100).length).toBeGreaterThan(2);
     h.processes.delete(100);
     await h.advance(500);
     expect(restarted.recoveryRequired()).toBe(false);
-    expect(JSON.parse(readFileSync(statePath, "utf8"))).toEqual({ recovery: [] });
+    expect(JSON.parse(readFileSync(statePath, "utf8"))).toEqual({ recovery: [], live: [] });
+  });
+
+  it("finds a crashed run's live groups, stops them and blocks Chrome until they are gone", async () => {
+    dir = mkdtempSync(join(tmpdir(), "f5-chrome-supervisor-"));
+    const statePath = join(dir, "chrome-recovery.json");
+    const h = fakeIo();
+    const crashed = new ChromeProcessSupervisor({ io: h.io, statePath });
+    await crashed.register(registration(), BACKEND);
+    // No stop ever runs: the desktop crashed with the group alive.
+    const next = new ChromeProcessSupervisor({ io: h.io, statePath });
+    expect(next.recoveryRequired()).toBe(true);
+    await h.advance(250);
+    expect(h.signals).toEqual([[100, "SIGTERM"]]);
+    await h.advance(250);
+    expect(next.recoveryRequired()).toBe(false);
+  });
+
+  it("never signals a crashed run's group whose PID now belongs to another process", async () => {
+    dir = mkdtempSync(join(tmpdir(), "f5-chrome-supervisor-"));
+    const statePath = join(dir, "chrome-recovery.json");
+    const h = fakeIo();
+    await new ChromeProcessSupervisor({ io: h.io, statePath }).register(registration(), BACKEND);
+    h.processes.set(100, { ppid: 1, pgid: 100, startTime: 70_000, zombie: false });
+    const next = new ChromeProcessSupervisor({ io: h.io, statePath });
+    await h.advance(1_000);
+    expect(h.signals).toEqual([]);
+    expect(next.recoveryRequired()).toBe(false);
+  });
+
+  it("shutdown waits for a group that ignores SIGTERM to be killed", async () => {
+    const h = fakeIo();
+    const supervisor = new ChromeProcessSupervisor({ io: h.io });
+    await supervisor.register(registration(), BACKEND);
+    h.state.ignoreSignals = true;
+    let settled = false;
+    const done = supervisor
+      .stopAndWait(() => true, "shutdown")
+      .then(() => {
+        settled = true;
+      });
+    await h.advance(2_500);
+    expect(h.signals).toEqual([[100, "SIGTERM"]]);
+    expect(settled).toBe(false);
+    h.state.ignoreSignals = false;
+    await h.advance(1_000);
+    await done;
+    expect(h.signals).toContainEqual([100, "SIGKILL"]);
+    expect(supervisor.alive(() => true)).toBe(false);
+  });
+
+  it("shutdown resolves once an unkillable group is persisted for recovery", async () => {
+    dir = mkdtempSync(join(tmpdir(), "f5-chrome-supervisor-"));
+    const statePath = join(dir, "chrome-recovery.json");
+    const h = fakeIo();
+    const supervisor = new ChromeProcessSupervisor({ io: h.io, statePath });
+    await supervisor.register(registration(), BACKEND);
+    h.state.ignoreSignals = true;
+    const done = supervisor.stopAndWait(() => true, "shutdown");
+    await h.advance(5_000);
+    await done;
+    expect(supervisor.recoveryRequired()).toBe(true);
+    expect(JSON.parse(readFileSync(statePath, "utf8")).recovery).toHaveLength(1);
+  });
+
+  it("keeps a group alive when its leader's start time is unreadable", async () => {
+    const h = fakeIo();
+    const supervisor = new ChromeProcessSupervisor({ io: h.io });
+    await supervisor.register(registration(), BACKEND);
+    h.processes.set(100, { ppid: BACKEND, pgid: 100, startTime: undefined, zombie: false });
+    h.state.ignoreSignals = true;
+    supervisor.stop(() => true, "emergency");
+    await h.advance(0);
+    // Still signalled as alive, never released as if it were gone.
+    expect(h.signals).toEqual([[100, "SIGTERM"]]);
+    expect(supervisor.alive(() => true)).toBe(true);
   });
 });
 

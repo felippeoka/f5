@@ -13,6 +13,7 @@ import {
   CODEX_CHROME_NEEDS_ISOLATED_HOME,
   codexChromeChildEnvironment,
   codexChromeInstructions,
+  codexChromeInstallationUnchanged,
   codexChromeRegistrationsUnchanged,
   inspectCodexChrome,
   type CodexChromeInstallation,
@@ -95,7 +96,7 @@ export async function codexChromeEligibility(input: {
 /**
  * One proxied `node_repl` per session generation. Session consent is asked on the
  * first call; every call still passes live policy, pause, generation, the registration
- * snapshot, the verified inventory and a per-call Chrome lease.
+ * snapshot, the verified inventory and the Chrome lease held for the child's life.
  */
 export function makeCodexChromeProxy(input: {
   readonly threadId: string;
@@ -107,6 +108,7 @@ export function makeCodexChromeProxy(input: {
   readonly policyEnabled: () => Promise<boolean>;
   readonly processEnvironment?: NodeJS.ProcessEnv;
   readonly stateChanged?: (state: IntegrationProxyState, detail?: string) => void;
+  readonly inspect?: typeof inspectCodexChrome;
 }): { readonly session: IntegrationProxySession; readonly instructions: string } {
   const { installation, codexHome } = input.eligibility;
   const { broker } = input;
@@ -153,6 +155,18 @@ export function makeCodexChromeProxy(input: {
         ? undefined
         : "The ChatGPT Chrome helper's setup changed. Start a new session to use Chrome.";
     },
+    // The child may start hours after the session: signatures and versions are checked
+    // again so an app update in between never runs under the session's verification.
+    beforeSpawn: async () => {
+      const current = await (input.inspect ?? inspectCodexChrome)({
+        userHome: input.userHome,
+        record: installation.record,
+      });
+      if (!current.available) return current.reason;
+      return codexChromeInstallationUnchanged(installation, current)
+        ? undefined
+        : "The ChatGPT app changed since this session started. Start a new session to use Chrome.";
+    },
     acquireLease: async () => {
       await broker.host.correlated(
         { type: "chromeLeaseAcquire", requestId: randomUUID(), holder },
@@ -165,7 +179,7 @@ export function makeCodexChromeProxy(input: {
     ...(input.stateChanged ? { stateChanged: input.stateChanged } : {}),
     disposed: () => offPause(),
   });
-  // Pause cancels in-flight calls; their leases drain on response or observed exit.
+  // Pause cancels in-flight calls and stops the child; the lease ends once its group exits.
   const offPause = broker.pause.subscribe((threadId, paused) => {
     if (paused && threadId === input.threadId) session.cancel();
   });

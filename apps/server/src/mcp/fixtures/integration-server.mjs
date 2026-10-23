@@ -1,5 +1,8 @@
 // Stdio MCP fixture for IntegrationProxySession tests. Behaviour is selected by env:
-// FIXTURE_TOOLS (JSON array of tool names), FIXTURE_PAGE_SIZE, FIXTURE_REVERSE=1.
+// FIXTURE_TOOLS (JSON array of tool names), FIXTURE_PAGE_SIZE, FIXTURE_REVERSE=1,
+// FIXTURE_INIT_DELAY (ms before answering `initialize`) and FIXTURE_MARKER (a file the
+// `worker` call's background process appends to).
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 let tools = JSON.parse(process.env.FIXTURE_TOOLS ?? '["js","js_reset","extra"]');
@@ -8,7 +11,10 @@ const schema = { type: "object", properties: { code: { type: "string" } } };
 const listed = () => (process.env.FIXTURE_REVERSE === "1" ? [...tools].reverse() : tools);
 const send = (message) =>
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+const reply = (id, text) => send({ id, result: { content: [{ type: "text", text }] } });
 
+let initialized = false;
+let calls = 0;
 const waitingForClient = new Map();
 createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line);
@@ -20,19 +26,26 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (request.method === undefined && waitingForClient.has(request.id)) {
     const callId = waitingForClient.get(request.id);
     waitingForClient.delete(request.id);
-    send({
-      id: callId,
-      result: { content: [{ type: "text", text: `answered ${request.error?.code}` }] },
-    });
+    reply(callId, `answered ${request.error?.code}`);
     return;
   }
   if (request.id === undefined) return;
   switch (request.method) {
     case "initialize":
-      send({
-        id: request.id,
-        result: { protocolVersion: "2024-11-05", capabilities: { tools: {} } },
-      });
+      // One initialization per connection, as MCP requires.
+      if (initialized) {
+        send({ id: request.id, error: { code: -32600, message: "already initialized" } });
+        return;
+      }
+      initialized = true;
+      setTimeout(
+        () =>
+          send({
+            id: request.id,
+            result: { protocolVersion: "2024-11-05", capabilities: { tools: {} } },
+          }),
+        Number(process.env.FIXTURE_INIT_DELAY ?? "0"),
+      );
       return;
     case "tools/list": {
       const start = Number(request.params?.cursor ?? "0");
@@ -53,22 +66,39 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     }
     case "tools/call": {
       const code = request.params?.arguments?.code ?? "";
+      if (code === "count") return reply(request.id, `calls ${calls}`);
+      calls += 1;
       if (code === "hang") return;
       if (code === "ask") {
         waitingForClient.set("server-1", request.id);
         send({ id: "server-1", method: "sampling/createMessage", params: {} });
         return;
       }
+      if (code === "flood") {
+        process.stdout.write("x".repeat(64 * 1024));
+        return;
+      }
+      if (code === "worker") {
+        // Background work that outlives the call, in the same process group.
+        spawn(
+          process.execPath,
+          [
+            "-e",
+            `setInterval(() => require("node:fs").appendFileSync(${JSON.stringify(
+              process.env.FIXTURE_MARKER,
+            )}, "x"), 20)`,
+          ],
+          { stdio: "ignore" },
+        );
+        return reply(request.id, "ran worker");
+      }
       if (code === "change") {
         tools = [...tools, "added"];
         send({ method: "notifications/tools/list_changed" });
       }
+      if (code === "touch") send({ method: "notifications/tools/list_changed" });
       const delay = code === "slow" ? 150 : 0;
-      setTimeout(
-        () =>
-          send({ id: request.id, result: { content: [{ type: "text", text: `ran ${code}` }] } }),
-        delay,
-      );
+      setTimeout(() => reply(request.id, `ran ${code}`), delay);
       return;
     }
     default:

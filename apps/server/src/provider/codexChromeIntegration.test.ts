@@ -90,7 +90,8 @@ describe("Codex Chrome eligibility", () => {
     expect(inspect).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the CODEX_HOME Codex itself runs with", () => {
+  // POSIX home paths; Codex Chrome is macOS only.
+  it.skipIf(process.platform === "win32")("uses the CODEX_HOME Codex itself runs with", () => {
     expect(effectiveCodexHome("/configured", { CODEX_HOME: "/inherited" })).toBe("/configured");
     // An isolated profile (or the user) already points Codex at its own home.
     expect(effectiveCodexHome(undefined, { CODEX_HOME: "/inherited" })).toBe("/inherited");

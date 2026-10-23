@@ -21,6 +21,8 @@ export const INTEGRATION_PROTOCOL_VERSION = "2024-11-05";
 const DRAIN_KILL_MS = 10_000;
 const TEARDOWN_KILL_MS = 3_000;
 const HANDSHAKE_TIMEOUT_MS = 30_000;
+/** Matches native control: an idle child is stopped, which releases the browser. */
+const IDLE_STOP_MS = 60_000;
 const MAX_TOOL_PAGES = 32;
 /** One JSON-RPC line; a child that streams more without a newline is killed. */
 const MAX_LINE_BYTES = 16 * 1024 * 1024;
@@ -45,7 +47,9 @@ export function toolInventorySha256(tools: ReadonlyArray<IntegrationTool>): stri
 /** Newline-delimited JSON-RPC over a registered child's stdio. */
 class StdioRpc {
   private nextId = 1;
-  private buffer = "";
+  /** Bytes of the current, unterminated line; each chunk is scanned once. */
+  private partial: Buffer[] = [];
+  private partialBytes = 0;
   private readonly pending = new Map<
     number,
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
@@ -54,9 +58,11 @@ class StdioRpc {
     private readonly child: RegisteredProcess,
     private readonly onNotification: (method: string, params: unknown) => void,
     private readonly onOverflow: () => void,
+    private readonly maxLineBytes: number,
   ) {
-    child.stdout.setEncoding?.("utf8");
-    child.stdout.on("data", (chunk: string | Buffer) => this.receive(chunk.toString()));
+    child.stdout.on("data", (chunk: string | Buffer) =>
+      this.receive(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
+    );
     child.stdout.on("end", () => {
       this.closed = true;
       this.failAll(new Error("The integration process exited."));
@@ -64,52 +70,68 @@ class StdioRpc {
   }
   /** Stdout ended: the child is exiting even if its `exit` event hasn't arrived yet. */
   closed = false;
-  private receive(chunk: string): void {
-    this.buffer += chunk;
-    if (this.buffer.length > MAX_LINE_BYTES && !this.buffer.includes("\n")) {
-      this.buffer = "";
-      this.failAll(new Error("The integration sent an oversized message."));
-      this.onOverflow();
+  private overflowed = false;
+  private receive(chunk: Buffer): void {
+    if (this.overflowed) return;
+    let rest = chunk;
+    for (let index = rest.indexOf(0x0a); index >= 0; index = rest.indexOf(0x0a)) {
+      const line =
+        this.partial.length === 0
+          ? rest.subarray(0, index)
+          : Buffer.concat([...this.partial, rest.subarray(0, index)]);
+      this.partial = [];
+      this.partialBytes = 0;
+      rest = rest.subarray(index + 1);
+      if (line.length > this.maxLineBytes) return this.overflow();
+      this.handleLine(line.toString("utf8").trim());
+    }
+    if (rest.length === 0) return;
+    this.partial.push(rest);
+    this.partialBytes += rest.length;
+    if (this.partialBytes > this.maxLineBytes) this.overflow();
+  }
+  private overflow(): void {
+    this.overflowed = true;
+    this.partial = [];
+    this.partialBytes = 0;
+    this.failAll(new Error("The integration sent an oversized message."));
+    this.onOverflow();
+  }
+  private handleLine(line: string): void {
+    if (!line) return;
+    let message: {
+      id?: unknown;
+      method?: unknown;
+      params?: unknown;
+      result?: unknown;
+      error?: { message?: unknown };
+    };
+    try {
+      message = JSON.parse(line);
+    } catch {
       return;
     }
-    for (let index = this.buffer.indexOf("\n"); index >= 0; index = this.buffer.indexOf("\n")) {
-      const line = this.buffer.slice(0, index).trim();
-      this.buffer = this.buffer.slice(index + 1);
-      if (!line) continue;
-      let message: {
-        id?: unknown;
-        method?: unknown;
-        params?: unknown;
-        result?: unknown;
-        error?: { message?: unknown };
-      };
-      try {
-        message = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (typeof message.method === "string") {
-        if (message.id === undefined) this.onNotification(message.method, message.params);
-        // F5 offers no client capabilities (sampling, roots, elicitation): answer at once
-        // so a child waiting on one fails instead of hanging until the drain kills it.
-        else
-          this.child.stdin.write(
-            `${JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              error: { code: -32601, message: "F5 doesn't support this request." },
-            })}\n`,
-          );
-        continue;
-      }
-      // Late or unknown ids (a dropped generation's response) are ignored.
-      const waiter = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
-      if (!waiter) continue;
-      this.pending.delete(message.id as number);
-      if (message.error)
-        waiter.reject(new Error(String(message.error.message ?? "Integration error.")));
-      else waiter.resolve(message.result);
+    if (typeof message.method === "string") {
+      if (message.id === undefined) this.onNotification(message.method, message.params);
+      // F5 offers no client capabilities (sampling, roots, elicitation): answer at once
+      // so a child waiting on one fails instead of hanging until the drain kills it.
+      else
+        this.child.stdin.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: "F5 doesn't support this request." },
+          })}\n`,
+        );
+      return;
     }
+    // Late or unknown ids (a dropped generation's response) are ignored.
+    const waiter = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
+    if (!waiter) return;
+    this.pending.delete(message.id as number);
+    if (message.error)
+      waiter.reject(new Error(String(message.error.message ?? "Integration error.")));
+    else waiter.resolve(message.result);
   }
   request(
     method: string,
@@ -145,22 +167,24 @@ class StdioRpc {
       `${JSON.stringify({ jsonrpc: "2.0", method, ...(params ? { params } : {}) })}\n`,
     );
   }
-  forget(id: number): void {
-    this.pending.delete(id);
-  }
   failAll(error: Error): void {
     for (const waiter of this.pending.values()) waiter.reject(error);
     this.pending.clear();
   }
 }
 
-export type IntegrationCallState = "admitted" | "forwarded" | "settled" | "cancelled" | "orphaned";
+export type IntegrationCallState =
+  | "admitting"
+  | "admitted"
+  | "forwarded"
+  | "settled"
+  | "cancelled"
+  | "orphaned";
 interface TrackedCall {
   readonly callId: string;
   readonly generation: string;
   state: IntegrationCallState;
   requestId?: number;
-  leaseHeld: boolean;
 }
 
 export type IntegrationProxyState = "pending" | "connected" | "failed" | "unavailable";
@@ -192,7 +216,13 @@ export interface IntegrationProxyDeps {
   readonly consent: () => Promise<boolean>;
   /** Integration-specific admission (for example: registrations unchanged). */
   readonly check?: () => Promise<string | undefined>;
-  /** Per call: acquired at admission, released at settlement or observed exit. */
+  /** Re-verifies the installation right before each spawn (signatures, versions). */
+  readonly beforeSpawn?: () => Promise<string | undefined>;
+  /**
+   * Held from the first forwarded call for the child's whole life: code a call started
+   * can outlive it. Released when the child exits; main keeps ownership until it has seen
+   * every process in the group gone. Acquisition is idempotent per holder.
+   */
   readonly acquireLease: () => Promise<void>;
   readonly releaseLease: () => void;
   readonly stateChanged?: (state: IntegrationProxyState, detail?: string) => void;
@@ -203,14 +233,18 @@ export interface IntegrationProxyDeps {
   readonly spawn?: typeof spawnRegisteredProcess;
   readonly drainKillMs?: number;
   readonly teardownKillMs?: number;
+  /** An idle child is stopped after this long, releasing the browser. */
+  readonly idleStopMs?: number;
   /** Per-call deadline; a call past it is cancelled and drained like an interrupt. */
   readonly callTimeoutMs?: number;
+  readonly maxLineBytes?: number;
 }
 
 const errorResult = (text: string): McpToolResult => ({
   isError: true,
   content: [{ type: "text", text }],
 });
+const INTERRUPTED = "Computer control was interrupted. Ask the user to resume.";
 
 export class IntegrationProxySession {
   private child: RegisteredProcess | undefined;
@@ -218,13 +252,15 @@ export class IntegrationProxySession {
   private ready: Promise<ReadonlyArray<IntegrationTool>> | undefined;
   /** The child `ready` was verified on; undefined while waiting for a dying one. */
   private readyChild: RegisteredProcess | undefined;
+  /** MCP allows one `initialize` per connection; re-verification only re-lists. */
+  private initializedChild: RegisteredProcess | undefined;
   private readyAttempts = 0;
   private readonly calls = new Map<string, TrackedCall>();
   private drainTimer: ReturnType<typeof setTimeout> | undefined;
+  private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
   private consented = false;
-  /** Calls counting on the shared per-session holder; released at zero. */
-  private leaseHolders = 0;
+  private leaseHeld = false;
   constructor(private readonly deps: IntegrationProxyDeps) {}
 
   get inFlight(): ReadonlyArray<{ callId: string; state: IntegrationCallState }> {
@@ -250,9 +286,11 @@ export class IntegrationProxySession {
       child,
       (method) => {
         // A changed inventory must be verified again before any further call.
-        if (method === "notifications/tools/list_changed") this.ready = undefined;
+        if (method === "notifications/tools/list_changed" && this.readyChild === child)
+          this.ready = undefined;
       },
       () => child.kill("SIGKILL"),
+      this.deps.maxLineBytes ?? MAX_LINE_BYTES,
     );
     child.once("exit", () => this.childExited(child));
     this.childExit = new Promise((resolve) => child.once("exit", () => resolve()));
@@ -269,14 +307,47 @@ export class IntegrationProxySession {
     if (this.readyChild === child) this.ready = undefined;
     if (this.drainTimer) clearTimeout(this.drainTimer);
     this.drainTimer = undefined;
-    // Main observed the exit too; whatever was in flight can no longer act.
+    this.clearIdle();
+    // Main observed the exit too; whatever was in flight can no longer act. Calls still
+    // in admission continue and start a new child.
+    // Deleting the current entry while iterating a Map is safe.
     for (const call of this.calls.values()) {
-      if (call.state === "admitted" || call.state === "forwarded" || call.state === "cancelled")
-        call.state = "orphaned";
-      this.releaseCall(call);
+      if (call.state === "admitting") continue;
+      call.state = "orphaned";
+      this.calls.delete(call.callId);
     }
-    this.calls.clear();
+    this.releaseLease();
     if (!this.disposed) this.setState("pending");
+  }
+
+  private releaseLease(): void {
+    if (!this.leaseHeld) return;
+    this.leaseHeld = false;
+    this.deps.releaseLease();
+  }
+  private clearIdle(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+  }
+  /** Nothing in flight: stop an idle child later, or release a lease no child uses. */
+  private idle(): void {
+    if (this.calls.size > 0) return;
+    if (!this.child) return this.releaseLease();
+    if (this.idleTimer || !this.leaseHeld) return;
+    const child = this.child;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined;
+      if (this.child === child && this.calls.size === 0) this.terminate(child);
+    }, this.deps.idleStopMs ?? IDLE_STOP_MS);
+  }
+  /** SIGTERM now, SIGKILL after the teardown grace. The lease is released on exit. */
+  private terminate(child: RegisteredProcess): void {
+    const kill = setTimeout(
+      () => child.kill("SIGKILL"),
+      this.deps.teardownKillMs ?? TEARDOWN_KILL_MS,
+    );
+    child.once("exit", () => clearTimeout(kill));
+    if (!child.kill("SIGTERM")) clearTimeout(kill);
   }
 
   /** Lazily spawns, initializes and verifies the paged inventory against the record. */
@@ -292,20 +363,30 @@ export class IntegrationProxySession {
       // Wait for the dying child rather than reusing it, so two never overlap.
       if (dying) await this.childExit;
       if (this.disposed) throw new Error("The integration session ended.");
-      const child = this.child ?? this.start();
+      let child = this.child;
+      if (!child) {
+        // The installation is checked again now, not only when the session started.
+        const changed = await this.deps.beforeSpawn?.();
+        if (changed) throw new Error(changed);
+        if (this.disposed) throw new Error("The integration session ended.");
+        child = this.child ?? this.start();
+      }
       await child.registered;
       if (this.readyAttempts === attemptNumber) this.readyChild = child;
       const rpc = this.rpc!;
-      await rpc.request(
-        "initialize",
-        {
-          protocolVersion: INTEGRATION_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: { name: "F5", version: "0.0.0" },
-        },
-        { timeoutMs: HANDSHAKE_TIMEOUT_MS },
-      );
-      rpc.notify("notifications/initialized");
+      if (this.initializedChild !== child) {
+        await rpc.request(
+          "initialize",
+          {
+            protocolVersion: INTEGRATION_PROTOCOL_VERSION,
+            capabilities: {},
+            clientInfo: { name: "F5", version: "0.0.0" },
+          },
+          { timeoutMs: HANDSHAKE_TIMEOUT_MS },
+        );
+        rpc.notify("notifications/initialized");
+        this.initializedChild = child;
+      }
       const tools: IntegrationTool[] = [];
       let cursor: string | undefined;
       for (let page = 0; ; page += 1) {
@@ -369,12 +450,18 @@ export class IntegrationProxySession {
     return this.verifiedTools();
   }
 
-  /** Live policy, generation, pause, consent, integration checks, then the inventory. */
+  /**
+   * Live policy, generation, pause, consent, integration checks, then the inventory. The
+   * call is tracked from the start, so a cancel during any of these waits is seen after it.
+   */
   private async admit(
     name: string,
+    call: TrackedCall,
   ): Promise<string | { readonly verified: Promise<ReadonlyArray<IntegrationTool>> }> {
+    const cancelled = () => (call.state === "admitting" ? undefined : INTERRUPTED);
     if (this.disposed) return "The integration session ended.";
     if (!(await this.deps.policyEnabled())) return "This integration is turned off in F5 settings.";
+    if (cancelled()) return INTERRUPTED;
     if (this.deps.currentGeneration() !== this.deps.generation)
       return "This integration is unavailable for this session.";
     if (this.deps.paused()) return "Computer control is paused. Ask the user to resume.";
@@ -384,16 +471,23 @@ export class IntegrationProxySession {
       this.consented = true;
       if (this.deps.paused() || this.deps.currentGeneration() !== this.deps.generation)
         return "Computer control is paused. Ask the user to resume.";
+      if (cancelled()) return INTERRUPTED;
     }
     const failed = await this.deps.check?.();
     if (failed) return failed;
+    if (cancelled()) return INTERRUPTED;
     let tools: ReadonlyArray<IntegrationTool>;
     const verified = this.verifiedTools();
     try {
       tools = await verified;
     } catch (error) {
-      return error instanceof Error ? error.message : "The integration could not be verified.";
+      // A pause stops the child under verification; report the interrupt, not the exit.
+      return (
+        cancelled() ??
+        (error instanceof Error ? error.message : "The integration could not be verified.")
+      );
     }
+    if (cancelled()) return INTERRUPTED;
     if (!tools.some((tool) => tool.name === name)) return `The tool "${name}" isn't allowed in F5.`;
     return { verified };
   }
@@ -404,8 +498,7 @@ export class IntegrationProxySession {
     verified: Promise<ReadonlyArray<IntegrationTool>>,
   ): string | undefined {
     if (this.disposed) return "The integration session ended.";
-    if (call.state !== "admitted" || this.deps.paused())
-      return "Computer control was interrupted. Ask the user to resume.";
+    if (call.state !== "admitted" || this.deps.paused()) return INTERRUPTED;
     if (this.deps.currentGeneration() !== call.generation)
       return "This integration is unavailable for this session.";
     if (this.ready !== verified || !this.rpc || this.rpc.closed || this.child?.killed)
@@ -418,21 +511,21 @@ export class IntegrationProxySession {
     args: unknown,
     requestedId: string = randomUUID(),
   ): Promise<McpToolResult> {
-    const admitted = await this.admit(name);
-    if (typeof admitted === "string") return errorResult(admitted);
     const callId = this.calls.has(requestedId) ? `${requestedId}#${randomUUID()}` : requestedId;
-    // Counted before acquiring: a concurrent call settling meanwhile must not release the
-    // ownership this call is about to rely on. Main's acquire is idempotent per holder.
-    const call: TrackedCall = {
-      callId,
-      generation: this.deps.generation,
-      state: "admitted",
-      leaseHeld: true,
-    };
+    const call: TrackedCall = { callId, generation: this.deps.generation, state: "admitting" };
     this.calls.set(callId, call);
-    this.leaseHolders += 1;
+    this.clearIdle();
+    const admitted = await this.admit(name, call).catch((error: unknown) =>
+      error instanceof Error ? error.message : "The integration could not be verified.",
+    );
+    if (typeof admitted === "string") {
+      this.settle(call, call.state === "admitting" ? "settled" : call.state);
+      return errorResult(admitted);
+    }
+    call.state = "admitted";
     try {
       await this.deps.acquireLease();
+      this.leaseHeld = true;
     } catch (error) {
       this.settle(call, "cancelled");
       return errorResult(
@@ -444,6 +537,8 @@ export class IntegrationProxySession {
     const stale = enabled ? this.stale(call, admitted.verified) : undefined;
     if (!enabled || stale) {
       this.settle(call, "cancelled");
+      // Turned off: nothing an earlier call started may keep running either.
+      if (!enabled) this.cancel();
       return errorResult(stale ?? "This integration is turned off in F5 settings.");
     }
     call.state = "forwarded";
@@ -469,8 +564,8 @@ export class IntegrationProxySession {
         return errorResult(error instanceof Error ? error.message : "The integration call failed.");
       },
     );
-    // Past the deadline the call is cancelled and drained; its lease stays held until the
-    // child answers or exits.
+    // Past the deadline the call is cancelled and drained; the child keeps the lease
+    // until it answers or exits.
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<McpToolResult>((resolve) => {
       deadline = setTimeout(
@@ -491,21 +586,19 @@ export class IntegrationProxySession {
   private settle(call: TrackedCall, state: IntegrationCallState): void {
     call.state = state;
     this.calls.delete(call.callId);
-    this.releaseCall(call);
     if (this.drainTimer && ![...this.calls.values()].some((entry) => entry.state === "cancelled")) {
       clearTimeout(this.drainTimer);
       this.drainTimer = undefined;
     }
-  }
-  /** The shared holder is released only when the last call holding it settles. */
-  private releaseCall(call: TrackedCall): void {
-    if (!call.leaseHeld) return;
-    call.leaseHeld = false;
-    this.leaseHolders -= 1;
-    if (this.leaseHolders === 0) this.deps.releaseLease();
+    this.idle();
   }
 
   private cancelTracked(call: TrackedCall): boolean {
+    if (call.state === "admitting") {
+      // Not yet forwarded: admission sees it after its current wait and stops there.
+      call.state = "cancelled";
+      return false;
+    }
     if (call.state !== "forwarded" && call.state !== "admitted") return false;
     call.state = "cancelled";
     if (call.requestId !== undefined)
@@ -531,35 +624,31 @@ export class IntegrationProxySession {
   }
 
   /**
-   * Pause, interrupt or turn end: cancel in-flight calls. Their leases stay held until a
-   * response arrives or the child exits; a child that doesn't answer in 10 s is killed.
+   * Pause, interrupt or turn end. Calls are cancelled and the child is stopped too, since
+   * code an earlier call started (timers, listeners) can still be driving the browser.
+   * The lease is released once the child has exited.
    */
   cancel(): void {
-    let draining = false;
-    for (const call of this.calls.values()) if (this.cancelTracked(call)) draining = true;
-    if (draining) this.startDrain();
+    for (const call of this.calls.values()) this.cancelTracked(call);
+    this.clearIdle();
+    if (this.child) this.terminate(this.child);
   }
 
   /** Session dispose, credential revocation or shutdown: SIGTERM, then SIGKILL after 3 s. */
   dispose(): Promise<void> {
     if (!this.disposed) this.deps.disposed?.();
     this.disposed = true;
-    this.cancel();
+    for (const call of this.calls.values()) this.cancelTracked(call);
+    this.clearIdle();
     const child = this.child;
-    if (!child) return Promise.resolve();
+    if (!child) {
+      this.releaseLease();
+      return Promise.resolve();
+    }
     return new Promise((resolve) => {
-      const kill = setTimeout(
-        () => child.kill("SIGKILL"),
-        this.deps.teardownKillMs ?? TEARDOWN_KILL_MS,
-      );
-      child.once("exit", () => {
-        clearTimeout(kill);
-        resolve();
-      });
-      if (!child.kill("SIGTERM")) {
-        clearTimeout(kill);
-        resolve();
-      }
+      child.once("exit", () => resolve());
+      this.terminate(child);
+      if (child.exitCode !== null || child.signalCode) resolve();
     });
   }
 }

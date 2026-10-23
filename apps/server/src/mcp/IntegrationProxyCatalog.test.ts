@@ -1,5 +1,8 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { spawnRegisteredProcess } from "../provider/registeredIntegrationProcess";
 import {
   IntegrationProxySession,
@@ -89,6 +92,20 @@ describe("integration proxy", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  it("re-checks the installation before every spawn and never starts a changed one", async () => {
+    let changed: string | undefined;
+    const beforeSpawn = vi.fn(async () => changed);
+    const { session, spawn } = setup({ beforeSpawn, idleStopMs: 50 });
+    expect(text(await session.callTool("js", { code: "a" }))).toBe("ran a");
+    // The idle child stops; an app update lands before the next spawn.
+    await vi.waitFor(() => expect(session.inFlight).toEqual([]));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    changed = "The ChatGPT app changed since this session started.";
+    expect(text(await session.callTool("js", { code: "b" }))).toContain("app changed");
+    expect(beforeSpawn).toHaveBeenCalledTimes(2);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   it("never spawns when the user declines consent", async () => {
     const { session, spawn } = setup({ consent: async () => false });
     expect(text(await session.callTool("js", { code: "a" }))).toContain("didn't allow");
@@ -116,9 +133,48 @@ describe("integration proxy", () => {
     expect(text(await session.callTool("js", { code: "a" }))).toBe("ran a");
     expect(text(await session.callTool("js", { code: "b" }))).toBe("ran b");
     expect(consent).toHaveBeenCalledTimes(1);
-    expect(releaseLease).toHaveBeenCalledTimes(2);
-    expect(state.held).toBe(false);
+    // Held for the child's life, not per call: code a call started can outlive it.
+    expect(releaseLease).not.toHaveBeenCalled();
+    expect(state.held).toBe(true);
     expect(text(await session.callTool("extra", {}))).toContain("isn't allowed");
+  });
+
+  it("stops an idle child and releases the lease once it has exited", async () => {
+    const { session, state, exited } = setup({ idleStopMs: 100 });
+    expect(text(await session.callTool("js", { code: "a" }))).toBe("ran a");
+    expect(state.held).toBe(true);
+    await vi.waitFor(() => expect(exited).toHaveBeenCalledTimes(1));
+    expect(state.held).toBe(false);
+    // The next call starts a new child without asking again.
+    expect(text(await session.callTool("js", { code: "b" }))).toBe("ran b");
+  });
+
+  it("never forwards a call cancelled while consent is pending", async () => {
+    let answer: (allowed: boolean) => void = () => undefined;
+    const { session, spawn, acquireLease } = setup({
+      consent: () =>
+        new Promise<boolean>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const pending = session.callTool("js", { code: "a" }, "c1");
+    await vi.waitFor(() => expect(session.inFlight).toHaveLength(1));
+    session.cancelCall("c1");
+    answer(true);
+    expect(text(await pending)).toContain("interrupted");
+    expect(spawn).not.toHaveBeenCalled();
+    expect(acquireLease).not.toHaveBeenCalled();
+  });
+
+  it("never forwards a call cancelled while the inventory is being verified", async () => {
+    const { session, spawn, acquireLease } = setup({ env: { FIXTURE_INIT_DELAY: "150" } });
+    const pending = session.callTool("js", { code: "a" }, "c1");
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+    session.cancel();
+    expect(text(await pending)).toContain("interrupted");
+    expect(acquireLease).not.toHaveBeenCalled();
+    // Pause also stopped the child; a fresh one has received no call at all.
+    expect(text(await session.callTool("js", { code: "count" }))).toBe("calls 0");
   });
 
   it("checks live policy, pause and generation on every call", async () => {
@@ -144,39 +200,62 @@ describe("integration proxy", () => {
     });
     const result = await session.callTool("js", { code: "a" });
     expect(text(result)).toContain("turned off");
-    expect(state.held).toBe(false);
     expect(session.inFlight).toEqual([]);
+    // The child is stopped and ownership ends once it has exited.
+    await vi.waitFor(() => expect(state.held).toBe(false));
   });
 
-  it("re-verifies after tools/list_changed and then denies a changed inventory", async () => {
-    const { session } = setup();
+  it("re-verifies after tools/list_changed without initializing the child again", async () => {
+    const { session, spawn } = setup();
+    // The fixture rejects a second `initialize`, as MCP allows only one per connection.
+    expect(text(await session.callTool("js", { code: "touch" }))).toBe("ran touch");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(text(await session.callTool("js", { code: "a" }))).toBe("ran a");
+    expect(spawn).toHaveBeenCalledTimes(1);
     expect(text(await session.callTool("js", { code: "change" }))).toBe("ran change");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(text(await session.callTool("js", { code: "a" }))).toContain("tools changed");
   });
 
-  it("drops a late response after the generation changes and releases its lease", async () => {
+  it("drops a late response after the generation changes", async () => {
     const { session, state } = setup();
     const pending = session.callTool("js", { code: "slow" });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.waitFor(() =>
+      expect(session.inFlight).toEqual([expect.objectContaining({ state: "forwarded" })]),
+    );
     state.generation = "g2";
     expect(text(await pending)).toContain("discarded");
-    expect(state.held).toBe(false);
+    expect(session.inFlight).toEqual([]);
   });
 
-  it("cancels on pause, keeps the lease while draining, kills a hung child and then releases", async () => {
-    const { session, state, exited } = setup();
-    expect(text(await session.callTool("js", { code: "warm" }))).toBe("ran warm");
+  it("stops the child and its background work on pause, then releases", async () => {
+    const markerDir = mkdtempSync(join(tmpdir(), "f5-proxy-"));
+    onTestFinished(() => rmSync(markerDir, { recursive: true, force: true }));
+    const marker = join(markerDir, "marker");
+    writeFileSync(marker, "");
+    const { session, state, exited } = setup({ env: { FIXTURE_MARKER: marker } });
+    expect(text(await session.callTool("js", { code: "worker" }))).toBe("ran worker");
+    await vi.waitFor(() => expect(readFileSync(marker, "utf8").length).toBeGreaterThan(2));
     const pending = session.callTool("js", { code: "hang" });
     await vi.waitFor(() =>
       expect(session.inFlight).toEqual([expect.objectContaining({ state: "forwarded" })]),
     );
     session.cancel();
     expect(session.inFlight[0]?.state).toBe("cancelled");
+    // Ownership stays until the child has exited.
     expect(state.held).toBe(true);
-    const result = await pending;
-    expect(result.isError).toBe(true);
+    expect((await pending).isError).toBe(true);
+    await vi.waitFor(() => expect(exited).toHaveBeenCalledTimes(1));
     expect(state.held).toBe(false);
+    const stopped = readFileSync(marker, "utf8").length;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    // The worker shared the child's process group and was stopped with it.
+    expect(readFileSync(marker, "utf8").length).toBe(stopped);
+  });
+
+  it("kills a child that streams an oversized line", async () => {
+    const { session, exited } = setup({ maxLineBytes: 16 * 1024 });
+    expect(text(await session.callTool("js", { code: "flood" }))).toContain("oversized");
     await vi.waitFor(() => expect(exited).toHaveBeenCalledTimes(1));
   });
 
@@ -184,7 +263,9 @@ describe("integration proxy", () => {
     const { session, state } = setup({ callTimeoutMs: 300 });
     expect(text(await session.callTool("js", { code: "warm" }, "warm"))).toBe("ran warm");
     const named = session.callTool("js", { code: "hang" }, "c1");
-    await vi.waitFor(() => expect(session.inFlight).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(session.inFlight).toEqual([expect.objectContaining({ state: "forwarded" })]),
+    );
     session.cancelCall("c1");
     expect(session.inFlight[0]?.state).toBe("cancelled");
     expect((await named).isError).toBe(true);
@@ -196,24 +277,23 @@ describe("integration proxy", () => {
     await vi.waitFor(() => expect(state.held).toBe(false));
   });
 
-  it("keeps the shared lease until the last parallel call settles", async () => {
+  it("shares one lease across parallel calls and releases it only when the child exits", async () => {
     const { session, state, releaseLease } = setup();
     const slow = session.callTool("js", { code: "slow" }, "slow");
     await vi.waitFor(() =>
       expect(session.inFlight).toEqual([expect.objectContaining({ state: "forwarded" })]),
     );
     expect(text(await session.callTool("js", { code: "fast" }, "fast"))).toBe("ran fast");
-    // The fast call settled while the slow one is still forwarded: ownership stays.
-    expect(state.held).toBe(true);
-    expect(releaseLease).not.toHaveBeenCalled();
     expect(text(await slow)).toBe("ran slow");
-    expect(state.held).toBe(false);
-    expect(releaseLease).toHaveBeenCalledTimes(1);
     const results = await Promise.all(
       ["a", "b", "c"].map((code) => session.callTool("js", { code }, `call-${code}`)),
     );
     expect(results.map(text)).toEqual(["ran a", "ran b", "ran c"]);
+    expect(state.held).toBe(true);
+    expect(releaseLease).not.toHaveBeenCalled();
+    await session.dispose();
     expect(state.held).toBe(false);
+    expect(releaseLease).toHaveBeenCalledTimes(1);
   });
 
   it("answers server-initiated requests instead of leaving the child waiting", async () => {

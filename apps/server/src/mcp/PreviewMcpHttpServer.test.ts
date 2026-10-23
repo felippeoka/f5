@@ -10,6 +10,7 @@ import type { IntegrationProxySession } from "./IntegrationProxyCatalog.ts";
 interface McpHttpResult {
   readonly status: number;
   readonly body: unknown;
+  readonly sessionId: string | null;
 }
 
 function postMcpHttp(
@@ -17,10 +18,12 @@ function postMcpHttp(
   token: string | null,
   body: unknown,
   method = "POST",
+  extraHeaders: Record<string, string> = {},
 ): Effect.Effect<McpHttpResult, never, never> {
   return Effect.promise(async () => {
     const headers: Record<string, string> = {
       "content-type": "application/json",
+      ...extraHeaders,
     };
     if (token !== null) {
       headers.authorization = `Bearer ${token}`;
@@ -37,6 +40,7 @@ function postMcpHttp(
     return {
       status: response.status,
       body: text.length > 0 ? JSON.parse(text) : null,
+      sessionId: response.headers.get("mcp-session-id"),
     };
   });
 }
@@ -446,6 +450,37 @@ it.effect("routes the integration catalog to its proxy session and revokes it on
         params: { requestId: 2, reason: "user" },
       });
       assert.deepEqual(cancelled, [callId]);
+      // Each connection has its own id space: after a reconnect, a late cancel from the
+      // old connection never names the new connection's call with the same id.
+      const first = yield* postMcpHttp(url, token, { jsonrpc: "2.0", id: 1, method: "initialize" });
+      const second = yield* postMcpHttp(url, token, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+      });
+      assert.ok(first.sessionId && second.sessionId && first.sessionId !== second.sessionId);
+      yield* postMcpHttp(
+        url,
+        token,
+        {
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: { name: "js", arguments: { code: "2" } },
+        },
+        "POST",
+        { "mcp-session-id": second.sessionId! },
+      );
+      yield* postMcpHttp(
+        url,
+        token,
+        { jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 7 } },
+        "POST",
+        { "mcp-session-id": first.sessionId! },
+      );
+      const liveCallId = (calls[1] as [string, unknown, string])[2];
+      assert.equal(liveCallId, `${second.sessionId}:7`);
+      assert.deepEqual(cancelled, [callId, `${first.sessionId}:7`]);
       session.dispose();
       assert.equal(disposed, 1);
       assert.equal(

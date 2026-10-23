@@ -2,7 +2,8 @@
  * Generates the Claude in Chrome certification record from the bundled Claude CLI.
  *
  *   bun apps/server/scripts/generate-claude-chrome-descriptor.ts [--check] [--binary <path>]
- *     [--evidence docs/computer-certification/<id>.json] [--withdraw <id> --reason <note>]
+ *     [--evidence docs/computer-certification/<id>.json [--reinstate]]
+ *     [--withdraw <id> --reason <note>]
  *
  * Static facts come from the shipped executable; `toolNames` and `evidenceId` are stamped
  * only from a live report (run outside F5) whose versions match. `--check` fails on drift
@@ -13,7 +14,6 @@ import { open, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { readCodeSignature } from "@t3tools/shared/codeSignature";
 import {
-  evidenceMismatches,
   type ClaudeChromeRecord,
   type IntegrationEvidenceReport,
 } from "@t3tools/shared/providerIntegrationCertification";
@@ -22,6 +22,7 @@ import {
   extractClaudeChromeDescriptor,
   type DescriptorSource,
 } from "../src/provider/claudeChromeDescriptorExtraction";
+import { mergeClaudeChromeRecords } from "../src/provider/claudeChromeRecordMerge";
 import { resolveBundledClaudeExecutable } from "../src/provider/claudeSdkExecutable";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -101,49 +102,26 @@ const evidencePath = argument("--evidence");
 const existing = JSON.parse(
   await readFile(outputPath, "utf8").catch(() => "[]"),
 ) as ClaudeChromeRecord[];
-const previous = existing.find((entry) => entry.id === record.id);
-if (evidencePath) {
-  const report = JSON.parse(
-    await readFile(resolve(evidencePath), "utf8"),
-  ) as IntegrationEvidenceReport;
-  if (report.versions.cliVersion !== descriptor.cliVersion)
-    throw new Error(
-      `Evidence is for CLI ${report.versions.cliVersion}, not ${descriptor.cliVersion}.`,
-    );
-  const stamped: ClaudeChromeRecord = {
-    ...record,
-    evidenceId: report.evidenceId,
-    ...(report.toolNames ? { toolNames: report.toolNames } : {}),
-  };
-  const problems = evidenceMismatches(stamped, report);
-  if (problems.length)
-    throw new Error(`Evidence does not support the record: ${problems.join(", ")}`);
-  record = stamped;
-} else if (previous?.evidenceId && previous.versions.cliVersion === descriptor.cliVersion) {
-  // Regenerating static facts keeps the stamp for the same CLI version.
-  record = {
-    ...record,
-    evidenceId: previous.evidenceId,
-    ...(previous.toolNames ? { toolNames: previous.toolNames } : {}),
-    ...(previous.withdrawn ? { withdrawn: previous.withdrawn } : {}),
-  };
-}
-
-// Older records stay: journals reference them, and restore validates slots against the
-// record that created them. Retiring one is explicit (`--withdraw <id> --reason <note>`),
-// so `sdk:audit` keeps failing until a withdrawal with its CHANGELOG note is recorded.
+// Retiring a record is explicit (`--withdraw <id> --reason <note>`), so `sdk:audit` keeps
+// failing until a withdrawal with its CHANGELOG note is recorded.
 const withdrawId = argument("--withdraw");
 const withdrawReason = argument("--reason");
 if (withdrawId && !withdrawReason)
   throw new Error("--withdraw needs --reason, matching the CHANGELOG note.");
-if (withdrawId && !existing.some((entry) => entry.id === withdrawId))
-  throw new Error(`No record ${withdrawId} to withdraw.`);
-const next = [
-  ...existing
-    .filter((entry) => entry.id !== record.id)
-    .map((entry) => (entry.id === withdrawId ? { ...entry, withdrawn: withdrawReason! } : entry)),
+const next = mergeClaudeChromeRecords({
+  existing,
   record,
-].sort((a, b) => a.id.localeCompare(b.id, "en"));
+  ...(evidencePath
+    ? {
+        report: JSON.parse(
+          await readFile(resolve(evidencePath), "utf8"),
+        ) as IntegrationEvidenceReport,
+      }
+    : {}),
+  reinstate: process.argv.includes("--reinstate"),
+  ...(withdrawId ? { withdraw: { id: withdrawId, reason: withdrawReason! } } : {}),
+});
+record = next.find((entry) => entry.id === record.id)!;
 const current = await readFile(outputPath, "utf8").catch(() => "");
 // Compared as data: the repository formatter owns the file's layout.
 const canonical = (text: string) => {

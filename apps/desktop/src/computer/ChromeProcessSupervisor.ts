@@ -7,8 +7,8 @@ export interface ChromeProcessRow {
   readonly pid: number;
   readonly ppid: number;
   readonly pgid: number;
-  /** Epoch milliseconds, one-second resolution. */
-  readonly startTime: number;
+  /** Epoch milliseconds, one-second resolution; undefined when its column was unreadable. */
+  readonly startTime: number | undefined;
   /** Zombies can no longer act. */
   readonly zombie: boolean;
 }
@@ -22,34 +22,42 @@ export interface ChromeProcessIo {
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const PS_ROW =
-  /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})\s*$/;
+const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*?)\s*$/;
+const LSTART = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/;
+
+function parseStart(text: string): number | undefined {
+  const match = LSTART.exec(text);
+  const month = match ? MONTHS.indexOf(match[1]!) : -1;
+  if (!match || month < 0) return undefined;
+  return Date.UTC(
+    Number(match[6]),
+    month,
+    Number(match[2]),
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+  );
+}
 
 /**
  * Parses `ps -o pid=,ppid=,pgid=,stat=,lstart=` run with `TZ=UTC`. `lstart` carries no
  * zone, so it is read explicitly as UTC rather than through `Date.parse` (local time).
- * Any unreadable row makes the whole listing unknown: a skipped row could hide a member.
+ * A row whose start column is unreadable is kept without a start time: it still counts
+ * as a member of its group, so it can only keep a group alive. A row whose IDs are
+ * unreadable could belong to any group, so it makes the whole listing unknown.
  */
 export function parseProcessListing(stdout: string): ChromeProcessRow[] | null {
   const rows: ChromeProcessRow[] = [];
   for (const line of stdout.split("\n")) {
     if (!line.trim()) continue;
     const match = PS_ROW.exec(line);
-    const month = match ? MONTHS.indexOf(match[5]!) : -1;
-    if (!match || month < 0) return null;
+    if (!match) return null;
     rows.push({
       pid: Number(match[1]),
       ppid: Number(match[2]),
       pgid: Number(match[3]),
       zombie: match[4]!.startsWith("Z"),
-      startTime: Date.UTC(
-        Number(match[10]),
-        month,
-        Number(match[6]),
-        Number(match[7]),
-        Number(match[8]),
-        Number(match[9]),
-      ),
+      startTime: parseStart(match[5]!),
     });
   }
   return rows.length ? rows : null;
@@ -91,7 +99,7 @@ function groupState(
 ): GroupState {
   if (!rows) return "unknown";
   const leader = rows.find((row) => row.pid === pgid);
-  if (leader && leader.startTime !== observedStart) return "gone";
+  if (leader?.startTime !== undefined && leader.startTime !== observedStart) return "gone";
   return rows.some((row) => row.pgid === pgid && !row.zombie) ? "alive" : "gone";
 }
 function descendsFrom(rows: ReadonlyArray<ChromeProcessRow>, pid: number, ancestor: number) {
@@ -111,10 +119,14 @@ interface Entry {
   readonly observedStart: number;
   exited: boolean;
   timers: unknown[];
+  /** `stopAndWait` callers, resolved on exit or on entering recovery. */
+  waiters: Array<() => void>;
 }
 interface PersistedRecovery {
   readonly registration: ChromeProcessRegistration;
   readonly observedStart: number;
+  /** Signalled at least once by this run; later signals are SIGKILL. */
+  signalled?: boolean;
 }
 export type ChromeStopReason = "emergency" | "unresponsive" | "shutdown" | "release";
 
@@ -178,6 +190,7 @@ export class ChromeProcessSupervisor {
       !leader ||
       leader.zombie ||
       leader.pgid !== registration.pgid ||
+      leader.startTime === undefined ||
       Math.abs(leader.startTime - registration.startTime) > START_TOLERANCE_MS ||
       // Main never signals a group the backend could not have started itself.
       !descendsFrom(rows, registration.pid, ancestorPid)
@@ -188,6 +201,7 @@ export class ChromeProcessSupervisor {
       observedStart: leader.startTime,
       exited: false,
       timers: [],
+      waiters: [],
     });
     try {
       // The host may veto (for example when the emergency shortcut is unavailable).
@@ -196,6 +210,8 @@ export class ChromeProcessSupervisor {
       this.entries.delete(registration.launchToken);
       throw error;
     }
+    // Persisted while alive, so a crashed desktop finds and stops it on the next launch.
+    this.persist();
     this.schedulePoll();
   }
 
@@ -266,6 +282,31 @@ export class ChromeProcessSupervisor {
     return stopped;
   }
 
+  /**
+   * `stop`, then wait until every selected group has exited or been persisted as
+   * `recovery-required`. Quitting awaits this so no group outlives F5 untracked.
+   */
+  async stopAndWait(
+    filter: (registration: ChromeProcessRegistration) => boolean,
+    reason: ChromeStopReason,
+  ): Promise<void> {
+    const stopped = this.stop(filter, reason);
+    await Promise.all(
+      stopped.map((registration) => {
+        const entry = this.entries.get(registration.launchToken);
+        if (!entry || entry.exited || this.inRecovery(registration.launchToken))
+          return Promise.resolve();
+        return new Promise<void>((resolve) => entry.waiters.push(resolve));
+      }),
+    );
+  }
+  private inRecovery(launchToken: string): boolean {
+    return this.recovery.some((persisted) => persisted.registration.launchToken === launchToken);
+  }
+  private settleWaiters(entry: Entry): void {
+    for (const resolve of entry.waiters.splice(0)) resolve();
+  }
+
   /** The backend reports an exit; main confirms it before acting on it. */
   reportedExit(launchToken: string): void {
     const entry = this.entries.get(launchToken);
@@ -296,19 +337,25 @@ export class ChromeProcessSupervisor {
     for (const timer of entry.timers) this.io.clearTimeout(timer);
     entry.timers = [];
     this.entries.delete(entry.registration.launchToken);
-    const before = this.recovery.length;
     this.recovery = this.recovery.filter(
       (persisted) => persisted.registration.launchToken !== entry.registration.launchToken,
     );
-    if (before !== this.recovery.length) this.persistRecovery();
+    this.persist();
+    this.settleWaiters(entry);
     this.options.exited?.(entry.registration);
   }
 
   private enterRecovery(entry: Entry): void {
-    const token = entry.registration.launchToken;
-    if (this.recovery.some((persisted) => persisted.registration.launchToken === token)) return;
-    this.recovery.push({ registration: entry.registration, observedStart: entry.observedStart });
-    this.persistRecovery();
+    if (!this.inRecovery(entry.registration.launchToken)) {
+      // Already signalled by its stop; the poll keeps sending SIGKILL until it is gone.
+      this.recovery.push({
+        registration: entry.registration,
+        observedStart: entry.observedStart,
+        signalled: true,
+      });
+      this.persist();
+    }
+    this.settleWaiters(entry);
   }
 
   /** Fast while a stop is in progress or recovery is pending, slow otherwise. */
@@ -334,43 +381,75 @@ export class ChromeProcessSupervisor {
     for (const entry of [...this.entries.values()])
       if (groupState(rows, entry.registration.pgid, entry.observedStart) === "gone")
         this.markExited(entry);
-    // Recovered from a previous run: entries are gone, only the persisted registrations remain.
-    const remaining = this.recovery.filter(
-      (persisted) =>
-        this.entries.has(persisted.registration.launchToken) ||
-        groupState(rows, persisted.registration.pgid, persisted.observedStart) !== "gone",
-    );
+    // Recovery entries (including a previous run's orphans) are stopped by main itself:
+    // SIGTERM first, then SIGKILL, and only while the start time still matches.
+    const remaining = this.recovery.filter((persisted) => {
+      const state = groupState(rows, persisted.registration.pgid, persisted.observedStart);
+      if (state === "alive") {
+        this.io.killGroup(persisted.registration.pgid, persisted.signalled ? "SIGKILL" : "SIGTERM");
+        persisted.signalled = true;
+      }
+      return this.entries.has(persisted.registration.launchToken) || state !== "gone";
+    });
     if (remaining.length !== this.recovery.length) {
       this.recovery = remaining;
-      this.persistRecovery();
+      this.persist();
     }
     this.schedulePoll();
   }
 
+  /**
+   * A previous run's live registrations are orphans: their backend is gone, so nothing
+   * else will stop them. They join recovery (blocking Chrome) until the poll has seen
+   * them gone.
+   */
   private loadRecovery(): void {
     if (!this.options.statePath) return;
+    const valid = (persisted: PersistedRecovery) =>
+      typeof persisted?.observedStart === "number" &&
+      typeof persisted.registration?.pgid === "number" &&
+      typeof persisted.registration.launchToken === "string";
     try {
       const parsed = JSON.parse(readFileSync(this.options.statePath, "utf8")) as {
         recovery?: PersistedRecovery[];
+        live?: PersistedRecovery[];
       };
-      this.recovery = Array.isArray(parsed.recovery)
-        ? parsed.recovery.filter(
-            (persisted) =>
-              typeof persisted?.observedStart === "number" &&
-              typeof persisted.registration?.pgid === "number",
-          )
-        : [];
+      const restored = new Map<string, PersistedRecovery>();
+      for (const persisted of [
+        ...(Array.isArray(parsed.recovery) ? parsed.recovery : []),
+        ...(Array.isArray(parsed.live) ? parsed.live : []),
+      ])
+        if (valid(persisted))
+          restored.set(persisted.registration.launchToken, {
+            registration: persisted.registration,
+            observedStart: persisted.observedStart,
+          });
+      this.recovery = [...restored.values()];
     } catch {
       this.recovery = [];
     }
-    if (this.recovery.length) this.schedulePoll();
+    if (this.recovery.length) {
+      this.persist();
+      this.schedulePoll();
+    }
   }
-  private persistRecovery(): void {
+  private persist(): void {
     if (this.options.statePath) {
       try {
         mkdirSync(dirname(this.options.statePath), { recursive: true });
         const temporary = `${this.options.statePath}.${process.pid}.tmp`;
-        writeFileSync(temporary, JSON.stringify({ recovery: this.recovery }));
+        writeFileSync(
+          temporary,
+          JSON.stringify({
+            recovery: this.recovery.map(({ registration, observedStart }) => ({
+              registration,
+              observedStart,
+            })),
+            live: [...this.entries.values()]
+              .filter((entry) => !entry.exited)
+              .map(({ registration, observedStart }) => ({ registration, observedStart })),
+          }),
+        );
         renameSync(temporary, this.options.statePath);
       } catch {
         // In-memory state still refuses ownership for this run.

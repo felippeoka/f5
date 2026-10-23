@@ -160,16 +160,20 @@ describe("Chrome launch decision", () => {
       }),
     ).toMatchObject({ kind: "unknown" });
   });
-  it("covers seven deduplicated browser folders under the real home", () => {
-    const locations = descriptor.locations("/profile/claude", "/Users/me");
-    expect(locations).toHaveLength(7);
-    expect(new Set(locations.map((entry) => (entry.kind === "file" ? entry.path : ""))).size).toBe(
-      7,
-    );
-    expect(locations[0]).toMatchObject({
-      path: "/Users/me/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_code_browser_extension.json",
-    });
-  });
+  // The browser folders are macOS paths.
+  it.skipIf(process.platform === "win32")(
+    "covers seven deduplicated browser folders under the real home",
+    () => {
+      const locations = descriptor.locations("/profile/claude", "/Users/me");
+      expect(locations).toHaveLength(7);
+      expect(
+        new Set(locations.map((entry) => (entry.kind === "file" ? entry.path : ""))).size,
+      ).toBe(7);
+      expect(locations[0]).toMatchObject({
+        path: "/Users/me/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_code_browser_extension.json",
+      });
+    },
+  );
 });
 
 describe("manifest parsing", () => {

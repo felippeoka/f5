@@ -78,10 +78,17 @@ export function spawnRegisteredProcess(input: {
   });
   const stdin = new PassThrough();
   const stdout = new PassThrough();
-  child.stderr?.on("data", (data: Buffer) => input.stderr?.(data.toString()));
   const endStdout = () => {
     if (!stdout.writableEnded) stdout.end();
   };
+  // A write that lands after the group was killed raises EPIPE on the real pipe; `pipe`
+  // adds no listener there, and an unhandled stream error would crash the server.
+  child.stdin?.on("error", () => undefined);
+  child.stdout?.on("error", endStdout);
+  child.stderr?.on("error", () => undefined);
+  child.stderr?.on("data", (data: Buffer) => input.stderr?.(data.toString()));
+  /** `process.kill(-pgid)` doesn't set `ChildProcess.killed`; track the request here. */
+  let killRequested = false;
   child.once("exit", () => {
     input.exited?.(launchToken);
     // A descendant holding the pipe must not keep stdout open after the child exited.
@@ -123,7 +130,7 @@ export function spawnRegisteredProcess(input: {
     launchToken,
     registered: flowing,
     get killed() {
-      return child.killed;
+      return killRequested || child.killed;
     },
     get exitCode() {
       return child.exitCode;
@@ -131,7 +138,11 @@ export function spawnRegisteredProcess(input: {
     get signalCode() {
       return child.signalCode;
     },
-    kill: (signal) => killGroup(child, signal),
+    kill: (signal) => {
+      const sent = killGroup(child, signal);
+      if (sent) killRequested = true;
+      return sent;
+    },
     on: (event: "exit" | "error", listener: (...args: any[]) => void) => {
       child.on(event, listener);
     },

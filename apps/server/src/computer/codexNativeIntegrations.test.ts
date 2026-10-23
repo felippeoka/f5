@@ -111,7 +111,8 @@ const inspect = (patch?: Parameters<typeof fixture>[0]) => {
   }).then((result) => ({ result, verified }));
 };
 
-describe("Codex Chrome inspection", () => {
+// ChatGPT.app inspection is macOS only; the fixtures are POSIX paths.
+describe.skipIf(process.platform === "win32")("Codex Chrome inspection", () => {
   it("verifies the app, runtime and helper signatures with their pinned identifiers", async () => {
     const { result, verified } = await inspect();
     expect(result).toMatchObject({ available: true, hostTarget: HOST, pluginRoot: PLUGIN });

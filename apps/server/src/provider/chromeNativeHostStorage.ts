@@ -1,3 +1,4 @@
+import { constants as fsConstants } from "node:fs";
 import { chmod, lstat, open, unlink } from "node:fs/promises";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { writeFileStringAtomically } from "../atomicWrite";
@@ -129,12 +130,23 @@ export async function readChromeArtifact(location: string): Promise<ChromeArtifa
     throw error;
   }
   if (!info.isFile()) throw new Error("Chrome artifact is not a regular file.");
-  const file = await open(location, "r");
+  // No-follow open and a check on the opened descriptor: a symlink swapped in after
+  // `lstat` is refused rather than read.
+  const file = await open(location, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0)).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ELOOP") throw new Error("Chrome artifact is not a regular file.");
+      if (error.code === "ENOENT") return null;
+      throw error;
+    },
+  );
+  if (!file) return { bytes: null };
   try {
+    const opened = await file.stat();
+    if (!opened.isFile()) throw new Error("Chrome artifact is not a regular file.");
     const buffer = Buffer.alloc(MAX_ARTIFACT_BYTES + 1);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     if (bytesRead > MAX_ARTIFACT_BYTES) throw new Error("Chrome artifact exceeds the size limit.");
-    return { bytes: buffer.subarray(0, bytesRead).toString("utf8"), mode: info.mode & 0o777 };
+    return { bytes: buffer.subarray(0, bytesRead).toString("utf8"), mode: opened.mode & 0o777 };
   } finally {
     await file.close();
   }

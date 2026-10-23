@@ -10,6 +10,7 @@ import {
   isIntegrationCertified,
   recordCertifies,
   type ClaudeChromeRecord,
+  type CodexChromeRecord,
   type IntegrationEvidenceReport,
   type ProviderIntegrationRecord,
 } from "./providerIntegrationCertification";
@@ -22,6 +23,7 @@ const certified: ClaudeChromeRecord = {
   ...claude,
   evidenceId: "evidence-1",
   toolNames: ["read_page"],
+  artifactSha256: "b".repeat(64),
 };
 
 describe("provider integration certification records", () => {
@@ -43,14 +45,43 @@ describe("provider integration certification records", () => {
     }
   });
 
-  it("certifies only with evidence and a tool inventory, never when withdrawn", () => {
+  it("certifies only with evidence, an artifact digest and a tool inventory, never when withdrawn", () => {
     expect(recordCertifies(claude)).toBe(claude.evidenceId !== undefined && !claude.withdrawn);
     expect(recordCertifies(certified)).toBe(true);
     expect(recordCertifies({ ...certified, toolNames: [] })).toBe(false);
+    // Claude's admission needs the tool names; a digest alone is not enough.
     expect(
       recordCertifies({ ...certified, toolNames: [], toolInventorySha256: "a".repeat(64) }),
-    ).toBe(true);
+    ).toBe(false);
+    const { artifactSha256: _digest, ...undigested } = certified;
+    expect(recordCertifies(undigested)).toBe(false);
     expect(recordCertifies({ ...certified, withdrawn: "SDK 0.3.296" })).toBe(false);
+  });
+
+  it("certifies a Codex Chrome record only when the proxy could actually use it", () => {
+    const codex = PROVIDER_INTEGRATION_RECORDS["codex-chrome"][0]!;
+    const schema = { type: "object" };
+    const complete: CodexChromeRecord = {
+      ...codex,
+      evidenceId: "evidence-2",
+      artifactSha256: "c".repeat(64),
+      toolNames: [...codex.identity.allowedTools],
+      toolInventorySha256: "d".repeat(64),
+      identity: {
+        ...codex.identity,
+        advertisedTools: codex.identity.allowedTools.map((name) => ({ name, inputSchema: schema })),
+      },
+    };
+    expect(recordCertifies(complete)).toBe(true);
+    // Names without the digest or the advertised definitions: every call would be denied.
+    const { toolInventorySha256: _inventory, ...noDigest } = complete;
+    expect(recordCertifies(noDigest)).toBe(false);
+    expect(
+      recordCertifies({
+        ...complete,
+        identity: { ...complete.identity, advertisedTools: [{ name: "js", inputSchema: schema }] },
+      }),
+    ).toBe(codex.identity.allowedTools.every((name) => name === "js"));
   });
 
   it("keeps every gate closed until a live run certifies a record", () => {
@@ -108,6 +139,10 @@ describe("provider integration certification records", () => {
     expect(evidenceMismatches(certified, report)).toEqual([]);
     const { artifactSha256: _artifact, ...unpackaged } = report;
     expect(evidenceMismatches(certified, unpackaged)).toEqual(["artifactSha256"]);
+    // A report from a different build never supports the record.
+    expect(evidenceMismatches(certified, { ...report, artifactSha256: "e".repeat(64) })).toEqual([
+      "artifactSha256",
+    ]);
     expect(
       evidenceMismatches(certified, {
         ...report,

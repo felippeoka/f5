@@ -85,16 +85,12 @@ export class ChromeLeaseAuthority {
     }
   }
   /**
-   * Claude holds the lease for its session, so release waits until the registered group
-   * has exited. Codex holds it per call: a settled call releases at once and its idle
-   * child keeps running; only an interrupt stops the child and waits for its exit.
+   * Both providers hold the lease for their registered child's life (Codex's code can
+   * outlive the call that started it), so release waits until every process in the group
+   * has exited, stopping whatever remains.
    */
   release(holder: ChromeLeaseHolder, reason: ChromeStopReason = "release"): void {
     if (!this.holder || !sameChromeHolder(this.holder, holder)) return;
-    if (holder.provider === "codex" && reason === "release" && !this.invalidated) {
-      this.clear();
-      return;
-    }
     const filter = ownedBy(holder);
     if (this.supervisor?.alive(filter)) {
       this.draining = true;
