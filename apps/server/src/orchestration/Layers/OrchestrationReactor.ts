@@ -20,6 +20,7 @@ import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeInge
 import { SessionNotesService } from "../Services/SessionNotesService.ts";
 import { WorkflowService } from "../Services/WorkflowService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { startScratchFolderCleanupReactor } from "../scratchFolderCleanupReactor.ts";
 import { startThreadSnoozeReactor } from "../threadSnoozeReactor.ts";
 import { reconcileWorkflowArchives } from "../workflowArchiveLifecycle.ts";
 
@@ -45,6 +46,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     if (Option.isSome(nativeHistoryWorker)) yield* nativeHistoryWorker.value.start;
     yield* providerCommandReactor.start;
     yield* startThreadSnoozeReactor(orchestrationEngine);
+    yield* startScratchFolderCleanupReactor(orchestrationEngine);
     yield* reconcileWorkflowArchives(orchestrationEngine);
     yield* Stream.runForEach(providerTurnDeliveryWorker.outcomes, (outcome) =>
       Effect.gen(function* () {
