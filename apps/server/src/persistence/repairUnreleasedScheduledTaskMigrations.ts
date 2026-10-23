@@ -14,7 +14,7 @@ export const repairUnreleasedScheduledTaskMigrations = Effect.gen(function* () {
         migration_id: number;
         name: string;
       }>`SELECT migration_id,name FROM effect_sql_migrations
-      WHERE (migration_id IN(124,127,128,129) AND name='ScheduledTasks') OR (migration_id IN(129,130) AND name='ScheduledTaskQuarantine') ORDER BY migration_id`;
+      WHERE (migration_id IN(124,127,128,129,137) AND name='ScheduledTasks') OR (migration_id IN(129,130,138) AND name='ScheduledTaskQuarantine') ORDER BY migration_id`;
       for (const row of previous) {
         const replacement = Object.entries(MIGRATIONS).find(
           ([key]) =>

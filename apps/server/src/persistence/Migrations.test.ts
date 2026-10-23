@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
 import { repairUnreleasedScheduledTaskMigrations } from "./repairUnreleasedScheduledTaskMigrations.ts";
 import { LATEST_MIGRATION_ID, MIGRATIONS, runMigrations } from "./Migrations.ts";
 import * as SqliteClient from "./NodeSqliteClient.ts";
-import quarantineMigration from "./Migrations/138_ScheduledTaskQuarantine.ts";
-import scheduledMigration from "./Migrations/137_ScheduledTasks.ts";
+import quarantineMigration from "./Migrations/139_ScheduledTaskQuarantine.ts";
+import scheduledMigration from "./Migrations/138_ScheduledTasks.ts";
 
 describe("MIGRATIONS", () => {
   // The migrator only runs IDs above the highest one a database has applied,
@@ -29,39 +29,48 @@ type PrecedingVersion =
   | "main126"
   | "main127"
   | "main128"
+  | "main137"
   | "schedules124"
   | "schedules127"
   | "schedules128"
   | "schedules129"
-  | "schedules130";
+  | "schedules130"
+  | "schedules138";
 
 const prepareUpgrade = (version: PrecedingVersion) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const legacySchedules = version.startsWith("schedules");
     const through =
-      version === "schedules124"
-        ? 123
-        : ["main128", "schedules130"].includes(version)
-          ? 128
-          : ["main127", "schedules128", "schedules129"].includes(version)
-            ? 127
-            : 126;
+      version === "main137"
+        ? 137
+        : version === "schedules138"
+          ? 136
+          : version === "schedules124"
+            ? 123
+            : ["main128", "schedules130"].includes(version)
+              ? 128
+              : ["main127", "schedules128", "schedules129"].includes(version)
+                ? 127
+                : 126;
     const preceding = Object.fromEntries(
       Object.entries(MIGRATIONS).filter(([key]) => Number.parseInt(key, 10) <= through),
     );
     if (legacySchedules)
       preceding[
-        version === "schedules124"
-          ? "124_ScheduledTasks"
-          : version === "schedules127"
-            ? "127_ScheduledTasks"
-            : version === "schedules130"
-              ? "129_ScheduledTasks"
-              : "128_ScheduledTasks"
+        version === "schedules138"
+          ? "137_ScheduledTasks"
+          : version === "schedules124"
+            ? "124_ScheduledTasks"
+            : version === "schedules127"
+              ? "127_ScheduledTasks"
+              : version === "schedules130"
+                ? "129_ScheduledTasks"
+                : "128_ScheduledTasks"
       ] = scheduledMigration;
     if (version === "schedules129") preceding["129_ScheduledTaskQuarantine"] = quarantineMigration;
     if (version === "schedules130") preceding["130_ScheduledTaskQuarantine"] = quarantineMigration;
+    if (version === "schedules138") preceding["138_ScheduledTaskQuarantine"] = quarantineMigration;
     yield* Migrator.make({})({ loader: Migrator.fromRecord(preceding) });
     yield* sql`INSERT INTO provider_terminal_events(event_id,thread_id,turn_id,event_type,event_json,received_at,attempt) VALUES('receipt','thread','turn','turn.completed','{}','2026-10-01',2)`;
     yield* sql`INSERT INTO projection_threads(thread_id,project_id,title,model,model_selection_json,branch,created_at,last_interaction_at,updated_at) VALUES('thread','project','Author','test-model','{}','a','now','now','now')`;
@@ -70,6 +79,9 @@ const prepareUpgrade = (version: PrecedingVersion) =>
       branchB: { authorThreadId: "other" },
     });
     yield* sql`INSERT INTO projection_planning_workflows(workflow_id,project_id,workflow_json,updated_at) VALUES('workflow','project',${workflow},'now')`;
+    if (version === "main137") {
+      yield* sql`INSERT INTO upstream_ledger_ops(op_id,project_id,seq,kind,target,payload_json,state,created_at,updated_at) VALUES('upstream-op','project',1,'interval','target','{}','recorded','now','now')`;
+    }
     if (legacySchedules) {
       yield* sql`INSERT INTO scheduled_tasks(id,project_id,definition_json,request_hash,requested_at,version,enabled,updated_at) VALUES('task','project','{}','hash','2026-10-01',1,1,'2026-10-01')`;
       yield* sql`INSERT INTO scheduled_task_runs(id,task_id,scheduled_for,trigger,status,state_json,snapshot_json,thread_id,owns_execution,capacity,created_at) VALUES('run','task','2026-10-01','manual','pending','{}','{}','thread',1,1,'2026-10-01')`;
@@ -101,12 +113,16 @@ const assertUpgrade = (version: PrecedingVersion) =>
       { migration_id: 134, name: "BackgroundWorkEffort" },
       { migration_id: 135, name: "RestartBackgroundWork" },
       { migration_id: 136, name: "ScratchProjects" },
-      { migration_id: 137, name: "ScheduledTasks" },
-      { migration_id: 138, name: "ScheduledTaskQuarantine" },
+      { migration_id: 137, name: "UpstreamPorts" },
+      { migration_id: 138, name: "ScheduledTasks" },
+      { migration_id: 139, name: "ScheduledTaskQuarantine" },
     ]);
     expect(
       yield* sql`SELECT event_id,attempt,origin_session_generation,next_due_at IS NOT NULL AS retry FROM provider_terminal_events`,
     ).toEqual([{ event_id: "receipt", attempt: 2, origin_session_generation: null, retry: 1 }]);
+    expect(yield* sql`SELECT op_id,state FROM upstream_ledger_ops`).toEqual(
+      version === "main137" ? [{ op_id: "upstream-op", state: "recorded" }] : [],
+    );
     const indexes = yield* sql<{ name: string }>`PRAGMA index_list(provider_terminal_events)`;
     expect(indexes.some((index) => index.name === "provider_terminal_events_retry_age")).toBe(true);
     // Main's 127 must not run again on a database that already recorded its correct identity.
@@ -114,9 +130,15 @@ const assertUpgrade = (version: PrecedingVersion) =>
       yield* sql`SELECT branch,scheduled_origin_json FROM projection_threads WHERE thread_id='thread'`,
     ).toEqual([
       {
-        branch: ["main127", "main128", "schedules128", "schedules129", "schedules130"].includes(
-          version,
-        )
+        branch: [
+          "main127",
+          "main128",
+          "main137",
+          "schedules128",
+          "schedules129",
+          "schedules130",
+          "schedules138",
+        ].includes(version)
           ? "a"
           : null,
         scheduled_origin_json: legacySchedules ? '{"taskId":"task","runId":"run"}' : null,
@@ -147,11 +169,13 @@ for (const version of [
   "main126",
   "main127",
   "main128",
+  "main137",
   "schedules124",
   "schedules127",
   "schedules128",
   "schedules129",
   "schedules130",
+  "schedules138",
 ] as const) {
   effectIt.effect(`upgrades ${version} without losing durable evidence`, () =>
     Effect.gen(function* () {
@@ -164,12 +188,19 @@ for (const version of [
   );
 }
 
-for (const version of ["schedules124", "schedules127", "schedules128"] as const) {
+for (const version of ["schedules124", "schedules127", "schedules128", "schedules138"] as const) {
   effectIt.effect(`rolls back interrupted ${version} ledger repair and retries safely`, () =>
     Effect.gen(function* () {
       yield* prepareUpgrade(version);
       const sql = yield* SqlClient.SqlClient;
-      const id = version === "schedules124" ? 124 : version === "schedules127" ? 127 : 128;
+      const id =
+        version === "schedules124"
+          ? 124
+          : version === "schedules127"
+            ? 127
+            : version === "schedules138"
+              ? 137
+              : 128;
       yield* sql.unsafe(
         `CREATE TRIGGER interrupt_repair BEFORE UPDATE ON effect_sql_migrations WHEN OLD.migration_id=${id} AND OLD.name='ScheduledTasks' BEGIN SELECT RAISE(ABORT, 'interrupted repair'); END`,
       );
@@ -187,7 +218,7 @@ for (const version of ["schedules124", "schedules127", "schedules128"] as const)
         { branch: "a" },
       ]);
       expect(
-        yield* sql`SELECT migration_id FROM effect_sql_migrations WHERE migration_id=138`,
+        yield* sql`SELECT migration_id FROM effect_sql_migrations WHERE migration_id=139`,
       ).toEqual([]);
       yield* sql`DROP TRIGGER interrupt_repair`;
       yield* repairUnreleasedScheduledTaskMigrations;
@@ -197,34 +228,37 @@ for (const version of ["schedules124", "schedules127", "schedules128"] as const)
   );
 }
 
-it("upgrades and reopens a file database from schedules 127 without losing ownership or history", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "f5-schedules-127-upgrade-"));
-  const filename = join(directory, "state.sqlite");
-  try {
-    const previous = ManagedRuntime.make(SqliteClient.layer({ filename }));
+it.each(["schedules127", "schedules138"] as const)(
+  "upgrades and reopens a file database from %s without losing ownership or history",
+  async (version) => {
+    const directory = mkdtempSync(join(tmpdir(), `f5-${version}-upgrade-`));
+    const filename = join(directory, "state.sqlite");
     try {
-      await previous.runPromise(prepareUpgrade("schedules127"));
-    } finally {
-      await previous.dispose();
-    }
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const upgraded = ManagedRuntime.make(SqliteClient.layer({ filename }));
+      const previous = ManagedRuntime.make(SqliteClient.layer({ filename }));
       try {
-        await upgraded.runPromise(
-          Effect.gen(function* () {
-            yield* repairUnreleasedScheduledTaskMigrations;
-            yield* runMigrations;
-            yield* assertUpgrade("schedules127");
-          }),
-        );
+        await previous.runPromise(prepareUpgrade(version));
       } finally {
-        await upgraded.dispose();
+        await previous.dispose();
       }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const upgraded = ManagedRuntime.make(SqliteClient.layer({ filename }));
+        try {
+          await upgraded.runPromise(
+            Effect.gen(function* () {
+              yield* repairUnreleasedScheduledTaskMigrations;
+              yield* runMigrations;
+              yield* assertUpgrade(version);
+            }),
+          );
+        } finally {
+          await upgraded.dispose();
+        }
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+  },
+);
 
 effectIt.layer(SqliteClient.layerMemory())("migration upgrades", (it) => {
   it.effect("adds session capabilities after database compaction has already run", () =>

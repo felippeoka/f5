@@ -94,6 +94,20 @@ import {
   AgentBridgeTaskControlInput,
   AgentBridgeTaskInput,
 } from "./agentBridge";
+import {
+  UPSTREAM_PORTS_WS_METHODS,
+  UpstreamAcceptSuggestionsInput,
+  UpstreamDecideInput,
+  UpstreamGetPortPromptInput,
+  UpstreamGetTopicInput,
+  UpstreamListTopicsInput,
+  UpstreamPortsListProjectsInput,
+  UpstreamPortsProjectInput,
+  UpstreamResolvePublicationInput,
+  UpstreamRunInput,
+  UpstreamStartPortInput,
+  UpstreamUnlinkPortInput,
+} from "./upstreamPorts";
 import { AGENTS_WS_METHODS, AgentsDismissInput, AgentsGetSnapshotInput } from "./backgroundWork";
 import { ProjectGetCheckedInConfigInput } from "./checkedInProjectFile";
 import { OpenInEditorInput, RevealInFileManagerInput } from "./editor";
@@ -787,6 +801,19 @@ const WebSocketRequestBody = Schema.Union([
   tagPrHubRequestBody(PR_HUB_WS_METHODS.changeReviewers, PrHubChangeReviewersInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.updateBranch, PrHubUpdateBranchInput),
   tagRequestBody(PR_HUB_WS_METHODS.clearData, PrHubClearDataInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.listProjects, UpstreamPortsListProjectsInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.getOverview, UpstreamPortsProjectInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.listTopics, UpstreamListTopicsInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.getTopic, UpstreamGetTopicInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.decide, UpstreamDecideInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.acceptSuggestions, UpstreamAcceptSuggestionsInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.run, UpstreamRunInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.startPort, UpstreamStartPortInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.unlinkPort, UpstreamUnlinkPortInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.getPortPrompt, UpstreamGetPortPromptInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.resolvePublication, UpstreamResolvePublicationInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.addRemote, UpstreamPortsProjectInput),
+  tagRequestBody(UPSTREAM_PORTS_WS_METHODS.takeOverWriter, UpstreamPortsProjectInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

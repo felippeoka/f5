@@ -23,6 +23,9 @@ import {
   AGENTS_WS_METHODS,
   AGENT_BRIDGE_WS_CHANNELS,
   AGENT_BRIDGE_WS_METHODS,
+  UPSTREAM_PORTS_WS_CHANNELS,
+  UPSTREAM_PORTS_WS_METHODS,
+  type UpstreamPortsChanged,
   ELICITATION_WS_METHODS,
   USAGE_WS_METHODS,
   type AgentsSnapshot,
@@ -109,6 +112,7 @@ const prHubChangedListeners = new Set<(payload: PrHubChanged) => void>();
 const prHubAdvisoriesUpdatedListeners = new Set<(payload: PrHubAdvisoriesChanged) => void>();
 const agentsSnapshotUpdatedListeners = new Set<(payload: AgentsSnapshot) => void>();
 const agentBridgeStateChangedListeners = new Set<(payload: AgentBridgeStateChanged) => void>();
+const upstreamPortsChangedListeners = new Set<(payload: UpstreamPortsChanged) => void>();
 
 function decodeRetryWorkflowResult(result: unknown) {
   return result === undefined
@@ -276,6 +280,16 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(AGENT_BRIDGE_WS_CHANNELS.stateChanged, (message) => {
     const payload = message.data;
     for (const listener of agentBridgeStateChangedListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(UPSTREAM_PORTS_WS_CHANNELS.changed, (message) => {
+    const payload = message.data;
+    for (const listener of upstreamPortsChangedListeners) {
       try {
         listener(payload);
       } catch {
@@ -954,6 +968,25 @@ export function createWsNativeApi(): NativeApi {
       pauseTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.pauseTask, input),
       resumeTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.resumeTask, input),
       cancelTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.cancelTask, input),
+    },
+    upstreamPorts: {
+      // Every method forwards its input (or `{}`) unchanged. Generated to keep
+      // the startup bundle small; the mapped type fails to compile if the
+      // method table and the NativeApi namespace drift apart.
+      ...(Object.fromEntries(
+        Object.entries(UPSTREAM_PORTS_WS_METHODS).map(([name, method]) => [
+          name,
+          (input?: unknown) => transport.request(method, input ?? {}),
+        ]),
+      ) as {
+        [Name in keyof typeof UPSTREAM_PORTS_WS_METHODS]: NativeApi["upstreamPorts"][Name];
+      }),
+      onChanged: (callback) => {
+        upstreamPortsChangedListeners.add(callback);
+        return () => {
+          upstreamPortsChangedListeners.delete(callback);
+        };
+      },
     },
     agents: {
       getSnapshot: (input) => transport.request(AGENTS_WS_METHODS.getSnapshot, input ?? {}),
