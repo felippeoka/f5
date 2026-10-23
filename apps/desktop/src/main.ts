@@ -3884,7 +3884,14 @@ function createWindow(
     // before this tab's allowlist and navigation listeners exist. The renderer navigates
     // once the guest registers and those are in place.
     params.src = "about:blank";
-    installPreviewPermissionPolicy(electronSession.fromPartition(partition));
+    installPreviewPermissionPolicy(electronSession.fromPartition(partition), {
+      isUserDriven: (guest) => {
+        const id = (guest as { readonly id?: unknown }).id;
+        return [...previewTabs.entries()].some(
+          ([tabId, tab]) => tab.webContentsId === id && !isAgentPreviewNavigation(tabId),
+        );
+      },
+    });
     // A page that goes fullscreen fills its own webview instead of the whole F5 window.
     webPreferences.disableHtmlFullscreenWindowResize = true;
     // Agent-driven previews may be hidden or headless; keep timers and rendering running.
