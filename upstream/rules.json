@@ -1,0 +1,78 @@
+{
+  "autoSkip": [
+    {
+      "pathPrefixes": [
+        "apps/mobile/"
+      ],
+      "reasonKey": "mobile"
+    },
+    {
+      "pathPrefixes": [
+        "apps/marketing/"
+      ],
+      "reasonKey": "marketing"
+    },
+    {
+      "pathPrefixes": [
+        ".github/"
+      ],
+      "reasonKey": "release-ci"
+    },
+    {
+      "pathPrefixes": [
+        "docs/"
+      ],
+      "pathSuffixes": [
+        ".md"
+      ],
+      "reasonKey": "maintenance"
+    },
+    {
+      "pathSuffixes": [
+        ".test.ts",
+        ".test.tsx",
+        ".browser.tsx",
+        ".spec.ts"
+      ],
+      "reasonKey": "maintenance"
+    }
+  ],
+  "autoSkipConfidence": 0.85,
+  "ignoredPathPrefixes": [
+    ".repos/"
+  ],
+  "reasonKeys": [
+    "mobile",
+    "relay-cloud",
+    "multi-environment",
+    "devices",
+    "marketing",
+    "release-ci",
+    "maintenance",
+    "reverted",
+    "declined-by-policy"
+  ],
+  "reasonLabels": {
+    "declined-by-policy": "Declined by f5 product policy",
+    "devices": "Devices and simulators only",
+    "maintenance": "No user-visible behavior change",
+    "marketing": "Marketing site only",
+    "mobile": "Mobile app only",
+    "multi-environment": "Multi-environment only",
+    "relay-cloud": "Relay or cloud service only",
+    "release-ci": "Upstream release or CI only",
+    "reverted": "Reverted upstream"
+  },
+  "schemaVersion": 1,
+  "upstreamOnlySubsystems": [
+    "auth-scopes",
+    "tiptap-composer",
+    "orchestration-v2",
+    "lineage-delegation",
+    "context-handoff",
+    "scheduled-tasks",
+    "source-control-gitcafe",
+    "analytics-feedback",
+    "t3-connect"
+  ]
+}
