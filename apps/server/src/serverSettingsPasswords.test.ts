@@ -3,7 +3,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { Effect, Exit, FileSystem, Layer } from "effect";
 import { it, assert } from "@effect/vitest";
+import { resolveOtlpConfiguration } from "@t3tools/shared/observability";
 import { ServerConfig } from "./config.ts";
+import { isOpenCodePasswordUnavailable } from "./serverSettingsSecrets.ts";
 import {
   ServerSettingsLiveWithSecretStore,
   ServerSettingsLive,
@@ -101,17 +103,25 @@ it.layer(layer)("OpenCode password persistence", (it) => {
     }),
   );
 
-  it.effect("fails closed for a missing password reference", () =>
+  it.effect("starts with a missing password reference and leaves it unresolved", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig;
       const fs = yield* FileSystem.FileSystem;
       yield* fs.writeFileString(
         config.settingsPath!,
-        JSON.stringify({ providers: { opencode: { serverPasswordRedacted: true } } }),
+        JSON.stringify({
+          providers: { opencode: { serverPasswordRedacted: true } },
+          observability: {
+            otlpTracesUrl: "https://collector.example/v1/traces",
+            otlpHeaders: [{ name: "authorization", value: "", valueRedacted: true }],
+          },
+        }),
       );
-      const result = yield* Effect.gen(function* () {
+      const settings = yield* Effect.gen(function* () {
         const service = yield* ServerSettingsService;
-        return yield* Effect.exit(service.getSettings);
+        // settings.json restored without secrets/ must not keep the backend from starting.
+        yield* service.start;
+        return yield* service.getSettings;
       }).pipe(
         Effect.provide(
           Layer.fresh(
@@ -129,7 +139,14 @@ it.layer(layer)("OpenCode password persistence", (it) => {
           ),
         ),
       );
-      assert.isTrue(Exit.isFailure(result));
+      // Consumers fail closed on the reference instead of using an empty value.
+      assert.isTrue(isOpenCodePasswordUnavailable(settings.providers.opencode));
+      assert.deepEqual(resolveOtlpConfiguration(settings.observability).traces, {
+        url: null,
+        source: "secret-unavailable",
+        protocol: "http/protobuf",
+        headers: {},
+      });
     }),
   );
 
@@ -234,53 +251,56 @@ it.layer(layer)("Removed OpenCode credentials", (it) => {
 });
 
 it.layer(layer)("Missing password repair", (it) => {
-  it.effect("allows replacing a missing secret but refuses an unrelated edit", () => {
-    const values = new Map<string, Uint8Array>();
-    return Effect.gen(function* () {
-      const config = yield* ServerConfig,
-        fs = yield* FileSystem.FileSystem;
-      yield* fs.writeFileString(
-        config.settingsPath!,
-        JSON.stringify({ providers: { opencode: { serverPasswordRedacted: true } } }),
-      );
-      const service = yield* ServerSettingsService;
-      assert.isTrue(
-        Exit.isFailure(
-          yield* service.updateSettings({ autoPullDefaultBranch: false }).pipe(Effect.exit),
-        ),
-      );
-      const repaired = yield* service.updateSettings({
-        providers: { opencode: { serverPassword: "repaired-password" } },
-      });
-      assert.equal(repaired.providers.opencode.serverPassword, "repaired-password");
-      assert.notInclude(yield* fs.readFileString(config.settingsPath!), "repaired-password");
-      assert.equal(
-        (yield* service.getSettings).providers.opencode.serverPassword,
-        "repaired-password",
-      );
-    }).pipe(
-      Effect.provide(
-        Layer.fresh(
-          ServerSettingsLiveWithSecretStore.pipe(
-            Layer.provide(
-              Layer.succeed(ServerSecretStore, {
-                get: (name) => Effect.succeed(values.get(name) ?? null),
-                set: (name, value) =>
-                  Effect.sync(() => {
-                    values.set(name, value);
-                  }),
-                remove: (name) =>
-                  Effect.sync(() => {
-                    values.delete(name);
-                  }),
-                list: () =>
-                  Effect.succeed([...values.keys()].map((name) => ({ name, modifiedAt: 0 }))),
-                getOrCreateRandom: () => Effect.die("unused"),
-              }),
+  it.effect(
+    "keeps a missing secret's reference through unrelated edits until it is replaced",
+    () => {
+      const values = new Map<string, Uint8Array>();
+      return Effect.gen(function* () {
+        const config = yield* ServerConfig,
+          fs = yield* FileSystem.FileSystem;
+        yield* fs.writeFileString(
+          config.settingsPath!,
+          JSON.stringify({ providers: { opencode: { serverPasswordRedacted: true } } }),
+        );
+        const service = yield* ServerSettingsService;
+        yield* service.updateSettings({ autoPullDefaultBranch: false });
+        assert.isTrue(
+          JSON.parse(yield* fs.readFileString(config.settingsPath!)).providers.opencode
+            .serverPasswordRedacted,
+        );
+        const repaired = yield* service.updateSettings({
+          providers: { opencode: { serverPassword: "repaired-password" } },
+        });
+        assert.equal(repaired.providers.opencode.serverPassword, "repaired-password");
+        assert.notInclude(yield* fs.readFileString(config.settingsPath!), "repaired-password");
+        assert.equal(
+          (yield* service.getSettings).providers.opencode.serverPassword,
+          "repaired-password",
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.fresh(
+            ServerSettingsLiveWithSecretStore.pipe(
+              Layer.provide(
+                Layer.succeed(ServerSecretStore, {
+                  get: (name) => Effect.succeed(values.get(name) ?? null),
+                  set: (name, value) =>
+                    Effect.sync(() => {
+                      values.set(name, value);
+                    }),
+                  remove: (name) =>
+                    Effect.sync(() => {
+                      values.delete(name);
+                    }),
+                  list: () =>
+                    Effect.succeed([...values.keys()].map((name) => ({ name, modifiedAt: 0 }))),
+                  getOrCreateRandom: () => Effect.die("unused"),
+                }),
+              ),
             ),
           ),
         ),
-      ),
-    );
-  });
+      );
+    },
+  );
 });

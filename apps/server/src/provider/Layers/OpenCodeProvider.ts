@@ -23,6 +23,10 @@ import {
   type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
+import {
+  isOpenCodePasswordUnavailable,
+  OPENCODE_PASSWORD_UNAVAILABLE,
+} from "../../serverSettingsSecrets.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 const OPENCODE_PRESENTATION = {
@@ -407,6 +411,10 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         },
       });
     }
+  }
+
+  if (isExternalServer && isOpenCodePasswordUnavailable(openCodeSettings)) {
+    return fallback(new Error(OPENCODE_PASSWORD_UNAVAILABLE), version);
   }
 
   const inventoryExit = yield* Effect.exit(

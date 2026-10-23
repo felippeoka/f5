@@ -10,7 +10,8 @@ export interface OtlpSettings {
 }
 export interface OtlpSignalConfiguration {
   readonly url: string | null;
-  readonly source: "disabled" | "settings" | "environment" | "unset";
+  /** `secret-unavailable`: a stored header's secret is missing, so nothing is exported. */
+  readonly source: "disabled" | "settings" | "environment" | "unset" | "secret-unavailable";
   readonly protocol: "http/json" | "http/protobuf";
   readonly headers: Readonly<Record<string, string>>;
 }
@@ -87,6 +88,13 @@ export function resolveOtlpConfiguration(
         ["host", "content-length", "connection"].includes(key.toLowerCase())
       )
         delete headers[key];
+    // Exporting without a header the collector expects could send data unauthenticated.
+    if (
+      !disabled &&
+      url &&
+      settings.otlpHeaders?.some((entry) => entry.valueRedacted && !entry.value)
+    )
+      return { url: null, source: "secret-unavailable", protocol: "http/protobuf", headers: {} };
     return {
       url: disabled ? null : url,
       source: disabled ? "disabled" : !url ? "unset" : configured ? "settings" : "environment",

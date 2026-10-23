@@ -289,7 +289,7 @@ export type ServerValidateHarnessesResult = typeof ServerValidateHarnessesResult
 
 const DiagnosticsSignal = Schema.Struct({
   endpoint: Schema.NullOr(Schema.String),
-  source: Schema.Literals(["disabled", "settings", "environment", "unset"]),
+  source: Schema.Literals(["disabled", "settings", "environment", "unset", "secret-unavailable"]),
   protocol: Schema.Literals(["http/json", "http/protobuf"]),
 });
 export const DiagnosticsConfiguration = Schema.Struct({

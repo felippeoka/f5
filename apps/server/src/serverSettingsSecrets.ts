@@ -76,7 +76,21 @@ export function prepareSettingsSecrets(
   };
 }
 
-/** Missing referenced secrets fail closed instead of silently using an empty password. */
+export const OPENCODE_PASSWORD_UNAVAILABLE =
+  "A stored OpenCode password is unavailable. Re-enter it in Settings.";
+
+/** A password reference whose secret was missing when the settings were read. */
+export const isOpenCodePasswordUnavailable = (config: {
+  readonly serverPassword?: string;
+  readonly serverPasswordRedacted?: boolean;
+}) => config.serverPasswordRedacted === true && !config.serverPassword;
+
+/**
+ * A missing referenced secret keeps its reference instead of failing, so settings still load
+ * (and the secret can be re-entered) after `settings.json` is restored without `secrets/`. Each
+ * consumer fails closed on the reference: OpenCode reports the password unavailable and OTLP
+ * export pauses, rather than either using an empty value.
+ */
 export const materializeSettingsSecrets = (
   settings: ServerSettings,
   store: ServerSecretStoreShape,
@@ -86,10 +100,10 @@ export const materializeSettingsSecrets = (
       Effect.gen(function* () {
         if (config.serverPasswordRedacted !== true || config.serverPassword) return config;
         const secret = yield* store.get(name);
-        if (!secret)
-          return yield* Effect.fail(
-            new Error("A stored OpenCode password is unavailable. Re-enter it in Settings."),
-          );
+        if (!secret) {
+          yield* Effect.logWarning(OPENCODE_PASSWORD_UNAVAILABLE);
+          return config;
+        }
         const { serverPasswordRedacted: _reference, ...rest } = config;
         return { ...rest, serverPassword: decoder.decode(secret) };
       });
@@ -112,10 +126,12 @@ export const materializeSettingsSecrets = (
         const secret = yield* store.get(
           `observability-header-${Buffer.from(header.name.toLowerCase()).toString("base64url")}`,
         );
-        if (!secret)
-          return yield* Effect.fail(
-            new Error("An observability header is unavailable. Re-enter it in Settings."),
+        if (!secret) {
+          yield* Effect.logWarning(
+            "A stored observability header is unavailable, so OTLP export is paused. Re-enter it in Settings.",
           );
+          return header;
+        }
         return { name: header.name, value: decoder.decode(secret) };
       }),
     );

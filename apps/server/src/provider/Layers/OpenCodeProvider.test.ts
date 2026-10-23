@@ -12,6 +12,7 @@ import {
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
+import { OPENCODE_PASSWORD_UNAVAILABLE } from "../../serverSettingsSecrets.ts";
 import { checkOpenCodeProviderStatus } from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 import { CommandNotFoundError } from "../../spawn/resolveCommand.ts";
@@ -231,6 +232,18 @@ it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (i
         snapshot.message,
         "OpenCode server rejected authentication. Check the server URL and password.",
       );
+    }),
+  );
+
+  it.effect("reports a stored password whose secret is missing instead of connecting", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings({ serverUrl: "http://127.0.0.1:9999", serverPasswordRedacted: true }),
+        process.cwd(),
+      );
+
+      assert.equal(snapshot.status, "error");
+      assert.equal(snapshot.message, OPENCODE_PASSWORD_UNAVAILABLE);
     }),
   );
 
