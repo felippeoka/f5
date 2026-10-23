@@ -80,12 +80,21 @@ export async function initializeNewProject(input: {
   readonly authorName: string;
   readonly authorEmail: string;
 }): Promise<{ readonly warning: string | null }> {
-  await NodeFS.writeFile(NodePath.join(input.folder, "README.md"), `# ${input.name}\n`, {
-    flag: "wx",
-  });
-  await NodeFS.writeFile(NodePath.join(input.folder, ".gitignore"), ".DS_Store\nnode_modules/\n", {
-    flag: "wx",
-  });
+  try {
+    await NodeFS.writeFile(NodePath.join(input.folder, "README.md"), `# ${input.name}\n`, {
+      flag: "wx",
+    });
+    await NodeFS.writeFile(
+      NodePath.join(input.folder, ".gitignore"),
+      ".DS_Store\nnode_modules/\n",
+      { flag: "wx" },
+    );
+  } catch (cause) {
+    // The folder was just reserved and holds only these files, so a failed start leaves nothing
+    // behind; otherwise each retry would leave another empty `<slug>-N`.
+    await NodeFS.rm(input.folder, { recursive: true, force: true }).catch(() => undefined);
+    throw cause;
+  }
   try {
     await git(input.folder, ["init", "-q"]);
   } catch (cause) {

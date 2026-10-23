@@ -86,6 +86,19 @@ describe("new project from a name", () => {
     expect(execFileSync("git", ["status", "--porcelain"], { cwd: folder }).toString()).toBe("");
   });
 
+  it("removes the folder it reserved when the starter files cannot be written", async () => {
+    const root = await tempDir();
+    const folder = await reserveProjectFolder(root, "app");
+    // An existing README fails the exclusive write, as a full disk would.
+    await FS.writeFile(Path.join(folder, "README.md"), "taken");
+    await expect(
+      initializeNewProject({ folder, name: "App", authorName: "", authorEmail: "" }),
+    ).rejects.toMatchObject({ code: "EEXIST" });
+    expect(await FS.readdir(root)).toEqual([]);
+    // So the next attempt reuses the name instead of moving on to app-2.
+    expect(await reserveProjectFolder(root, "app")).toBe(folder);
+  });
+
   it("keeps the folder and warns when the first commit fails", async () => {
     const folder = await reserveProjectFolder(await tempDir(), "app");
     // A held index lock fails `git add` on any machine, whatever its Git identity.
