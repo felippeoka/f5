@@ -228,8 +228,20 @@ export function NewThreadLinkView({
 
   const openInProject = useCallback(
     async (operation: Operation, link: NewThreadLink, project: LinkedProject) => {
-      if (link.kind === "new") await openDraft(operation, link, project.projectId);
-      else operation.setState({ kind: "confirm-checkout", link, project });
+      if (link.kind === "new") return openDraft(operation, link, project.projectId);
+      // A checkout runs the pull request's own agent settings and hooks once the user sends a
+      // message, so a link never checks out code from outside the repository.
+      const { changeRequest } = await ensureNativeApi().git.resolvePullRequest({
+        cwd: project.workspaceRoot,
+        reference: promptLinkPullRequestUrl(link.pullRequest),
+      });
+      if (changeRequest?.isCrossRepository !== false) {
+        return operation.setState({
+          kind: "failed",
+          message: `Pull request #${link.pullRequest.number} comes from a fork, and links only check out pull requests from the repository itself. Review its code before you check it out yourself.`,
+        });
+      }
+      operation.setState({ kind: "confirm-checkout", link, project });
     },
     [openDraft],
   );
@@ -401,7 +413,8 @@ function LinkStateBody(props: {
           <p className="text-muted-foreground">
             F5 creates a new worktree of {project.title} for{" "}
             {promptLinkPullRequestUrl(link.pullRequest)} and opens a thread there. The project's
-            setup script does not run, since the pull request's code may come from anyone.
+            setup script does not run, but the agent uses the pull request's own files, including
+            its agent settings. Check out only pull requests you trust.
           </p>
           <div>
             <Button disabled={busy} onClick={() => props.onCheckout(link, project)}>

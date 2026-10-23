@@ -10,7 +10,12 @@ import { NewThreadLinkView } from "./NewThreadLinkView";
 const api = vi.hoisted(() => ({
   projects: { findByRepository: vi.fn() },
   prHub: { getThreadsForPr: vi.fn(), peek: vi.fn() },
-  git: { preparePullRequestThread: vi.fn() },
+  git: {
+    preparePullRequestThread: vi.fn(),
+    resolvePullRequest: vi.fn(async (_input: unknown) => ({
+      changeRequest: { isCrossRepository: false },
+    })),
+  },
   server: { getConfig: vi.fn(async () => ({ providers: [] })) },
   orchestration: { dispatchCommand: vi.fn(async (_command: unknown) => ({ sequence: 1 })) },
   nextTurnQueue: { submit: vi.fn() },
@@ -272,6 +277,23 @@ it("checks out a pull request in a new worktree only after the user confirms", a
   });
   expect(draftPrompt(command.threadId)).toBe("Review it");
   expect(api.nextTurnQueue.submit).not.toHaveBeenCalled();
+});
+
+it("refuses to check out a pull request from a fork", async () => {
+  api.prHub.getThreadsForPr.mockResolvedValueOnce([]);
+  api.projects.findByRepository.mockResolvedValueOnce([project]);
+  api.git.resolvePullRequest.mockResolvedValueOnce({ changeRequest: { isCrossRepository: true } });
+  const screen = await render(
+    <NewThreadLinkView search={search({ pr: "lopes-felipe/f5#42", prompt: "Review it" })} />,
+  );
+
+  await expect.element(screen.getByRole("alert")).toHaveTextContent("comes from a fork");
+  expect(api.git.resolvePullRequest).toHaveBeenCalledWith({
+    cwd: "/code/f5",
+    reference: "https://github.com/lopes-felipe/f5/pull/42",
+  });
+  expect(screen.getByRole("button", { name: "Check out in a new worktree" }).query()).toBeNull();
+  expect(api.git.preparePullRequestThread).not.toHaveBeenCalled();
 });
 
 it("opens the thread a pull request already has instead of checking it out again", async () => {
