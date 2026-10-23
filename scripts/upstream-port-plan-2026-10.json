@@ -1875,7 +1875,7 @@
         "apps/server/src/provider/Layers/ProviderService.test.ts:4108",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:1234",
         "apps/server/src/orchestration/Layers/TurnLifecycle.test.ts:364",
-        "apps/server/src/persistence/Migrations/134_RestartBackgroundWork.test.ts:1"
+        "apps/server/src/persistence/Migrations/135_RestartBackgroundWork.test.ts:1"
       ]
     },
     {
@@ -6247,7 +6247,7 @@
       "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"],
       "evidence": [
         "apps/server/src/provider/claudeSubagentSelection.test.ts:1",
-        "apps/server/src/persistence/Migrations/133_BackgroundWorkEffort.test.ts:1",
+        "apps/server/src/persistence/Migrations/134_BackgroundWorkEffort.test.ts:1",
         "apps/web/src/components/AgentsPanel.browser.tsx:1"
       ]
     },

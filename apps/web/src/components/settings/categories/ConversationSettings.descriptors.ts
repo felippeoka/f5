@@ -25,6 +25,13 @@ const CONVERSATION_CONTROL_DESCRIPTORS = (
       ["composer", "scroll", "resting", "collapse"],
     ],
     [
+      "compact-layout",
+      "Compact chat layout",
+      "Show tasks, queued turns and notices as chips above the composer.",
+      "Compact chat layout",
+      ["composer", "horizontal", "chips", "tray", "density", "space"],
+    ],
+    [
       "streaming",
       "Stream assistant messages",
       "Show output while a response is in progress.",

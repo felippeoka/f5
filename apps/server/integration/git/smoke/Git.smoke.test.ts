@@ -194,6 +194,8 @@ describe.concurrent("real Git smoke", () => {
     expect(fs.existsSync(worktreePath)).toBe(false);
   });
 
+  // Four worktree removal attempts and their rechecks spawn enough Git processes to
+  // pass 15s on Windows runners.
   it("rechecks ignored approvals at the Git removal boundary without overriding local changes", async () => {
     const { git: service, core } = await makeServices();
     const cwd = await initRepository(service, core);
@@ -252,7 +254,7 @@ describe.concurrent("real Git smoke", () => {
     expect(
       await git(service, cwd, ["rev-parse", "--verify", "refs/heads/ignored-boundary"]),
     ).toMatch(/^[0-9a-f]{40}$/);
-  });
+  }, 45_000);
 
   it("sets upstream on local push and skips a second up-to-date push", async () => {
     const { git: service, core } = await makeServices();

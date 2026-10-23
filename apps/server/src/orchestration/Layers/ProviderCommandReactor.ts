@@ -53,7 +53,7 @@ import {
   type TurnId,
   type WorkflowTurnExecutionProfile,
 } from "@t3tools/contracts";
-import { Cause, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Layer, Option, Schema, Scope, Stream } from "effect";
 import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { estimateMessageContextCharacters, inferProviderForModel } from "@t3tools/shared/model";
 import { getProviderTurnInputLengthIssue } from "@t3tools/shared/providerInput";
@@ -361,6 +361,7 @@ export function toProviderTurnDeliveryError(error: unknown): ProviderTurnDeliver
 }
 
 const make = Effect.gen(function* () {
+  const reactorScope = yield* Scope.Scope;
   // Serializes turn delivery with archive stops and MCP-apply restarts per thread, so Apply
   // never stops a session between its idle check and a new turn. Separate
   // from `withProviderThreadAccess`, which startSession takes itself.
@@ -646,6 +647,7 @@ const make = Effect.gen(function* () {
       readonly modelOptions?: ProviderModelOptions;
       readonly providerOptions?: ProviderStartOptions;
       readonly workflowExecutionProfile?: WorkflowTurnExecutionProfile;
+      readonly keepWorkflowExecutionProfile?: boolean;
     },
   ) {
     return yield* Effect.gen(function* () {
@@ -674,10 +676,16 @@ const make = Effect.gen(function* () {
             branch: thread.branch,
           });
       }
+      const activeWorkflowExecutionProfile = readPersistedInstructionContext(
+        persistedBinding?.runtimePayload,
+      )?.workflowExecutionProfile;
+      const desiredWorkflowExecutionProfile = options?.keepWorkflowExecutionProfile
+        ? activeWorkflowExecutionProfile
+        : options?.workflowExecutionProfile;
       const instructionContext: Partial<SharedInstructionInput> = {
         ...baseInstructionContext,
-        ...(options?.workflowExecutionProfile
-          ? { workflowExecutionProfile: options.workflowExecutionProfile }
+        ...(desiredWorkflowExecutionProfile
+          ? { workflowExecutionProfile: desiredWorkflowExecutionProfile }
           : {}),
       };
       let recoveredPriorWorkSummary: string | undefined;
@@ -1057,11 +1065,8 @@ const make = Effect.gen(function* () {
           currentSessionCwd !== null &&
           desiredSessionCwd !== null &&
           currentSessionCwd !== desiredSessionCwd;
-        const activeWorkflowExecutionProfile = readPersistedInstructionContext(
-          persistedBinding?.runtimePayload,
-        )?.workflowExecutionProfile;
         const shouldRestartForWorkflowExecutionProfileChange =
-          activeWorkflowExecutionProfile !== options?.workflowExecutionProfile;
+          activeWorkflowExecutionProfile !== desiredWorkflowExecutionProfile;
 
         if (
           !runtimeModeChanged &&
@@ -1138,7 +1143,7 @@ const make = Effect.gen(function* () {
           shouldRestartForCwdChange,
           shouldRestartForWorkflowExecutionProfileChange,
           activeWorkflowExecutionProfile: activeWorkflowExecutionProfile ?? null,
-          desiredWorkflowExecutionProfile: options?.workflowExecutionProfile ?? null,
+          desiredWorkflowExecutionProfile: desiredWorkflowExecutionProfile ?? null,
           currentSessionCwd,
           desiredSessionCwd,
           persistedMcpEffectiveConfigVersion: persistedBinding?.mcpEffectiveConfigVersion ?? null,
@@ -2742,6 +2747,51 @@ const make = Effect.gen(function* () {
     },
   );
 
+  /** Refresh the current live generation without reviving a stopped or replaced session. */
+  const refreshSessionForThread = (thread: OrchestrationThread, createdAt: string) =>
+    Effect.gen(function* () {
+      const threadId = thread.id;
+      const generation = thread.session?.capabilities?.generation;
+      const binding = yield* providerSessionDirectory.getBinding(threadId);
+      const persistedGeneration = readPersistedSessionGeneration(
+        Option.getOrUndefined(binding)?.runtimePayload,
+      );
+      return yield* withThreadTurnGate(
+        threadId,
+        Effect.gen(function* () {
+          const current = yield* resolveThread(threadId);
+          const currentBinding = yield* providerSessionDirectory.getBinding(threadId);
+          if (
+            !current ||
+            current.deletedAt !== null ||
+            current.archivedAt !== null ||
+            !current.session ||
+            current.session.status === "stopped" ||
+            current.session.capabilities?.generation !== generation ||
+            readPersistedSessionGeneration(
+              Option.getOrUndefined(currentBinding)?.runtimePayload,
+            ) !== persistedGeneration ||
+            current.session.providerName !== thread.session?.providerName ||
+            current.session.providerInstanceId !== thread.session?.providerInstanceId
+          )
+            return;
+          yield* ensureSessionForThread(threadId, createdAt, {
+            keepWorkflowExecutionProfile: true,
+          });
+        }),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("provider command reactor failed to refresh session", {
+                threadId,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+        Effect.forkIn(reactorScope),
+      );
+    });
+
   const processDomainEvent = (event: ProviderIntentEvent) =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({
@@ -2814,7 +2864,7 @@ const make = Effect.gen(function* () {
           if (!thread?.session || thread.session.status === "stopped") {
             return;
           }
-          yield* ensureSessionForThread(event.payload.threadId, event.occurredAt);
+          yield* refreshSessionForThread(thread, event.occurredAt);
           break;
         }
         case "thread.meta-updated": {
@@ -2836,19 +2886,7 @@ const make = Effect.gen(function* () {
           if (!thread?.session || thread.session.status === "stopped") {
             return;
           }
-          const currentProvider = providerFromSessionName(thread.session.providerName);
-          const selectedProvider = event.payload.modelSelection?.model
-            ? inferProviderForModel(event.payload.modelSelection.model)
-            : undefined;
-          const preferredInstanceId =
-            selectedProvider !== undefined && selectedProvider === currentProvider
-              ? event.payload.modelSelection?.instanceId
-              : undefined;
-          yield* ensureSessionForThread(
-            event.payload.threadId,
-            event.occurredAt,
-            preferredInstanceId !== undefined ? { preferredInstanceId } : undefined,
-          );
+          yield* refreshSessionForThread(thread, event.occurredAt);
           break;
         }
         case "thread.deleted":

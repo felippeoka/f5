@@ -20,15 +20,20 @@ export default Effect.gen(function* () {
     return;
   }
 
-  // A repaired database can hold a minimal projection_threads without these columns; it has
-  // no lane labels to clear.
-  const columns = yield* sql<{ readonly name: string }>`
-    SELECT name FROM pragma_table_info('projection_threads')
-  `;
-  const names = new Set(columns.map((column) => column.name));
-  if (!names.has("branch") || !names.has("worktree_path")) {
+  // Repair-test and legacy databases can contain only part of the projection schema.
+  const threadColumns = yield* sql<{
+    readonly name: string;
+  }>`SELECT name FROM pragma_table_info('projection_threads')`;
+  const workflowColumns = yield* sql<{
+    readonly name: string;
+  }>`SELECT name FROM pragma_table_info('projection_planning_workflows')`;
+  if (
+    !["thread_id", "branch", "worktree_path"].every((name) =>
+      threadColumns.some((column) => column.name === name),
+    ) ||
+    !workflowColumns.some((column) => column.name === "workflow_json")
+  )
     return;
-  }
 
   yield* sql`
     UPDATE projection_threads

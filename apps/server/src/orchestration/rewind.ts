@@ -491,15 +491,20 @@ export const makeConversationRewind = Effect.gen(function* () {
           }
           yield* update(op.operation_id, "files-confirmed");
         }
+        const retainedTurns = (yield* listHistory(thread.id)).slice(0, op.retained_count);
         yield* engine.dispatch({
           type: "thread.revert.complete",
           operationId: request.operationId,
           commandId: CommandId.makeUnsafe(`rewind-complete:${request.operationId}`),
           threadId: thread.id,
           turnCount: op.retained_count,
-          retainedTurnIds: (yield* listHistory(thread.id))
-            .slice(0, op.retained_count)
-            .flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
+          retainedTurnIds: retainedTurns.flatMap((turn) =>
+            turn.turnId === null ? [] : [turn.turnId],
+          ),
+          retainedMessageIds: retainedTurns.flatMap((turn) => [
+            ...(turn.pendingMessageId ? [turn.pendingMessageId] : []),
+            ...(turn.assistantMessageId ? [turn.assistantMessageId] : []),
+          ]),
           createdAt: new Date().toISOString(),
         });
         yield* sql`DELETE FROM rewind_requests WHERE operation_id = ${request.operationId}`;
@@ -525,6 +530,22 @@ export const makeConversationRewind = Effect.gen(function* () {
           yield* sql`UPDATE rewind_operations SET state = CASE WHEN state = 'prepared' THEN 'prepared' ELSE 'reconciliation-required' END, error = ${detail}, updated_at = ${failedAt} WHERE operation_id = ${request.operationId} AND thread_id = ${request.threadId} AND target_message_id = ${request.targetMessageId} AND state <> 'completed'`;
           const op =
             (yield* sql<Operation>`SELECT * FROM rewind_operations WHERE operation_id = ${request.operationId}`)[0];
+          if (!op) {
+            const saved = (yield* sql<{
+              state: string | null;
+            }>`SELECT queue_state_json AS state FROM rewind_requests WHERE operation_id = ${request.operationId}`)[0];
+            const prior = saved?.state
+              ? JSON.parse(saved.state)
+              : { paused: 0, pause_reason_code: null, pause_detail: null };
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* sql`UPDATE next_turn_queue_state SET paused = ${prior.paused}, pause_reason_code = ${prior.pause_reason_code}, pause_detail = ${prior.pause_detail}, revision = revision + 1 WHERE thread_id = ${request.threadId} AND pause_reason_code = 'rewind_in_progress'`;
+                yield* sql`DELETE FROM rewind_requests WHERE operation_id = ${request.operationId}`;
+              }),
+            );
+          } else if (op.state !== "completed") {
+            yield* sql`UPDATE next_turn_queue_state SET paused = 1, pause_reason_code = 'reconciliation_required', pause_detail = ${detail}, revision = revision + 1 WHERE thread_id = ${request.threadId}`;
+          }
           // Unique per attempt so every Retry/Recheck surfaces its own result.
           const failureId = `rewind-failed:${request.operationId}:${op?.state ?? "preflight"}:${randomUUID()}`;
           yield* engine
@@ -555,20 +576,18 @@ export const makeConversationRewind = Effect.gen(function* () {
               },
               createdAt: new Date().toISOString(),
             })
-            .pipe(Effect.catchCause(() => Effect.void));
-          if (!op) {
-            const saved = (yield* sql<{
-              state: string | null;
-            }>`SELECT queue_state_json AS state FROM rewind_requests WHERE operation_id = ${request.operationId}`)[0];
-            const prior = saved?.state
-              ? JSON.parse(saved.state)
-              : { paused: 0, pause_reason_code: null, pause_detail: null };
-            yield* sql.withTransaction(
-              Effect.gen(function* () {
-                yield* sql`UPDATE next_turn_queue_state SET paused = ${prior.paused}, pause_reason_code = ${prior.pause_reason_code}, pause_detail = ${prior.pause_detail}, revision = revision + 1 WHERE thread_id = ${request.threadId} AND pause_reason_code = 'rewind_in_progress'`;
-                yield* sql`DELETE FROM rewind_requests WHERE operation_id = ${request.operationId}`;
-              }),
+            .pipe(
+              Effect.catchCause((activityCause) =>
+                Cause.hasInterruptsOnly(activityCause)
+                  ? Effect.failCause(activityCause)
+                  : Effect.logError("Could not publish conversation rewind failure", {
+                      threadId: request.threadId,
+                      operationId: request.operationId,
+                      cause: Cause.pretty(activityCause),
+                    }),
+              ),
             );
+          if (!op) {
             yield* Effect.logError("Conversation rewind preflight failed", {
               threadId: request.threadId,
               detail,
@@ -585,7 +604,6 @@ export const makeConversationRewind = Effect.gen(function* () {
             });
             return;
           }
-          yield* sql`UPDATE next_turn_queue_state SET paused = 1, pause_reason_code = ${op ? "reconciliation_required" : "thread_reverted"}, pause_detail = ${detail}, revision = revision + 1 WHERE thread_id = ${request.threadId}`;
           yield* Effect.logError("conversation rewind requires attention", {
             threadId: request.threadId,
             operationId: request.operationId,

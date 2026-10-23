@@ -2612,6 +2612,8 @@ describe("ChatView timeline (full app)", () => {
     });
 
     it("reserves conversation space with long tasks, a tall draft, and an open terminal", async () => {
+      // Measures the task drawer in the tray, which the compact layout replaces with a chip.
+      persistAppSettings({ compactChatLayout: false });
       useComposerDraftStore.getState().setPrompt(THREAD_ID, "A tall draft line\n".repeat(30));
       useTerminalStateStore.getState().setTerminalHeight(THREAD_ID, 200);
       useTerminalStateStore.getState().setTerminalOpen(THREAD_ID, true);
@@ -4600,7 +4602,8 @@ describe("ChatView timeline (full app)", () => {
   });
 
   it("renders a collapsible task panel when the thread has tracked tasks", async () => {
-    persistAppSettings({ tasksPanelAutoOpen: true });
+    // The collapsible drawer is the classic layout; the compact one shows a chip.
+    persistAppSettings({ tasksPanelAutoOpen: true, compactChatLayout: false });
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -4747,6 +4750,171 @@ describe("ChatView timeline (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("folds non-critical notices into chips and the runtime row into the header in the compact layout", async () => {
+    persistAppSettings({ compactChatLayout: true });
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-compact-target" as MessageId,
+      targetText: "compact target",
+    });
+    const snapshot: OrchestrationReadModel = {
+      ...baseSnapshot,
+      threads: baseSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              session: thread.session
+                ? { ...thread.session, lastError: "Provider crashed during the turn" }
+                : thread.session,
+            }
+          : thread,
+      ),
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      configureFixture: (nextFixture) => {
+        nextFixture.resolveWsRequest = (body) =>
+          body._tag === WS_METHODS.storageGetDiskSpace
+            ? {
+                type: "result",
+                result: {
+                  level: "low",
+                  checkedAt: NOW_ISO,
+                  lowThresholdBytes: 10 * 1024 ** 3,
+                  criticalThresholdBytes: 2 * 1024 ** 3,
+                  volumes: [
+                    {
+                      path: "/data",
+                      roles: ["userdata"],
+                      freeBytes: 8 * 1024 ** 3,
+                      totalBytes: 500 * 1024 ** 3,
+                      level: "low",
+                    },
+                  ],
+                  reclaimable: [],
+                },
+              }
+            : null;
+      },
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const strip = document.querySelector<HTMLElement>('[data-slot="composer-status-strip"]');
+          expect(strip?.querySelector('[data-status-chip="low-disk-space"]')).not.toBeNull();
+          // The thread error needs the user, so it stays inline in the tray.
+          const notices = document.querySelector<HTMLElement>(
+            '[data-slot="composer-tray"] [data-slot="thread-notice-stack"]',
+          );
+          expect(notices?.textContent).toContain("Provider crashed during the turn");
+          expect(notices?.textContent).not.toContain("Low disk space");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(() => {
+        const headerControls = document.querySelector<HTMLElement>(
+          '[data-slot="header-runtime-controls"]',
+        );
+        expect(
+          headerControls?.querySelector('[data-slot="native-runtime-controls"]'),
+        ).not.toBeNull();
+        // Only the header copy remains; the separate runtime row is gone.
+        expect(document.querySelectorAll('[data-slot="native-runtime-controls"]')).toHaveLength(1);
+      });
+      await page.getByRole("button", { name: "Runtime details", exact: true }).click();
+      await expect.element(page.getByRole("dialog", { name: "Runtime details" })).toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the queue chip and focuses its panel from the command palette", async () => {
+    persistAppSettings({ compactChatLayout: true });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-queue-palette" as MessageId,
+        targetText: "queue palette target",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.resolveWsRequest = (body) =>
+          body._tag === WS_METHODS.nextTurnQueueList
+            ? {
+                type: "result",
+                result: {
+                  threadId: THREAD_ID,
+                  revision: 1,
+                  paused: false,
+                  blockedKind: null,
+                  reasonCode: null,
+                  reasonDetail: null,
+                  maxItems: 20,
+                  quarantinedCount: 0,
+                  items: [
+                    {
+                      itemId: "queue-palette-item",
+                      threadId: THREAD_ID,
+                      submissionId: "queue-palette-submission",
+                      position: 0,
+                      status: "queued",
+                      command: {
+                        type: "thread.turn.start",
+                        commandId: "queue-palette-command",
+                        threadId: THREAD_ID,
+                        message: {
+                          messageId: "queue-palette-message",
+                          role: "user",
+                          text: "Queued from the palette test",
+                          attachments: [],
+                        },
+                        runtimeMode: "full-access",
+                        interactionMode: "default",
+                        createdAt: NOW_ISO,
+                      },
+                      attemptCount: 0,
+                      notBefore: null,
+                      dispatchStartedAt: null,
+                      lastErrorCode: null,
+                      lastErrorDetail: null,
+                      createdAt: NOW_ISO,
+                      updatedAt: NOW_ISO,
+                    },
+                  ],
+                },
+              }
+            : null;
+      },
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-status-chip="queue"]')).not.toBeNull();
+          expect(document.getElementById("next-turn-queue-panel")).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      useCommandPaletteStore.getState().setOpen(true);
+      await page.getByTestId("command-palette").getByText("Focus queued turns").click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-testid="command-palette"]')).toBeNull();
+          expect(document.activeElement?.id).toBe("next-turn-queue-panel");
+        },
+        { timeout: 4_000, interval: 16 },
+      );
+      await expect
+        .element(page.getByText("Queued from the palette test", { exact: true }))
+        .toBeVisible();
     } finally {
       await mounted.cleanup();
     }
@@ -6081,6 +6249,8 @@ describe("ChatView timeline (full app)", () => {
         () => document.querySelector<HTMLElement>('[data-slot="messages-scroll-container"]'),
         "Messages scroll container should render before testing scroll shortcuts.",
       );
+      // Scrolling up during the list's initial pin to the end gets undone.
+      await waitForTimelineScrollToSettle();
       scrollContainer.scrollTo({ top: 0, behavior: "auto" });
       scrollContainer.scrollTop = 0;
       scrollContainer.dispatchEvent(new Event("scroll"));
@@ -7366,6 +7536,7 @@ describe("ChatView timeline (full app)", () => {
   // has zero rows. The panel now lives in the composer tray; keep checking
   // that it renders next to the "send a message to start..." copy.
   it("renders the tasks panel when the thread is empty but has tasks", async () => {
+    persistAppSettings({ compactChatLayout: false });
     const emptyThreadWithTasks: OrchestrationReadModel = {
       snapshotSequence: 1,
       projects: [

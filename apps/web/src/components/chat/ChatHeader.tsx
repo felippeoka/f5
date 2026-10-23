@@ -7,7 +7,7 @@ import {
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
-import { memo, useState, type ComponentType } from "react";
+import { memo, useState, type ComponentType, type ReactNode } from "react";
 import GitActionsControl from "../GitActionsControl";
 import {
   BotIcon,
@@ -65,6 +65,8 @@ interface ChatHeaderProps {
   workflowType?: WorkflowTypeValue | undefined;
   onOpenWorkflow?: (() => void) | undefined;
   threadStatus?: ThreadStatusPill | null | undefined;
+  /** Runtime info and details, folded in from their own row (compact chat layout). */
+  runtimeControls?: ReactNode;
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
@@ -128,6 +130,7 @@ export const ChatHeader = memo(function ChatHeader({
   workflowType,
   onOpenWorkflow,
   threadStatus,
+  runtimeControls,
   isGitRepo,
   openInCwd,
   activeProjectScripts,
@@ -364,6 +367,11 @@ export const ChatHeader = memo(function ChatHeader({
           threadId={activeThreadId}
           className="@xl/header-actions:hidden"
         />
+        {runtimeControls ? (
+          <div data-slot="header-runtime-controls" className="flex shrink-0 items-center gap-1">
+            {runtimeControls}
+          </div>
+        ) : null}
       </nav>
       <div className="flex shrink-0 items-center justify-end gap-2">
         {activeProjectScripts && (

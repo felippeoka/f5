@@ -15774,7 +15774,7 @@
         "apps/server/src/provider/Layers/ProviderService.test.ts:4179",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:1234",
         "apps/server/src/orchestration/Layers/TurnLifecycle.test.ts:365",
-        "apps/server/src/persistence/Migrations/134_RestartBackgroundWork.test.ts:8"
+        "apps/server/src/persistence/Migrations/135_RestartBackgroundWork.test.ts:8"
       ]
     },
     {
@@ -21078,7 +21078,7 @@
       "evidence": [
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:7423",
         "apps/server/src/provider/claudeSubagentSelection.test.ts:14",
-        "apps/server/src/persistence/Migrations/133_BackgroundWorkEffort.test.ts:7",
+        "apps/server/src/persistence/Migrations/134_BackgroundWorkEffort.test.ts:7",
         "apps/web/src/components/AgentsPanel.browser.tsx:229"
       ]
     },

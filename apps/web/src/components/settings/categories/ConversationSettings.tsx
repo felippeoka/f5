@@ -42,6 +42,7 @@ const COMPOSER_KEYS = [
   "sendShortcut",
   "composerRichTextEnabled",
   "composerCollapseOnScroll",
+  "compactChatLayout",
 ] as const;
 const MESSAGE_KEYS = [
   "enableAssistantStreaming",
@@ -150,6 +151,17 @@ export function ConversationSettings() {
             }
           />
         )}
+        <SettingsRow
+          title="Compact chat layout"
+          description="Show tasks, queued turns and non-critical notices as chips above the composer, and runtime info in the header."
+          control={
+            <Switch
+              aria-label="Compact chat layout"
+              checked={settings.compactChatLayout}
+              onCheckedChange={(checked) => updateSettings({ compactChatLayout: checked })}
+            />
+          }
+        />
       </SettingsCard>
 
       <SettingsCard

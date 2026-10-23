@@ -2242,6 +2242,7 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
           threadId: command.threadId,
           turnCount: command.turnCount,
           ...(command.operationId ? { operationId: command.operationId } : {}),
+          ...(command.retainedMessageIds ? { retainedMessageIds: command.retainedMessageIds } : {}),
           ...(command.retainedTurnIds ? { retainedTurnIds: command.retainedTurnIds } : {}),
         },
       };

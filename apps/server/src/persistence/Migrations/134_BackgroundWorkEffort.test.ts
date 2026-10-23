@@ -2,8 +2,8 @@ import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqliteClient from "../NodeSqliteClient.ts";
-import Migration0129 from "./133_BackgroundWorkEffort.ts";
-it.layer(SqliteClient.layerMemory())("133_BackgroundWorkEffort", (it) => {
+import Migration0129 from "./134_BackgroundWorkEffort.ts";
+it.layer(SqliteClient.layerMemory())("134_BackgroundWorkEffort", (it) => {
   it.effect("preserves old metadata and adds a nullable bounded effort column idempotently", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

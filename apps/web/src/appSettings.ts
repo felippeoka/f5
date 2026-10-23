@@ -525,6 +525,8 @@ export const AppSettingsSchema = Schema.Struct({
   showProviderRuntimeMetadata: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
+  // Layout only, so it is not one of the display profile keys.
+  compactChatLayout: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   onboardingLiteStatus: Schema.Literals(["eligible", "dismissed", "completed", "reopened"]).pipe(
     Schema.withConstructorDefault(() => Option.some("eligible" as const)),
     Schema.withDecodingDefault(() => "eligible" as const),

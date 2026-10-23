@@ -302,6 +302,9 @@ export const SETTINGS_ITEM_ROUTES = defineItemRoutes({
   "conversation.composer-collapse": {
     category: "conversation",
   },
+  "conversation.compact-layout": {
+    category: "conversation",
+  },
   "conversation.streaming": {
     category: "conversation",
   },

@@ -1,3 +1,5 @@
+import { makeProjectionTurnRepository } from "../../persistence/Layers/ProjectionTurns.ts";
+import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { createPersistentOrchestrationSystem } from "../testUtils/persistentOrchestration.ts";
 import { AcceptedShutdownWork, ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
 import { ProviderControlTarget } from "../../provider/controlTarget.ts";
@@ -199,6 +201,115 @@ function now() {
 }
 
 describe("OrchestrationEngine", () => {
+  it("retains a retried message consistently in live, SQL, and replayed conversations", async () => {
+    const system = await createOrchestrationSystem();
+    const threadId = ThreadId.makeUnsafe("retried-revert");
+    const projectId = ProjectId.makeUnsafe("retried-project");
+    const at = "2026-10-22T12:00:00.000Z";
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("retry-project"),
+          projectId,
+          title: "Retry",
+          workspaceRoot: process.cwd(),
+          createdAt: at,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("retry-thread"),
+          threadId,
+          projectId,
+          title: "Retry",
+          model: "gpt-5-codex",
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: at,
+        }),
+      );
+      for (let index = 1; index <= 3; index++) {
+        await system.run(
+          system.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.makeUnsafe(`retry-start-${index}`),
+            threadId,
+            message: {
+              messageId: MessageId.makeUnsafe(`retry-message-${index}`),
+              role: "user",
+              text: `Prompt ${index}`,
+              attachments: [],
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: new Date(Date.parse(at) + index * 1000).toISOString(),
+          }),
+        );
+      }
+      const turns = await system.run(
+        makeProjectionTurnRepository.pipe(Effect.provideService(SqlClient.SqlClient, system.sql)),
+      );
+      for (let index = 1; index <= 2; index++) {
+        await system.run(
+          turns.upsertByTurnId({
+            threadId,
+            turnId: TurnId.makeUnsafe(`retry-turn-${index}`),
+            pendingMessageId: null,
+            assistantMessageId: null,
+            state: "completed",
+            requestedAt: new Date(Date.parse(at) + index * 1000).toISOString(),
+            startedAt: at,
+            completedAt: at,
+            processingQuiescedAt: at,
+            checkpointTurnCount: null,
+            checkpointRef: null,
+            checkpointStatus: null,
+            checkpointFiles: [],
+          }),
+        );
+        await system.run(
+          system.sql`UPDATE provider_turn_deliveries SET state = 'accepted', provider_turn_id = ${`retry-turn-${index}`} WHERE command_id = ${`retry-start-${index + 1}`}`,
+        );
+      }
+      const retained = (await system.run(turns.listByThreadId({ threadId }))).slice(0, 1);
+      const retainedMessageIds = retained.flatMap((turn) =>
+        turn.pendingMessageId ? [turn.pendingMessageId] : [],
+      );
+      expect(retainedMessageIds).toEqual(["retry-message-2"]);
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.revert.complete",
+          commandId: CommandId.makeUnsafe("retry-revert"),
+          threadId,
+          turnCount: 1,
+          retainedTurnIds: [TurnId.makeUnsafe("retry-turn-1")],
+          retainedMessageIds,
+          createdAt: at,
+        }),
+      );
+      const live = (await system.run(system.engine.getReadModel())).threads[0]!.messages.map(
+        (message) => message.id,
+      );
+      expect(live).toEqual(["retry-message-2"]);
+      const stored = await system.run(
+        system.sql<{
+          id: string;
+        }>`SELECT message_id AS id FROM projection_thread_messages WHERE thread_id = ${threadId}`,
+      );
+      expect(stored.map((message) => message.id)).toEqual(live);
+      const events = await system.run(Stream.runCollect(system.engine.readEvents(0)));
+      let replayed = createEmptyReadModel(at);
+      for (const event of events) replayed = await Effect.runPromise(projectEvent(replayed, event));
+      expect(replayed.threads[0]!.messages.map((message) => message.id)).toEqual(live);
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it.each(["planning", "codeReview", "investigation"] as const)(
     "persists and replays an atomic %s workflow archive and restore",
     async (kind) => {

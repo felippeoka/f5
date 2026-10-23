@@ -2,11 +2,11 @@ import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqliteClient from "../NodeSqliteClient.ts";
-import prHubReviewGuides from "./128_PrHubReviewGuides.ts";
-import threadPullRequestWatches from "./129_ThreadPullRequestWatches.ts";
-import restartBackgroundWork from "./134_RestartBackgroundWork.ts";
+import prHubReviewGuides from "./129_PrHubReviewGuides.ts";
+import threadPullRequestWatches from "./130_ThreadPullRequestWatches.ts";
+import restartBackgroundWork from "./135_RestartBackgroundWork.ts";
 
-// These migrations moved to new numbers when main took 124-127, so a development database can
+// These migrations moved to new numbers when main took 124-128, so a development database can
 // already hold their tables and columns when they run under the new numbers.
 it.layer(SqliteClient.layerMemory())("renumbered migrations", (it) => {
   it.effect("run again over their own tables and columns", () =>
