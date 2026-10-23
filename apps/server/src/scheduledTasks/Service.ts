@@ -771,7 +771,10 @@ export const makeScheduledTaskService = (deps: {
           yield* sql`UPDATE scheduled_control SET enabled=${current.enabled ? 1 : 0},epoch=${current.epoch},cutover_at=${cutover} WHERE id=1`;
           yield* store.revision;
         }
-        if (!current.enabled) return;
+        if (!current.enabled) {
+          yield* changed();
+          return;
+        }
         for (const task of yield* store.tasks()) {
           if (!task.enabled || !task.nextRunAt || task.nextRunAt > at) continue;
           yield* Effect.gen(function* () {

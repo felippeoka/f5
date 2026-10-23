@@ -89,6 +89,16 @@ function WorktreeSettings() {
       }
     >
       <SettingsRow
+        title="Manage worktrees"
+        searchTarget="git.manage-worktrees"
+        description="Browse checkouts for each project, see which conversations use them, and switch or remove them."
+        control={
+          <Button size="xs" variant="outline" render={<Link to="/worktrees" />}>
+            Open worktrees
+          </Button>
+        }
+      />
+      <SettingsRow
         title="Worktree submodules"
         description="Which git submodules a new worktree checks out."
         control={

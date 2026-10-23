@@ -1493,7 +1493,8 @@ describe("Thread sidebar", () => {
     });
     const previousProfile = useProfileState.getState();
     try {
-      await vi.waitFor(() => expect(socket).toBeDefined());
+      // The startup request can take over a second to arrive on a loaded runner.
+      await vi.waitFor(() => expect(socket).toBeDefined(), { timeout: 8_000, interval: 16 });
       const profile = {
         id: ProfileId.makeUnsafe("1".repeat(32)),
         slug: "one",

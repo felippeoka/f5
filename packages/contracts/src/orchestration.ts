@@ -1782,6 +1782,7 @@ const ThreadSessionNotesRecordCommand = Schema.Struct({
 });
 
 const ThreadRevertCompleteCommand = Schema.Struct({
+  retainedMessageIds: Schema.optional(Schema.Array(MessageId)),
   retainedTurnIds: Schema.optional(Schema.Array(TurnId)),
   operationId: Schema.optional(CommandId),
   type: Schema.Literal("thread.revert.complete"),
@@ -2298,6 +2299,8 @@ export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
+  /** Verified delivery bindings shared by live projection and event replay. */
+  retainedMessageIds: Schema.optional(Schema.Array(MessageId)),
   retainedTurnIds: Schema.optional(Schema.Array(TurnId)),
   operationId: Schema.optional(CommandId),
   threadId: ThreadId,

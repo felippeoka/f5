@@ -1399,6 +1399,7 @@ function reduceDomainEvent(
           thread.messages,
           retainedTurnIds,
           event.payload.turnCount,
+          event.payload.retainedMessageIds,
         ).slice(-MAX_THREAD_MESSAGES);
         const proposedPlans = retainThreadProposedPlansAfterRevert(
           thread.proposedPlans,

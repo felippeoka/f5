@@ -12,18 +12,20 @@ export const repairUnreleasedScheduledTaskMigrations = Effect.gen(function* () {
     Effect.gen(function* () {
       const previous = yield* sql<{
         migration_id: number;
-      }>`SELECT migration_id FROM effect_sql_migrations
-      WHERE migration_id IN(124,127,128) AND name='ScheduledTasks' ORDER BY migration_id`;
+        name: string;
+      }>`SELECT migration_id,name FROM effect_sql_migrations
+      WHERE (migration_id IN(124,127,128) AND name='ScheduledTasks') OR (migration_id=129 AND name='ScheduledTaskQuarantine') ORDER BY migration_id`;
       for (const row of previous) {
         const replacement = Object.entries(MIGRATIONS).find(
           ([key]) =>
-            Number.parseInt(key, 10) === row.migration_id && !key.endsWith("_ScheduledTasks"),
+            Number.parseInt(key, 10) === row.migration_id &&
+            key.slice(key.indexOf("_") + 1) !== row.name,
         );
         if (!replacement) continue;
         const [key, migration] = replacement;
         yield* migration;
         const name = key.slice(key.indexOf("_") + 1);
-        yield* sql`UPDATE effect_sql_migrations SET name=${name} WHERE migration_id=${row.migration_id} AND name='ScheduledTasks'`;
+        yield* sql`UPDATE effect_sql_migrations SET name=${name} WHERE migration_id=${row.migration_id} AND name=${row.name}`;
       }
     }),
   );

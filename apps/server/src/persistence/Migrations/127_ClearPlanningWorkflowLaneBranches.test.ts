@@ -10,6 +10,24 @@ const layer = it.layer(SqliteClient.layerMemory());
 layer("127_ClearPlanningWorkflowLaneBranches", (it) => {
   it.effect("skips databases without the projection tables", () => Migration0127);
 
+  it.effect("skips a thread table without branch columns", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE projection_threads (thread_id TEXT PRIMARY KEY)`;
+      yield* sql`
+        CREATE TABLE projection_planning_workflows (
+          workflow_id TEXT PRIMARY KEY,
+          workflow_json TEXT NOT NULL
+        )
+      `;
+
+      yield* Migration0127;
+
+      yield* sql`DROP TABLE projection_threads`;
+      yield* sql`DROP TABLE projection_planning_workflows`;
+    }),
+  );
+
   it.effect("clears lane labels only on planning workflow author threads", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -65,3 +83,14 @@ layer("127_ClearPlanningWorkflowLaneBranches", (it) => {
     }),
   );
 });
+
+for (const columns of ["thread_id TEXT", "thread_id TEXT, branch TEXT"] as const) {
+  it.effect(`skips partial legacy thread columns: ${columns}`, () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql.unsafe(`CREATE TABLE projection_threads (${columns})`);
+      yield* sql`CREATE TABLE projection_planning_workflows (workflow_json TEXT)`;
+      yield* Migration0127;
+    }).pipe(Effect.provide(SqliteClient.layerMemory())),
+  );
+}

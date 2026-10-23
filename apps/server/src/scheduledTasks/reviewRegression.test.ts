@@ -502,3 +502,27 @@ it.effect("schedule cursor writes preserve budget counters reserved after the ta
     expect(current.version).toBe(task.version);
   }).pipe(Effect.provide(testLayer), Effect.scoped),
 );
+
+it.effect(
+  "publishes a disabled cutover revision once without waking clients for unchanged evaluations",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* setup;
+      yield* f.create();
+      const revisions: number[] = [];
+      const runtime = yield* makeScheduledTaskService({
+        store: f.store,
+        host: f.host.shape,
+        settings: f.settings,
+        publish: (change) =>
+          Effect.sync(() => {
+            revisions.push(change.revision);
+          }),
+      });
+      yield* f.settings.updateSettings({ scheduledTasks: { enabled: false } });
+      yield* runtime.evaluate(false);
+      expect(revisions).toEqual([yield* f.store.readRevision]);
+      yield* runtime.evaluate(false);
+      expect(revisions).toHaveLength(1);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+);

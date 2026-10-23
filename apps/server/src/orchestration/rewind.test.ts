@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { CommandId, MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
@@ -12,7 +12,10 @@ import { CheckpointStore } from "../checkpointing/Services/CheckpointStore.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { makeConversationRewind } from "./rewind.ts";
 
-const layer = it.layer(SqlitePersistenceMemory);
+import { ProjectionTurnRepositoryLive } from "../persistence/Layers/ProjectionTurns.ts";
+const layer = it.layer(
+  ProjectionTurnRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+);
 const at = "2026-09-30T12:00:00.000Z";
 const harness = (
   name: string,
@@ -37,10 +40,12 @@ const harness = (
     nativeWorkspace?: string;
     isGit?: boolean;
     sibling?: "live" | "deleted";
+    usePersistedTurns?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const persistedTurns = yield* ProjectionTurnRepository;
     const threadId = ThreadId.makeUnsafe(name);
     const projectId = ProjectId.makeUnsafe(`project:${name}`);
     const messageId = MessageId.makeUnsafe(`message:${name}`);
@@ -63,6 +68,7 @@ const harness = (
     const beforeTurnIds: Array<string | undefined> = [];
     const deletedRefs: string[] = [];
     const activityCommandIds: string[] = [];
+    const queueReasonsAtFailure: Array<string | null> = [];
     let rollbackCalls = 0;
     let identity = "provider-session";
     let providerTurns = [TurnId.makeUnsafe("first"), TurnId.makeUnsafe("second")];
@@ -232,33 +238,45 @@ const harness = (
             deletedRefs.push(...checkpointRefs);
           }),
       } as never),
-      Effect.provideService(ProjectionTurnRepository, {
-        listByThreadId: () =>
-          Effect.succeed([
-            {
-              turnId: "first",
-              pendingMessageId: options.zeroTurnClaude ? messageId : "earlier",
-              requestedAt: at,
-            },
-            {
-              turnId: "second",
-              pendingMessageId: options.zeroTurnClaude ? "later" : messageId,
-              requestedAt: "2026-09-30T12:01:00.000Z",
-            },
-          ]),
-      } as never),
+      Effect.provideService(
+        ProjectionTurnRepository,
+        options.usePersistedTurns
+          ? persistedTurns
+          : ({
+              listByThreadId: () =>
+                Effect.succeed([
+                  {
+                    turnId: "first",
+                    pendingMessageId: options.zeroTurnClaude ? messageId : "earlier",
+                    requestedAt: at,
+                  },
+                  {
+                    turnId: "second",
+                    pendingMessageId: options.zeroTurnClaude ? "later" : messageId,
+                    requestedAt: "2026-09-30T12:01:00.000Z",
+                  },
+                ]),
+            } as never),
+      ),
       Effect.provideService(OrchestrationEngineService, {
         getReadModel: () => Effect.succeed(model),
         dispatch: (command: { type: string; commandId: string }) =>
-          Effect.suspend(() => {
-            if (command.type === "thread.activity.append")
+          Effect.gen(function* () {
+            if (command.type === "thread.activity.append") {
               activityCommandIds.push(command.commandId);
-            if (command.type !== "thread.revert.complete") return Effect.succeed({ sequence: 4 });
+              const rows = yield* sql<{
+                reason: string | null;
+              }>`SELECT pause_reason_code AS reason FROM next_turn_queue_state WHERE thread_id = ${threadId}`;
+              queueReasonsAtFailure.push(rows[0]?.reason ?? null);
+            }
+            if (command.type !== "thread.revert.complete") return { sequence: 4 };
             if (failPersist) {
               failPersist = false;
-              return Effect.fail(new Error("Persistence unavailable after provider accepted"));
+              return yield* Effect.fail(
+                new Error("Persistence unavailable after provider accepted"),
+              );
             }
-            return sql`UPDATE rewind_operations SET state = 'completed' WHERE operation_id = ${operationId}`.pipe(
+            return yield* sql`UPDATE rewind_operations SET state = 'completed' WHERE operation_id = ${operationId}`.pipe(
               Effect.as({ sequence: 4 }),
             );
           }),
@@ -271,6 +289,7 @@ const harness = (
       fileActions,
       beforeTurnIds,
       activityCommandIds,
+      queueReasonsAtFailure,
       deletedRefs,
       rollbackCalls: () => rollbackCalls,
       changeIdentity: () => {
@@ -279,6 +298,52 @@ const harness = (
     };
   });
 layer("conversation rewind recovery", (it) => {
+  it.effect("restores the prior queue pause before publishing a preflight failure", () =>
+    Effect.gen(function* () {
+      const h = yield* harness("rewind-preflight-pause", null, null, { usePersistedTurns: true });
+      const sql = yield* SqlClient.SqlClient;
+      const prior = { paused: 1, pause_reason_code: "manual_pause", pause_detail: "User paused" };
+      yield* sql`UPDATE rewind_requests SET queue_state_json = ${JSON.stringify(prior)} WHERE operation_id = ${h.operationId}`;
+      yield* sql`UPDATE next_turn_queue_state SET pause_reason_code = 'rewind_in_progress' WHERE thread_id = ${h.request.threadId}`;
+      // Missing turn boundary fails preflight.
+      yield* h.rewind.run(h.request);
+      assert.deepEqual(h.queueReasonsAtFailure, ["manual_pause"]);
+      const queue =
+        (yield* sql`SELECT paused, pause_reason_code, pause_detail FROM next_turn_queue_state WHERE thread_id = ${h.request.threadId}`)[0]!;
+      assert.deepEqual(queue, prior);
+    }),
+  );
+  it.effect("rewinds a retried delivery whose projection has no pending message", () =>
+    Effect.gen(function* () {
+      const h = yield* harness("rewind-retried-delivery", null, null, { usePersistedTurns: true });
+      const sql = yield* SqlClient.SqlClient;
+      const turns = yield* ProjectionTurnRepository;
+      for (const turn of ["first", "second"]) {
+        yield* turns.upsertByTurnId({
+          threadId: h.request.threadId,
+          turnId: TurnId.makeUnsafe(turn),
+          pendingMessageId: null,
+          assistantMessageId: null,
+          state: "completed",
+          requestedAt: at,
+          startedAt: at,
+          completedAt: at,
+          processingQuiescedAt: at,
+          checkpointTurnCount: null,
+          checkpointRef: null,
+          checkpointStatus: null,
+          checkpointFiles: [],
+        });
+      }
+      yield* sql`INSERT INTO provider_turn_deliveries
+        (delivery_id, thread_id, command_id, message_id, state, provider_turn_id, event_json, created_at, updated_at)
+        VALUES (${h.operationId}, ${h.request.threadId}, ${h.operationId}, ${h.request.targetMessageId}, 'accepted', 'second', '{}', ${at}, ${at})`;
+      yield* h.rewind.run(h.request);
+      assert.equal(h.rollbackCalls(), 1);
+      assert.deepEqual(h.beforeTurnIds, ["second"]);
+      assert.equal(h.activityCommandIds.length, 0);
+    }),
+  );
   it.effect("rejects a provider cwd outside the isolated worktree before any file operation", () =>
     Effect.gen(function* () {
       const cwd = yield* Effect.acquireRelease(

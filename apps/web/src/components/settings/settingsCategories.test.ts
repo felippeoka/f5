@@ -85,6 +85,7 @@ describe("settings item descriptors", () => {
       "storage.backup-credentials",
     );
     expect(filterSettingsItems("merge method")[0]?.id).toBe("git.merge-method");
+    expect(filterSettingsItems("manage worktrees")[0]?.id).toBe("git.manage-worktrees");
   });
 
   it("limits search to the items the current scope renders", () => {

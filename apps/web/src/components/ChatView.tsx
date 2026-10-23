@@ -18,6 +18,18 @@ import { OpenLinkThread } from "../hooks/useOpenLink";
 import { formatUsageLimits } from "../lib/usageLimits";
 import { useServerCapability } from "~/protocolState";
 import { describeTaskSync, ThreadTasksPanel } from "./chat/composer/ThreadTasksPanel";
+import {
+  ComposerStatusStrip,
+  ComposerStatusStripHostProvider,
+  ComposerStatusStripSlot,
+} from "./chat/composer/ComposerStatusStrip";
+import {
+  NoticeStatusChip,
+  QueueStatusChip,
+  TasksStatusChip,
+  WorktreeStatusChip,
+} from "./chat/composer/StatusStripChips";
+import { isWorktreeSetupChip, summarizeQueueChip } from "./chat/composer/ComposerStatusStrip.logic";
 import { workspaceBasenameMatch } from "../lib/workspaceBasename";
 import { resolveChatAssetTarget } from "../lib/chatAssetTarget";
 import { WorkspaceMediaView } from "./WorkspaceMediaView";
@@ -240,7 +252,7 @@ import { setSearchParamsForSurface } from "../rightPanelNavigation";
 import { canStartImplementation, workflowContainsThread } from "./workflow/workflowUtils";
 import { codeReviewWorkflowContainsThread } from "./workflow/codeReviewWorkflowUtils";
 import { investigationWorkflowContainsThread } from "./workflow/investigationWorkflowUtils";
-import { MessagesSquareIcon } from "lucide-react";
+import { HardDriveIcon, MessagesSquareIcon } from "lucide-react";
 import { Button } from "./ui/button";
 
 import { randomUUID } from "~/lib/utils";
@@ -345,7 +357,7 @@ import type { RewindDraft } from "@t3tools/contracts";
 import { UserInputAttachments } from "./chat/UserInputAttachments";
 import { AsyncUserInputPanel } from "./chat/AsyncUserInputPanel";
 import { ElicitationPanel } from "./chat/ElicitationPanel";
-import { NextTurnQueuePanel } from "./chat/NextTurnQueuePanel";
+import { NextTurnQueuePanel, NextTurnQueueSync } from "./chat/NextTurnQueuePanel";
 import { shouldShowWorktreeSetupCard, WorktreeSetupCard } from "./chat/WorktreeSetupCard";
 import { useWorktreeSetup } from "../hooks/useWorktreeSetup";
 import { runFanOut, toggleFanOutModel, type FanOutAttempt, type FanOutModel } from "./chat/fanOut";
@@ -363,10 +375,13 @@ import {
 } from "./chat/composerProviderState";
 import { supportsClaudeTraitsControls } from "./chat/ClaudeTraitsPicker";
 
-import { ProviderHealthBanner } from "./chat/ProviderHealthBanner";
-import { LowDiskSpaceBanner } from "./chat/LowDiskSpaceBanner";
+import { ProviderHealthBanner, providerHealthChip } from "./chat/ProviderHealthBanner";
+import { fullestLowDiskVolume, LowDiskSpaceBanner } from "./chat/LowDiskSpaceBanner";
 import { useDiskSpaceStatus } from "../hooks/useDiskSpaceStatus";
-import { ProviderRuntimeInfoBanner } from "./chat/ProviderRuntimeInfoBanner";
+import {
+  ProviderRuntimeInfoBanner,
+  ProviderRuntimeInfoChip,
+} from "./chat/ProviderRuntimeInfoBanner";
 import { UsageLimitNotice } from "./chat/UsageLimitNotice";
 import { resolveUsageLimitNotice } from "./chat/UsageLimitNotice.logic";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
@@ -6918,11 +6933,24 @@ export default function ChatView({
     );
   }
 
+  const compactChatLayout = settings.compactChatLayout;
   const threadNotices: ThreadNotice[] = [];
   let lowDiskSpaceNotice: ThreadNotice | null = null;
   if (diskSpaceStatus && diskSpaceStatus.level !== "ok") {
+    const fullestVolume = fullestLowDiskVolume(diskSpaceStatus);
     const notice: ThreadNotice = {
       id: "low-disk-space",
+      // Held turns explain why nothing sends, so a critical notice never folds into a chip.
+      ...(diskSpaceStatus.level !== "critical" && fullestVolume
+        ? {
+            chip: {
+              icon: HardDriveIcon,
+              tone: "warning" as const,
+              label: `${formatByteSize(fullestVolume.freeBytes)} free`,
+              ariaLabel: `Low disk space: ${formatByteSize(fullestVolume.freeBytes)} free`,
+            },
+          }
+        : {}),
       content: (
         <LowDiskSpaceBanner
           status={diskSpaceStatus}
@@ -7032,8 +7060,10 @@ export default function ChatView({
     !isProviderStatusDismissed &&
     activeProviderStatus.status !== "ready"
   ) {
+    const providerChip = providerHealthChip(activeProviderStatus);
     threadNotices.push({
       id: "provider-health",
+      ...(providerChip ? { chip: providerChip } : {}),
       content: (
         <ProviderHealthBanner
           status={activeProviderStatus}
@@ -7047,6 +7077,88 @@ export default function ChatView({
     });
   }
   if (lowDiskSpaceNotice) threadNotices.push(lowDiskSpaceNotice);
+  const inlineThreadNotices = compactChatLayout
+    ? threadNotices.filter((notice) => !notice.chip)
+    : threadNotices;
+  const chipThreadNotices = compactChatLayout ? threadNotices.filter((notice) => notice.chip) : [];
+  const worktreeSetupCardVisible =
+    isServerThread &&
+    !!worktreeSetup &&
+    shouldShowWorktreeSetupCard(worktreeSetup, {
+      firstTurnQueued:
+        nextTurnQueueState.snapshot?.items.some((item) => item.itemId === worktreeSetup.itemId) ??
+        false,
+    });
+  const worktreeSetupAsChip =
+    compactChatLayout && worktreeSetupCardVisible && isWorktreeSetupChip(worktreeSetup);
+  const queueChip =
+    compactChatLayout && isServerThread
+      ? summarizeQueueChip({
+          snapshot: nextTurnQueueState.snapshot,
+          optimistic: nextTurnQueueState.optimistic,
+          syncError: nextTurnQueueState.syncError,
+          foldedItemId: usageLimitNotice?.foldedItemId ?? null,
+        })
+      : null;
+  const tasksPanelVisible = activeThread.detailsLoaded && showThreadTasksPanel;
+  const runtimeRowVisible =
+    activeThread.session != null ||
+    latestConfiguredRuntimeActivity != null ||
+    (settings.showProviderRuntimeMetadata && providerRuntimeInfoEntries.length > 0);
+  // `expanded` opens a warnings-only setup in full, as its chip's popover does.
+  const renderWorktreeSetupCard = (expanded: boolean) =>
+    worktreeSetup ? (
+      <WorktreeSetupCard
+        variant="tray"
+        defaultExpanded={expanded}
+        snapshot={worktreeSetup}
+        busy={worktreeSetupBusy}
+        onCancel={worktreeSetup.agentStarted ? null : () => void runWorktreeSetupAction("cancel")}
+        onRetry={
+          worktreeSetup.phase === "failed" ||
+          worktreeSetup.phase === "cancelled" ||
+          worktreeSetup.phase === "cancelled_kept"
+            ? () => void runWorktreeSetupAction("retry")
+            : null
+        }
+        onWorkLocally={
+          worktreeSetup.agentStarted || worktreeSetup.phase === "done"
+            ? null
+            : () => void runWorktreeSetupAction("workLocally")
+        }
+      />
+    ) : null;
+  const nextTurnQueuePanel = (
+    <NextTurnQueuePanel
+      variant="tray"
+      synced
+      turnSteering={isSessionActionSupported(
+        activeThread.session?.capabilities,
+        "steer",
+        activeProviderStatus?.runtimeCapabilities?.turnSteering === true,
+      )}
+      threadId={activeThread.id}
+      foldedItemId={usageLimitNotice?.foldedItemId ?? null}
+      provider={selectedProvider}
+      runtimeSlashCommands={composerNativeSlashCommands.commands}
+      projectSkills={activeProject?.skills}
+    />
+  );
+  // The compact layout moves the same panel from its own row into the header.
+  const nativeRuntimePanel = (compact: boolean) => (
+    <NativeRuntimePanel
+      compact={compact}
+      provider={sessionProvider}
+      sessionStatus={activeThread.session?.status}
+      projectId={activeThread.projectId}
+      threadId={activeThread.id}
+      capabilities={activeThread.session?.capabilities}
+      activities={activeThread.activities}
+      runtime={latestConfiguredRuntimeActivity}
+      requestedModel={activeThread.model}
+      outcome={activeThread.latestTurn?.state}
+    />
+  );
 
   const composerPendingInteraction: ComposerPendingInteraction = {
     activePendingApproval,
@@ -7237,6 +7349,23 @@ export default function ChatView({
                 : undefined
             }
             threadStatus={resolveThreadStatusPillForThread(activeThread)}
+            runtimeControls={
+              compactChatLayout && runtimeRowVisible ? (
+                <>
+                  {settings.showProviderRuntimeMetadata ? (
+                    <ProviderRuntimeInfoChip
+                      provider={sessionProvider ?? selectedProviderByThreadId ?? null}
+                      entries={providerRuntimeInfoEntries}
+                      mcpServers={mcpRuntimeSummary?.servers}
+                      projectId={activeThread.projectId}
+                      threadId={activeThread.id}
+                      className="hidden @[36rem]/header-actions:flex"
+                    />
+                  ) : null}
+                  {nativeRuntimePanel(true)}
+                </>
+              ) : undefined
+            }
             onOpenWorkflow={activeWorkflow ? handleOpenActiveWorkflow : undefined}
             isGitRepo={isGitRepo}
             openInCwd={activeThread.worktreePath ?? activeProject?.cwd ?? null}
@@ -7273,9 +7402,7 @@ export default function ChatView({
           />
         </AppTitlebar>
 
-        {(activeThread.session != null ||
-          latestConfiguredRuntimeActivity != null ||
-          (settings.showProviderRuntimeMetadata && providerRuntimeInfoEntries.length > 0)) && (
+        {runtimeRowVisible && !compactChatLayout && (
           <div className="flex shrink-0 items-center border-b border-border">
             <div className="min-w-0 flex-1">
               {settings.showProviderRuntimeMetadata ? (
@@ -7288,17 +7415,7 @@ export default function ChatView({
                 />
               ) : null}
             </div>
-            <NativeRuntimePanel
-              provider={sessionProvider}
-              sessionStatus={activeThread.session?.status}
-              projectId={activeThread.projectId}
-              threadId={activeThread.id}
-              capabilities={activeThread.session?.capabilities}
-              activities={activeThread.activities}
-              runtime={latestConfiguredRuntimeActivity}
-              requestedModel={activeThread.model}
-              outcome={activeThread.latestTurn?.state}
-            />
+            {nativeRuntimePanel(false)}
           </div>
         )}
         {latestConfiguredRuntimeActivity?.agentBrowser ? (
@@ -7421,165 +7538,154 @@ export default function ChatView({
                   redesign={composerRedesign}
                   className={isGitRepo ? "pb-0.5" : "pb-3 sm:pb-4"}
                 >
-                  <ComposerTray redesign={composerRedesign}>
-                    {/* The task list stays attached to the composer so it is
+                  <ComposerStatusStripHostProvider>
+                    {/* The panel unmounts inside a closed chip popover, so the
+                      queue's loading and announcements live here. */}
+                    {isServerThread ? <NextTurnQueueSync threadId={activeThread.id} /> : null}
+                    {compactChatLayout ? (
+                      <ComposerStatusStrip>
+                        {tasksPanelVisible ? (
+                          <TasksStatusChip
+                            tasks={effectiveThreadTasks}
+                            tracking={activeThread.tasksTracking}
+                            summary={taskPanelSummary}
+                          />
+                        ) : null}
+                        {chipThreadNotices.map((notice) => (
+                          <NoticeStatusChip key={notice.id} notice={notice} />
+                        ))}
+                        {worktreeSetupAsChip && worktreeSetup ? (
+                          <WorktreeStatusChip snapshot={worktreeSetup}>
+                            {renderWorktreeSetupCard(true)}
+                          </WorktreeStatusChip>
+                        ) : null}
+                        <ComposerStatusStripSlot />
+                        {queueChip ? (
+                          <QueueStatusChip summary={queueChip}>
+                            {nextTurnQueuePanel}
+                          </QueueStatusChip>
+                        ) : null}
+                      </ComposerStatusStrip>
+                    ) : null}
+                    <ComposerTray redesign={composerRedesign}>
+                      {/* The task list stays attached to the composer so it is
                         visible in long threads. Tasks come only from the
                         detail payload, so keep this gated on `detailsLoaded`. */}
-                    {activeThread.detailsLoaded && showThreadTasksPanel ? (
-                      <ThreadTasksPanel
-                        attached
-                        threadId={activeThread.id}
-                        tasks={effectiveThreadTasks}
-                        tracking={activeThread.tasksTracking}
-                        open={tasksPanelOpen}
-                        summary={taskPanelSummary}
-                        onToggle={onToggleTasksPanel}
-                      />
-                    ) : null}
-                    {threadNotices.length > 0 ? (
-                      <ThreadNoticeStack notices={threadNotices} />
-                    ) : null}
-                    {isServerThread && (
-                      <>
-                        <WorkspaceTransitionBanner threadId={threadId} />
-                        <WorktreeMissingBanner
-                          threadId={threadId}
-                          worktreePath={activeThread?.worktreePath}
-                          branch={activeThread?.branch}
-                          queueBlocked={
-                            nextTurnQueueState.snapshot?.reasonCode === "worktree_missing"
-                          }
-                          turnActive={
-                            phase === "running" || Boolean(activeThread?.session?.activeTurnId)
-                          }
-                        />
-                      </>
-                    )}
-                    {isServerThread &&
-                    worktreeSetup &&
-                    shouldShowWorktreeSetupCard(worktreeSetup, {
-                      firstTurnQueued:
-                        nextTurnQueueState.snapshot?.items.some(
-                          (item) => item.itemId === worktreeSetup.itemId,
-                        ) ?? false,
-                    }) ? (
-                      <WorktreeSetupCard
-                        variant="tray"
-                        snapshot={worktreeSetup}
-                        busy={worktreeSetupBusy}
-                        onCancel={
-                          worktreeSetup.agentStarted
-                            ? null
-                            : () => void runWorktreeSetupAction("cancel")
-                        }
-                        onRetry={
-                          worktreeSetup.phase === "failed" ||
-                          worktreeSetup.phase === "cancelled" ||
-                          worktreeSetup.phase === "cancelled_kept"
-                            ? () => void runWorktreeSetupAction("retry")
-                            : null
-                        }
-                        onWorkLocally={
-                          worktreeSetup.agentStarted || worktreeSetup.phase === "done"
-                            ? null
-                            : () => void runWorktreeSetupAction("workLocally")
-                        }
-                      />
-                    ) : null}
-                    {isServerThread ? (
-                      <NextTurnQueuePanel
-                        variant="tray"
-                        turnSteering={isSessionActionSupported(
-                          activeThread.session?.capabilities,
-                          "steer",
-                          activeProviderStatus?.runtimeCapabilities?.turnSteering === true,
-                        )}
-                        threadId={activeThread.id}
-                        foldedItemId={usageLimitNotice?.foldedItemId ?? null}
-                        provider={selectedProvider}
-                        runtimeSlashCommands={composerNativeSlashCommands.commands}
-                        projectSkills={activeProject?.skills}
-                      />
-                    ) : null}
-                    {activeThread?.pendingUserInputs
-                      ?.filter((input) => !input.elicitation && !isBlockingUserInput(input))
-                      .map((input) => (
-                        <AsyncUserInputPanel
-                          variant="tray"
-                          key={input.requestId}
+                      {tasksPanelVisible && !compactChatLayout ? (
+                        <ThreadTasksPanel
+                          attached
                           threadId={activeThread.id}
-                          input={input}
+                          tasks={effectiveThreadTasks}
+                          tracking={activeThread.tasksTracking}
+                          open={tasksPanelOpen}
+                          summary={taskPanelSummary}
+                          onToggle={onToggleTasksPanel}
                         />
-                      ))}
-                    {activeThread
-                      ? elicitationInputs.map((input) => (
-                          <ElicitationPanel
+                      ) : null}
+                      {inlineThreadNotices.length > 0 ? (
+                        <ThreadNoticeStack notices={inlineThreadNotices} />
+                      ) : null}
+                      {isServerThread && (
+                        <>
+                          <WorkspaceTransitionBanner threadId={threadId} />
+                          <WorktreeMissingBanner
+                            threadId={threadId}
+                            worktreePath={activeThread?.worktreePath}
+                            branch={activeThread?.branch}
+                            queueBlocked={
+                              nextTurnQueueState.snapshot?.reasonCode === "worktree_missing"
+                            }
+                            turnActive={
+                              phase === "running" || Boolean(activeThread?.session?.activeTurnId)
+                            }
+                          />
+                        </>
+                      )}
+                      {worktreeSetupCardVisible && !worktreeSetupAsChip
+                        ? renderWorktreeSetupCard(false)
+                        : null}
+                      {isServerThread && !queueChip ? nextTurnQueuePanel : null}
+                      {activeThread?.pendingUserInputs
+                        ?.filter((input) => !input.elicitation && !isBlockingUserInput(input))
+                        .map((input) => (
+                          <AsyncUserInputPanel
                             variant="tray"
                             key={input.requestId}
                             threadId={activeThread.id}
                             input={input}
                           />
-                        ))
-                      : null}
-                    {activePendingUserInput && activeThread ? (
-                      <div className={COMPOSER_TRAY_PANEL_CLASS_NAME}>
-                        <UserInputAttachments
-                          key={activePendingUserInput.requestId}
-                          threadId={activeThread.id}
-                          attachments={answerAttachments[activePendingUserInput.requestId] ?? []}
-                          onChange={(update) =>
-                            setAnswerAttachments((current) => ({
-                              ...current,
-                              [activePendingUserInput.requestId]: update(
-                                current[activePendingUserInput.requestId] ?? [],
-                              ),
-                            }))
-                          }
-                          onUploadBusyChange={(busy) =>
-                            setRespondingUserInputRequestIds((current) =>
-                              busy
-                                ? [...new Set([...current, activePendingUserInput.requestId])]
-                                : current.filter((id) => id !== activePendingUserInput.requestId),
-                            )
-                          }
-                          disabled={activePendingIsResponding}
-                          onDismiss={() =>
-                            void onRespondToUserInput(activePendingUserInput.requestId, {}, true)
-                          }
-                        />
-                      </div>
-                    ) : null}
-                    {/* One keyed list, so the panel keeps its identity (and doesn't
-                    replay its entrance) when the real draft replaces the provisional one. */}
-                    {activeThread
-                      ? visibleRewindDrafts.map((entry) => (
-                          <RewindDraftPanel
-                            variant="tray"
-                            key={entry.operationId}
+                        ))}
+                      {activeThread
+                        ? elicitationInputs.map((input) => (
+                            <ElicitationPanel
+                              variant="tray"
+                              key={input.requestId}
+                              threadId={activeThread.id}
+                              input={input}
+                            />
+                          ))
+                        : null}
+                      {activePendingUserInput && activeThread ? (
+                        <div className={COMPOSER_TRAY_PANEL_CLASS_NAME}>
+                          <UserInputAttachments
+                            key={activePendingUserInput.requestId}
                             threadId={activeThread.id}
-                            draft={entry.draft}
-                            provisional={entry.provisional}
-                            onFocusComposer={focusComposer}
+                            attachments={answerAttachments[activePendingUserInput.requestId] ?? []}
+                            onChange={(update) =>
+                              setAnswerAttachments((current) => ({
+                                ...current,
+                                [activePendingUserInput.requestId]: update(
+                                  current[activePendingUserInput.requestId] ?? [],
+                                ),
+                              }))
+                            }
+                            onUploadBusyChange={(busy) =>
+                              setRespondingUserInputRequestIds((current) =>
+                                busy
+                                  ? [...new Set([...current, activePendingUserInput.requestId])]
+                                  : current.filter((id) => id !== activePendingUserInput.requestId),
+                              )
+                            }
+                            disabled={activePendingIsResponding}
+                            onDismiss={() =>
+                              void onRespondToUserInput(activePendingUserInput.requestId, {}, true)
+                            }
                           />
-                        ))
-                      : null}
-                    <McpSignInTray
-                      provider={sessionProvider}
-                      sessionStatus={activeThread.session?.status}
-                      sessionGeneration={activeThread.session?.capabilities?.generation}
-                      projectId={activeThread.projectId}
-                      threadId={activeThread.id}
-                      activities={activeThread.activities}
-                    />
-                    <NativeRuntimeTray
-                      threadId={activeThread.id}
-                      capabilities={activeThread.session?.capabilities}
-                      activities={activeThread.activities}
-                      prompt={prompt}
-                      latestMessageAt={activeThread.messages.at(-1)?.createdAt}
-                      onSuggestion={setPrompt}
-                    />
-                  </ComposerTray>
+                        </div>
+                      ) : null}
+                      {/* One keyed list, so the panel keeps its identity (and doesn't
+                    replay its entrance) when the real draft replaces the provisional one. */}
+                      {activeThread
+                        ? visibleRewindDrafts.map((entry) => (
+                            <RewindDraftPanel
+                              variant="tray"
+                              key={entry.operationId}
+                              threadId={activeThread.id}
+                              draft={entry.draft}
+                              provisional={entry.provisional}
+                              onFocusComposer={focusComposer}
+                            />
+                          ))
+                        : null}
+                      <McpSignInTray
+                        provider={sessionProvider}
+                        sessionStatus={activeThread.session?.status}
+                        sessionGeneration={activeThread.session?.capabilities?.generation}
+                        projectId={activeThread.projectId}
+                        threadId={activeThread.id}
+                        activities={activeThread.activities}
+                      />
+                      <NativeRuntimeTray
+                        threadId={activeThread.id}
+                        capabilities={activeThread.session?.capabilities}
+                        activities={activeThread.activities}
+                        prompt={prompt}
+                        latestMessageAt={activeThread.messages.at(-1)?.createdAt}
+                        onSuggestion={setPrompt}
+                        backgroundTasksPresentation={compactChatLayout ? "chip" : "row"}
+                      />
+                    </ComposerTray>
+                  </ComposerStatusStripHostProvider>
                   <ChatComposer
                     redesignEnabled={composerRedesign}
                     getTimeline={getComposerTimeline}

@@ -85,6 +85,17 @@ export const NextTurnQueueItem = Schema.Struct({
 });
 export type NextTurnQueueItem = typeof NextTurnQueueItem.Type;
 
+/**
+ * Failed queue rows marked for delivery-only recovery. Command receipts remain
+ * the server's authority for admission; this marker controls recovery presentation.
+ */
+export function isAdmittedDeliveryQueueItem(item: NextTurnQueueItem): boolean {
+  return (
+    item.status === "failed" &&
+    (item.lastErrorCode === "delivery_rejected" || item.lastErrorCode === "delivery_ambiguous")
+  );
+}
+
 export const NextTurnQueueSnapshot = Schema.Struct({
   workspaceTransition: Schema.optional(Schema.NullOr(WorkspaceTransitionSnapshot)),
   threadId: ThreadId,
