@@ -1,5 +1,8 @@
 import { registerHtmlPreviewIpc } from "./htmlPreview";
-import { blocksEmbeddedFrameNavigation, installAppFramePermissionPolicy } from "./appFramePolicy";
+import {
+  createEmbeddedFrameNavigationGuard,
+  installAppFramePermissionPolicy,
+} from "./appFramePolicy";
 import { createDesktopCliInstaller } from "./cliCommand";
 import { offerApplicationsMove, createBootstrapGate } from "./startupInstallation";
 import { createUpdatePoller } from "./updatePoller";
@@ -3958,10 +3961,14 @@ function createWindow(
   window.webContents.on("will-navigate", (_event, url) => {
     if (url === rendererUrl) rendererCrashRecovery.beginManualRetry();
   });
+  const blocksEmbeddedFrameNavigation = createEmbeddedFrameNavigationGuard();
   window.webContents.on("will-frame-navigate", (event) => {
+    const frameIds: number[] = [];
+    for (let frame = event.frame; frame; frame = frame.parent) frameIds.push(frame.frameTreeNodeId);
     const blocked = blocksEmbeddedFrameNavigation({
       isMainFrame: event.isMainFrame,
       isSameDocument: event.isSameDocument,
+      frameIds,
       frameUrl: event.frame?.url,
       url: event.url,
     });
