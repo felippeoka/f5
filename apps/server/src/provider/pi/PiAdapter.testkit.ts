@@ -40,8 +40,9 @@ case 'prompt':{
  const mode=process.env.F5_PI_CASE;
  if(mode==='flood'){
   reply(record,{});let emitted=0;const timer=setInterval(()=>{
-   emit({type:'extension_ui_request',method:'notify',message:'Native notification'});
-   if(++emitted===600){clearInterval(timer);trace({type:'flood-done'});}
+   // 20 per tick: Windows timers fire about every 16ms, so one per tick took 10 seconds.
+   for(let batch=0;batch<20;batch++)emit({type:'extension_ui_request',method:'notify',message:'Native notification'});
+   if((emitted+=20)===600){clearInterval(timer);trace({type:'flood-done'});}
   },1);break;
  }
  if(mode==='crash'){process.exit(23);break;}
