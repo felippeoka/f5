@@ -24,12 +24,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { openInPreferredEditor } from "../editorPreferences";
+import { openFileInEditor } from "../lib/openFileInEditor";
 import { clearFileViewSearchParams, parseDiffRouteSearch } from "../diffRouteSearch";
 import { useDiffWordWrap } from "../appSettings";
 import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName } from "../lib/diffRendering";
-import { looksLikeAbsoluteFilePath } from "../lib/normalizeFilePathForDiff";
+import { resolveFilePreviewTarget } from "../lib/filePreviewTarget";
 import { fileContentQueryOptions, providerQueryKeys } from "../lib/providerReactQuery";
 import { useWatchedWorkspacePaths } from "../lib/workspaceWatch";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -126,8 +126,9 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
   const fileLine = surface?.line ?? fileSearch.fileLine;
   const fileEndLine = surface?.endLine ?? fileSearch.fileEndLine;
   const fileColumn = surface?.column ?? fileSearch.fileColumn;
-  const canDisplayFileInPanel =
-    typeof filePath === "string" && !looksLikeAbsoluteFilePath(filePath);
+  const previewTarget = resolveFilePreviewTarget(filePath, workspaceRoot);
+  const canDisplayFileInPanel = Boolean(previewTarget);
+  const readOnly = previewTarget?.readOnly ?? false;
   const positionBadge = useMemo(
     () => formatPositionBadge({ line: fileLine, endLine: fileEndLine, column: fileColumn }),
     [fileColumn, fileEndLine, fileLine],
@@ -137,17 +138,21 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     [fileEndLine, fileLine],
   );
   const [showSource, setShowSource] = useState(false);
-  const mediaKind = filePath ? workspaceMediaKind(filePath) : null;
+  const mediaKind = filePath && !readOnly ? workspaceMediaKind(filePath) : null;
   const renderedMarkdown = Boolean(
     filePath && /\.(?:md|mdown|markdown)$/iu.test(filePath) && !showSource,
   );
   const watchedFilePath =
-    canDisplayFileInPanel && (!mediaKind || showSource) ? filePath : undefined;
+    canDisplayFileInPanel && (!mediaKind || showSource) ? previewTarget?.relativePath : undefined;
   const fileQuery = useQuery(
-    fileContentQueryOptions({ cwd: workspaceRoot, relativePath: watchedFilePath }),
+    fileContentQueryOptions({ cwd: previewTarget?.cwd, relativePath: watchedFilePath }),
   );
   // External edits refetch the file; a dirty draft turns into a conflict below.
-  useWatchedWorkspacePaths(workspaceRoot, watchedFilePath ? [watchedFilePath] : [], []);
+  useWatchedWorkspacePaths(
+    workspaceRoot,
+    watchedFilePath && !readOnly ? [watchedFilePath] : [],
+    [],
+  );
   const [editing, setEditing] = useState(false);
   const [draftContents, setDraftContents] = useState("");
   const [saving, setSaving] = useState(false);
@@ -170,6 +175,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
   durableKeyRef.current = durableFileKey;
 
   const canEditFile =
+    !readOnly &&
     Boolean(workspaceRoot && filePath && canDisplayFileInPanel) &&
     Boolean(fileQuery.data?.contentSha256) &&
     fileQuery.data?.truncated === false;
@@ -231,7 +237,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     draftBranchRef.current = null;
     setDraftReady(false);
     setRecoverableDrafts([]);
-    if (!workspaceRoot || !filePath) return;
+    if (!workspaceRoot || !filePath || readOnly) return;
     void editorBranch(profileId)
       .then(async (branchId) => {
         const drafts = await editorDrafts.list(durableFileKey, true);
@@ -261,9 +267,10 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     return () => {
       disposed = true;
     };
-  }, [durableFileKey, profileId, workspaceRoot, filePath]);
+  }, [durableFileKey, profileId, workspaceRoot, filePath, readOnly]);
 
   useEffect(() => {
+    if (readOnly) return;
     const discover = (event: Event) => {
       const detail = (event as CustomEvent<{ fileKey: string; branch: string }>).detail;
       if (detail.fileKey !== durableFileKey || detail.branch === draftBranchRef.current) return;
@@ -279,7 +286,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     };
     window.addEventListener("f5-editor-draft", discover);
     return () => window.removeEventListener("f5-editor-draft", discover);
-  }, [durableFileKey]);
+  }, [durableFileKey, readOnly]);
 
   const editDraft = (text: string) => {
     setDraftContents(text);
@@ -311,6 +318,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
   const saveDraft = useCallback(async () => {
     if (
       !mountedRef.current ||
+      !canEditFile ||
       fileScopeRef.current !== fileScope ||
       !workspaceRoot ||
       !filePath ||
@@ -423,6 +431,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
       if (mountedRef.current && fileScopeRef.current === fileScope) setSaving(false);
     }
   }, [
+    canEditFile,
     dirty,
     durableFileKey,
     draftContents,
@@ -486,25 +495,18 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     if (!filePath) {
       return;
     }
-    const api = readNativeApi();
-    if (!api) {
-      console.warn("Native API not found. Unable to open file in editor.");
-      return;
-    }
     const targetPath = resolveEditorTarget({
       filePath,
       workspaceRoot,
       line: fileLine,
       column: fileColumn,
     });
-    void openInPreferredEditor(api, targetPath).catch((error) => {
-      console.warn("Failed to open file in editor.", error);
-    });
+    void openFileInEditor(targetPath);
   }, [fileColumn, fileLine, filePath, workspaceRoot]);
 
   const showFileContextMenu = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
-      if (!filePath || !workspaceRoot || !activeThreadId || !activeProjectId) return;
+      if (!filePath || !workspaceRoot || !activeThreadId || !activeProjectId || readOnly) return;
       event.preventDefault();
       event.stopPropagation();
       const api = readNativeApi();
@@ -519,7 +521,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
         onAddToChat: (relativePath) => insertFileMentionIntoComposer(activeThreadId, relativePath),
       });
     },
-    [activeProjectId, activeThreadId, filePath, workspaceRoot],
+    [activeProjectId, activeThreadId, filePath, workspaceRoot, readOnly],
   );
 
   const closeFileView = useCallback(() => {
@@ -559,7 +561,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
         {filePath ? (
           <FileBreadcrumbs
             path={filePath}
-            {...(activeThreadId ? { threadId: activeThreadId } : {})}
+            {...(activeThreadId && !readOnly ? { threadId: activeThreadId } : {})}
           />
         ) : null}
       </div>
@@ -576,7 +578,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
             {showSource ? "Rendered" : "Source"}
           </Button>
         )}
-        {fileQuery.data?.truncated ? (
+        {readOnly || fileQuery.data?.truncated ? (
           <span className="rounded-md border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-2xs font-medium text-warning-foreground">
             Read-only preview
           </span>
@@ -632,7 +634,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
           <div className="rounded-md border border-border/60 bg-card/40 p-3">
             <p className="text-sm font-medium text-foreground">Unable to display file</p>
             <p className="mt-2 text-sm text-muted-foreground">
-              Files outside the current workspace can only be opened in your editor.
+              This path cannot be previewed as a local file: {filePath}
             </p>
             <div className="mt-4 flex items-center gap-2">
               <Button size="xs" variant="outline" onClick={openInEditor}>
@@ -642,7 +644,8 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
             </div>
           </div>
         </div>
-      ) : (mediaKind ||
+      ) : !readOnly &&
+        (mediaKind ||
           (fileQuery.isError &&
             /Binary file cannot be displayed/iu.test(String(fileQuery.error)))) &&
         !showSource &&
@@ -658,9 +661,9 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
           <ChatMarkdown
             text={fileQuery.data.contents}
             cwd={
-              workspaceRoot && filePath?.includes("/")
-                ? `${workspaceRoot}/${filePath.slice(0, filePath.lastIndexOf("/"))}`
-                : workspaceRoot
+              previewTarget?.cwd && previewTarget.relativePath.includes("/")
+                ? `${previewTarget.cwd}/${previewTarget.relativePath.slice(0, previewTarget.relativePath.lastIndexOf("/"))}`
+                : previewTarget?.cwd
             }
           />
         </div>
@@ -670,7 +673,8 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
         <div className="flex min-h-0 flex-1 flex-col p-3">
           <div className="rounded-md border border-border/60 bg-card/40 p-3">
             <p className="text-sm font-medium text-foreground">Unable to display file</p>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 break-all font-mono text-xs text-muted-foreground">{filePath}</p>
+            <p role="alert" className="mt-2 text-sm text-muted-foreground">
               {fileQuery.error instanceof Error ? fileQuery.error.message : "Failed to load file."}
             </p>
             {/* A wrong link usually means a wrong path, so show which path was tried and where. */}

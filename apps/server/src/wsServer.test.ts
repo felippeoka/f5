@@ -6655,6 +6655,32 @@ describe("WebSocket Server", () => {
     });
   });
 
+  it("reads an external preview through a canonicalized parent without changing the project root", async () => {
+    const workspace = makeTempDir("t3code-preview-project-");
+    const external = makeTempDir("t3code-preview-external-");
+    const aliasRoot = makeTempDir("t3code-preview-alias-");
+    const alias = path.join(aliasRoot, "external");
+    fs.writeFileSync(path.join(external, "report.json"), '{"images":8}', "utf8");
+    fs.symlinkSync(external, alias, "dir");
+    server = await createTestServer({ cwd: workspace });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsReadFile, {
+      cwd: alias,
+      relativePath: "report.json",
+    });
+    expect(response.error).toBeUndefined();
+    expect(response.result).toMatchObject({
+      workspaceIdentity: fs.realpathSync(external),
+      fileIdentity: fs.realpathSync(path.join(external, "report.json")),
+      contents: '{"images":8}',
+      truncated: false,
+    });
+  });
+
   it("authorizes binary workspace files without reading their contents", async () => {
     const workspace = makeTempDir("t3code-ws-authorize-entry-");
     fs.writeFileSync(path.join(workspace, "image.bin"), Buffer.from([0, 1, 2, 3]));
