@@ -3953,6 +3953,49 @@ describe("ChatView timeline (full app)", () => {
   });
 
   describe("file reference previews", () => {
+    it("reports editor failures when panel previews are disabled", async () => {
+      persistAppSettings({ openFileLinksInPanel: false });
+      const base = createSnapshotForTargetUser({
+        targetMessageId: "msg-editor-fallback" as MessageId,
+        targetText: "Open the export",
+        fillerPairCount: 1,
+        targetPairIndex: 0,
+      });
+      const snapshot = {
+        ...base,
+        threads: base.threads.map((thread) => ({
+          ...thread,
+          messages: [
+            createAssistantMessage({
+              id: "msg-editor-reference" as MessageId,
+              text: "[report.json](/tmp/export/report.json)",
+              offsetSeconds: 1,
+            }),
+          ],
+        })),
+      };
+      const mounted = await mountChatView({
+        viewport: { name: "wide", width: 1600, height: 1000 },
+        snapshot,
+        configureFixture: (next) => {
+          next.serverConfig = { ...next.serverConfig, availableEditors: ["vscode"] };
+          next.resolveWsRequest = (body) =>
+            body._tag === WS_METHODS.shellOpenInEditor
+              ? { type: "error", message: "Editor launch failed" }
+              : undefined;
+        },
+      });
+      try {
+        await page.getByRole("link", { name: "report.json", exact: true }).click();
+        await expect
+          .element(page.getByText("/tmp/export/report.json: Editor launch failed", { exact: true }))
+          .toBeVisible();
+        expect(wsRequests.some((body) => body._tag === WS_METHODS.projectsReadFile)).toBe(false);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
     it.each([
       {
         name: "external JSON",
@@ -3998,7 +4041,7 @@ describe("ChatView timeline (full app)", () => {
             messages: [
               createAssistantMessage({
                 id: "msg-assistant-reference" as MessageId,
-                text: `Salvei os [links e dimensões das oito imagens](${filePath}).`,
+                text: `Saved the [links and dimensions of the eight images](${filePath}).`,
                 offsetSeconds: 1,
               }),
             ],
