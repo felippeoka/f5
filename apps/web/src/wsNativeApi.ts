@@ -714,7 +714,9 @@ export function createWsNativeApi(): NativeApi {
     },
     shell: {
       openInEditor: (cwd, editor) =>
-        transport.request(WS_METHODS.shellOpenInEditor, { cwd, editor }),
+        editor === "vscode" && window.desktopBridge?.openInVSCode
+          ? window.desktopBridge.openInVSCode(cwd)
+          : transport.request(WS_METHODS.shellOpenInEditor, { cwd, editor }),
       revealInFileManager: requestMethod(WS_METHODS.shellRevealInFileManager),
       openExternal: async (url) => {
         if (window.desktopBridge) {

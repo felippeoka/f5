@@ -675,6 +675,9 @@ export interface DesktopBridge {
   copyImage?: (pngBytes: Uint8Array) => Promise<void>;
   downloadImage?: (bytes: Uint8Array, filename: string) => Promise<DesktopImageDownloadResult>;
   openExternal: (url: string) => Promise<boolean>;
+  /** User-initiated local file actions run in main, outside the backend GUI sandbox. */
+  openInVSCode?: (targetPath: string) => Promise<void>;
+  revealFile?: (filePath: string) => Promise<void>;
   openThreadInNewWindow?: (threadId: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   checkForUpdates?: () => Promise<DesktopUpdateActionResult>;

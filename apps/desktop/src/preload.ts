@@ -59,14 +59,23 @@ const systemLocale = argument("f5-system-locale");
 
 // The isolated preload observes actual DOM gestures; renderer-supplied booleans are ignored.
 let computerGestureAt = -Infinity;
+let fileActionGestureAt = -Infinity;
 for (const eventName of ["click", "keydown"] as const) {
   window.addEventListener(
     eventName,
     (event) => {
-      if (event.isTrusted) computerGestureAt = performance.now();
+      if (event.isTrusted) {
+        computerGestureAt = performance.now();
+        fileActionGestureAt = performance.now();
+      }
     },
     true,
   );
+}
+function takeFileActionGesture(): boolean {
+  const trusted = performance.now() - fileActionGestureAt < 1000;
+  fileActionGestureAt = -Infinity;
+  return trusted;
 }
 contextBridge.exposeInMainWorld("desktopBridge", {
   htmlPreview: (input) => ipcRenderer.invoke("desktop:html-preview", input),
@@ -136,6 +145,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   copyImage: (pngBytes) => ipcRenderer.invoke(COPY_IMAGE_CHANNEL, pngBytes),
   downloadImage: (bytes, filename) => ipcRenderer.invoke(DOWNLOAD_IMAGE_CHANNEL, bytes, filename),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
+  openInVSCode: (targetPath: string) =>
+    ipcRenderer.invoke("desktop:open-in-vscode", targetPath, takeFileActionGesture()),
+  revealFile: (filePath: string) =>
+    ipcRenderer.invoke("desktop:reveal-file", filePath, takeFileActionGesture()),
   openThreadInNewWindow: (threadId: string) =>
     ipcRenderer.invoke(OPEN_THREAD_WINDOW_CHANNEL, threadId),
   onMenuAction: (listener) => {

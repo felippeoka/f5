@@ -13,6 +13,12 @@ export async function revealFile(
     if (!api) throw new Error("File manager is unavailable.");
     const target = resolveFilePreviewTarget(filePath, workspaceRoot);
     if (!target) throw new Error("Unable to resolve the local file path.");
+    if (typeof window !== "undefined" && window.desktopBridge?.revealFile) {
+      await window.desktopBridge.revealFile(
+        `${target.cwd.replace(/[\\/]$/u, "")}/${target.relativePath}`,
+      );
+      return;
+    }
     await api.shell.revealInFileManager({
       ...context,
       ...(target.readOnly ? { cwd: target.cwd } : {}),

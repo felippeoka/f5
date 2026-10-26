@@ -16,6 +16,7 @@ import { createUpdateController } from "./updateController";
 import { initializeUpdatePreferences, writeUpdatePreferences } from "./updateChannel";
 import { migrateUserData } from "./userDataMigration";
 import { isolatedBackendCommand } from "./backendComputerIsolation";
+import { assertFileActionCaller, registerDesktopFileActions } from "./fileActions";
 import { profilePreviewPartition } from "./profileRuntime";
 import { CaptureShortcut } from "./snapShot/CaptureShortcut";
 import { captureBoundedPage } from "./preview/capture";
@@ -3295,6 +3296,35 @@ function reopenApplication(): void {
 }
 
 function registerIpcHandlers(): void {
+  registerDesktopFileActions(ipcMain, {
+    assertCaller(event, trustedGesture) {
+      assertFileActionCaller({
+        registered: appRendererWebContentsIds.has(event.sender.id),
+        mainFrame: event.senderFrame === event.sender.mainFrame,
+        origin: event.senderFrame?.origin ?? "",
+        expectedOrigin: isDevelopment
+          ? new URL(mainRendererUrl()).origin
+          : `${DESKTOP_SCHEME}://app`,
+        trustedGesture,
+      });
+      runtimeForRenderer(event.sender.id);
+    },
+    openExternal: (url) => shell.openExternal(url, { activate: true }),
+    showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
+    activateFileManager: () =>
+      process.platform !== "darwin"
+        ? Promise.resolve()
+        : new Promise<void>((resolve, reject) => {
+            // Revealing selects the file; a separate activation brings Finder above F5
+            // without reopening the directory and losing that selection.
+            ChildProcess.execFile(
+              "/usr/bin/open",
+              ["-b", "com.apple.finder"],
+              { timeout: 5000 },
+              (error) => (error ? reject(error) : resolve()),
+            );
+          }),
+  });
   registerHtmlPreviewIpc(ipcMain, (event) => {
     if (
       !appRendererWebContentsIds.has(event.sender.id) ||

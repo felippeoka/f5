@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { revealFile } from "./revealFile";
 
@@ -13,6 +13,29 @@ vi.mock("../components/ui/toast", () => ({ toastManager: { add: mocks.toast } })
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.read.mockReturnValue({ shell: { revealInFileManager: mocks.reveal } });
+});
+afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  ["src/app.ts", "/repo/src/app.ts"],
+  ["/tmp/report.json", "/tmp/report.json"],
+])("uses the native reveal action for %s", async (filePath, fullPath) => {
+  const reveal = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("window", { desktopBridge: { revealFile: reveal } });
+  await revealFile(filePath, "/repo", context);
+  expect(reveal).toHaveBeenCalledWith(fullPath);
+  expect(mocks.reveal).not.toHaveBeenCalled();
+});
+
+it("shows failed native reveals instead of falling back into the sandbox", async () => {
+  vi.stubGlobal("window", {
+    desktopBridge: { revealFile: vi.fn().mockRejectedValue(new Error("Cannot activate Finder")) },
+  });
+  await revealFile("/tmp/report.json", "/repo", context);
+  expect(mocks.reveal).not.toHaveBeenCalled();
+  expect(mocks.toast).toHaveBeenCalledWith(
+    expect.objectContaining({ description: "/tmp/report.json: Cannot activate Finder" }),
+  );
 });
 
 it.each([
