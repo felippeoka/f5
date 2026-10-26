@@ -8,7 +8,6 @@
  */
 import { spawn } from "node:child_process";
 import NodePath from "node:path";
-import { Socket } from "node:net";
 
 import { EDITORS, type EditorId } from "@t3tools/contracts";
 import { Cause, Effect, Exit, Layer, Schema, ServiceMap } from "effect";
@@ -251,7 +250,7 @@ export const resolveEditorLaunch = Effect.fnUntraced(function* (
   return { command: fileManagerCommandForPlatform(platform), args: [input.cwd] };
 });
 
-export const launchDetached = (launch: EditorLaunch) =>
+export const launchDetached = (launch: EditorLaunch, checkEarlyExit = true) =>
   Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({
       "open.command": launch.command,
@@ -267,7 +266,7 @@ export const launchDetached = (launch: EditorLaunch) =>
         const invocation = resolveInvocation(launch.command, launch.args);
         child = spawn(invocation.file, [...invocation.args], {
           detached: true,
-          stdio: ["ignore", "ignore", "pipe"],
+          stdio: "ignore",
           windowsHide: true,
         });
       } catch (error) {
@@ -276,41 +275,56 @@ export const launchDetached = (launch: EditorLaunch) =>
         );
       }
 
-      let stderr = "";
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderr = (stderr + chunk.toString()).slice(-4096);
-      });
       let timer: ReturnType<typeof setTimeout> | undefined;
       let finished = false;
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        clearTimeout(timer);
+        child.removeListener("spawn", handleSpawn);
+        child.removeListener("exit", handleExit);
+        child.removeListener("error", handleError);
+        child.once("error", ignoreDetachedError);
+        child.unref();
+      };
       const finish = (error?: OpenError) => {
         if (finished) return;
         finished = true;
-        clearTimeout(timer);
-        // Keep draining late diagnostics without keeping the server alive or
-        // closing the editor's pipe underneath it.
-        if (child.stderr instanceof Socket) child.stderr.unref();
-        child.unref();
+        cleanup();
         resume(error ? Effect.fail(error) : Effect.void);
       };
       // CLI launchers can spawn successfully and then immediately fail. Observe
       // that handoff briefly without waiting for a long-running editor to close.
-      child.once("spawn", () => {
-        timer = setTimeout(() => finish(), 1000);
-      });
-      child.once("exit", (code, signal) =>
+      const handleSpawn = () => {
+        if (checkEarlyExit) timer = setTimeout(() => finish(), 1000);
+        else finish();
+      };
+      const handleExit = (code: number | null, signal: NodeJS.Signals | null) => {
         finish(
           code === 0
             ? undefined
             : new OpenError({
-                message: `Launcher failed (${signal ?? code}): ${stderr.trim() || launch.command}`,
+                message: `Launcher failed (${signal ?? code}): ${launch.command}`,
               }),
-        ),
-      );
-      child.once("error", (cause) =>
-        finish(new OpenError({ message: "failed to spawn detached process", cause })),
-      );
+        );
+      };
+      child.once("spawn", handleSpawn);
+      child.once("exit", handleExit);
+      const handleError = (cause: Error) =>
+        finish(new OpenError({ message: "failed to spawn detached process", cause }));
+      child.once("error", handleError);
+      return Effect.sync(() => {
+        finished = true;
+        cleanup();
+      });
     });
   });
+
+// An interrupted spawn may still fail later, after its waiting fiber has gone.
+function ignoreDetachedError(): void {
+  /* No owner remains to notify. */
+}
 
 function classifyEditorLaunchFailure(error: OpenError): string {
   if (error.message.startsWith("Unknown editor:")) {
@@ -342,7 +356,9 @@ const make = Effect.gen(function* () {
       return yield* Effect.failCause(launchExit.cause);
     }
 
-    const detachedExit = yield* Effect.exit(launchDetached(launchExit.value));
+    const detachedExit = yield* Effect.exit(
+      launchDetached(launchExit.value, input.editor !== "file-manager"),
+    );
     if (Exit.isFailure(detachedExit)) {
       const error = Cause.squash(detachedExit.cause) as OpenError;
       yield* increment(editorLaunchTotal, {
@@ -362,7 +378,9 @@ const make = Effect.gen(function* () {
     targetPath: string,
   ) {
     const detachedExit = yield* Effect.exit(
-      launchDetached(resolveFileManagerRevealLaunch(targetPath)),
+      // Explorer can exit 1 after a successful handoff. File-manager launchers
+      // retain spawn-only semantics on every platform.
+      launchDetached(resolveFileManagerRevealLaunch(targetPath), false),
     );
     if (Exit.isFailure(detachedExit)) {
       const error = Cause.squash(detachedExit.cause) as OpenError;

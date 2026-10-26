@@ -16,7 +16,11 @@ import { createUpdateController } from "./updateController";
 import { initializeUpdatePreferences, writeUpdatePreferences } from "./updateChannel";
 import { migrateUserData } from "./userDataMigration";
 import { isolatedBackendCommand } from "./backendComputerIsolation";
-import { assertFileActionCaller, registerDesktopFileActions } from "./fileActions";
+import {
+  assertFileActionCaller,
+  finderRevealArgs,
+  registerDesktopFileActions,
+} from "./fileActions";
 import { profilePreviewPartition } from "./profileRuntime";
 import { CaptureShortcut } from "./snapShot/CaptureShortcut";
 import { captureBoundedPage } from "./preview/capture";
@@ -3322,30 +3326,25 @@ function reopenApplication(): void {
 }
 
 function registerIpcHandlers(): void {
-  registerDesktopFileActions(ipcMain, {
-    assertCaller(event, trustedGesture) {
-      assertFileActionCaller({
-        registered: appRendererWebContentsIds.has(event.sender.id),
-        mainFrame: event.senderFrame === event.sender.mainFrame,
-        origin: event.senderFrame?.origin ?? "",
-        expectedOrigin: isDevelopment
-          ? new URL(mainRendererUrl()).origin
-          : `${DESKTOP_SCHEME}://app`,
-        trustedGesture,
-      });
-      runtimeForRenderer(event.sender.id);
-    },
+  const assertFileCaller = (event: Electron.IpcMainInvokeEvent) => {
+    assertFileActionCaller({
+      registered: appRendererWebContentsIds.has(event.sender.id),
+      mainFrame: event.senderFrame === event.sender.mainFrame,
+      origin: event.senderFrame?.origin ?? "",
+      expectedOrigin: isDevelopment ? new URL(mainRendererUrl()).origin : `${DESKTOP_SCHEME}://app`,
+    });
+    runtimeForRenderer(event.sender.id);
+  };
+  const fileActions = registerDesktopFileActions(ipcMain, {
+    assertCaller: assertFileCaller,
     openExternal: (url) => shell.openExternal(url, { activate: true }),
-    showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
-    activateFileManager: () =>
+    revealFile: (filePath) =>
       process.platform !== "darwin"
-        ? Promise.resolve()
+        ? Promise.resolve(shell.showItemInFolder(filePath))
         : new Promise<void>((resolve, reject) => {
-            // Revealing selects the file; a separate activation brings Finder above F5
-            // without reopening the directory and losing that selection.
             ChildProcess.execFile(
-              "/usr/bin/open",
-              ["-b", "com.apple.finder"],
+              "/usr/bin/osascript",
+              finderRevealArgs(filePath),
               { timeout: 5000 },
               (error) => (error ? reject(error) : resolve()),
             );
@@ -3458,7 +3457,13 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
   ipcMain.handle(
     CONTEXT_MENU_CHANNEL,
-    async (_event, items: ContextMenuItem[], position?: { x: number; y: number }) => {
+    async (
+      event,
+      items: ContextMenuItem[],
+      position?: { x: number; y: number },
+      fileAction?: { editorTarget: string },
+    ) => {
+      if (fileAction) assertFileCaller(event);
       const normalizedItems = items
         .filter((item) => typeof item.id === "string" && typeof item.label === "string")
         .map((item) => ({
@@ -3493,7 +3498,11 @@ function registerIpcHandlers(): void {
           const itemOption: MenuItemConstructorOptions = {
             label: item.label,
             enabled: !item.disabled,
-            click: () => resolve(item.id),
+            click: () => {
+              if (item.id === "open-in-editor" && typeof fileAction?.editorTarget === "string")
+                fileActions.nativeMenuSelected(event.sender.id, fileAction.editorTarget);
+              resolve(item.id);
+            },
           };
           if (item.destructive) {
             const destructiveIcon = getDestructiveMenuIcon();

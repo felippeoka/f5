@@ -3210,6 +3210,17 @@ describe("WebSocket Server", () => {
     });
     expect(localReveal.error).toBeUndefined();
     expect(revealCalls[2]).toBe(path.join(fs.realpathSync(external), "report.json"));
+    for (const input of [
+      { cwd: "relative-directory", relativePath: "report.json", kind: "file" },
+      { cwd: external, relativePath: ".", kind: "directory" },
+    ]) {
+      const denied = await sendRequest(ws, WS_METHODS.shellRevealInFileManager, {
+        projectId,
+        threadId,
+        ...input,
+      });
+      expect(denied.error).toBeDefined();
+    }
     for (const relativePath of ["missing.json", "../report.json"]) {
       const rejected = await sendRequest(ws, WS_METHODS.shellRevealInFileManager, {
         projectId,

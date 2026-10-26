@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { resolveFilePreviewTarget } from "./filePreviewTarget";
+import { isExternalTextPreviewPath, resolveFilePreviewTarget } from "./filePreviewTarget";
+
+it.each(["/tmp/report.json", "/tmp/notes.md", "/tmp/.env", "/tmp/app.ts"])(
+  "accepts text-like external preview %s",
+  (path) => expect(isExternalTextPreviewPath(path)).toBe(true),
+);
+it.each([
+  "/tmp/screenshot.png",
+  "/tmp/report.pdf",
+  "/tmp/photo.heic",
+  "/tmp/file.bin",
+  "/tmp/unknown.xyz",
+])("leaves media/binary external reference %s with the existing handoff", (path) =>
+  expect(isExternalTextPreviewPath(path)).toBe(false),
+);
 
 describe("resolveFilePreviewTarget", () => {
   it.each(["/repo/project", "/repo/worktree"])("keeps relative files in %s", (cwd) => {

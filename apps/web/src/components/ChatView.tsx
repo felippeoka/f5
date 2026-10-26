@@ -41,7 +41,7 @@ import {
 import { isWorktreeSetupChip, summarizeQueueChip } from "./chat/composer/ComposerStatusStrip.logic";
 import { workspaceBasenameMatch } from "../lib/workspaceBasename";
 import { resolveChatAssetTarget } from "../lib/chatAssetTarget";
-import { resolveFilePreviewTarget } from "../lib/filePreviewTarget";
+import { isExternalTextPreviewPath, resolveFilePreviewTarget } from "../lib/filePreviewTarget";
 import { WorkspaceMediaView } from "./WorkspaceMediaView";
 import { Dialog, DialogPopup, DialogTitle } from "./ui/dialog";
 import { PROVIDER_DISPLAY_NAMES, type ProjectIssueAssetUrlInput } from "@t3tools/contracts";
@@ -6998,11 +6998,7 @@ export default memo(function ChatView({
           setReferencedAsset({ ...target, name: target.path });
           return true;
         }
-        if (resolveFilePreviewTarget(parsed.path, workspaceRoot)) {
-          openFile(parsed.path);
-          return true;
-        }
-        const basename = filePath.split(/[\\/]/u).at(-1);
+        const basename = parsed.path.split(/[\\/]/u).at(-1);
         for (const thread of roots.threads)
           for (const message of thread.messages)
             for (const attachment of message.attachments ?? []) {
@@ -7026,6 +7022,13 @@ export default memo(function ChatView({
                 /* An optimistic attachment may not have a durable URL yet. */
               }
             }
+        if (
+          isExternalTextPreviewPath(parsed.path) &&
+          resolveFilePreviewTarget(parsed.path, workspaceRoot)
+        ) {
+          openFile(parsed.path);
+          return true;
+        }
         return false;
       }
 

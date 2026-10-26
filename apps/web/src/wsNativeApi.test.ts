@@ -584,6 +584,8 @@ describe("wsNativeApi", () => {
     const api = createWsNativeApi();
     await api.shell.openInEditor("/tmp/report.json:4:2", "vscode");
     expect(openInVSCode).toHaveBeenCalledWith("/tmp/report.json:4:2");
+    await api.shell.openInEditor("/tmp/report.json:4:2", "vscode", "prepared-token");
+    expect(openInVSCode).toHaveBeenLastCalledWith("/tmp/report.json:4:2", "prepared-token");
     expect(requestMock).not.toHaveBeenCalledWith(WS_METHODS.shellOpenInEditor, expect.anything());
     openInVSCode.mockRejectedValue(new Error("Native launch failed"));
     await expect(api.shell.openInEditor("/tmp/report.json", "vscode")).rejects.toThrow(

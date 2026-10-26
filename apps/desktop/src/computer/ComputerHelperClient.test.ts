@@ -50,6 +50,63 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("computer helper supervision", () => {
+  it("uses the same exponential backoff for pipe failures as ordinary crashes", async () => {
+    const h = make();
+    ready(h);
+    const replacement = child();
+    vi.mocked(spawn).mockReturnValue(replacement);
+    h.process.stdin.emit("error", new Error("EPIPE"));
+    h.process.emit("exit", 1);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    replacement.stdin.emit("error", new Error("EPIPE"));
+    replacement.emit("exit", 1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(spawn).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not count a timed-out observation twice when its suspend pipe also fails", async () => {
+    const h = make();
+    ready(h);
+    const heartbeat = setInterval(
+      () => h.emit({ type: "heartbeat", monitorHealthy: true, suspended: true }),
+      250,
+    );
+    vi.spyOn(h.process.stdin, "write").mockImplementation((chunk) => {
+      if (String(chunk).includes('"type":"suspend"')) throw new Error("EPIPE");
+      return true;
+    });
+    const failed = expect(
+      h.client.request(request("timeout-pipe", "screenshot"), extra),
+    ).rejects.toMatchObject({ error: { _tag: "Execution" } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await failed;
+    clearInterval(heartbeat);
+    vi.mocked(spawn).mockReturnValue(child());
+    h.process.emit("exit", 1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it("emits one failure when a terminal helper loses its pipe during nested suspend", async () => {
+    const h = make();
+    ready(h);
+    const failed = expect(h.client.request(request("terminal-pipe"), extra)).rejects.toMatchObject({
+      error: { _tag: "OutcomeUnknown" },
+    });
+    const listener = vi.fn();
+    h.client.onEvent(listener);
+    vi.spyOn(h.process.stdin, "write").mockImplementationOnce(() => {
+      throw new Error("EPIPE");
+    });
+    h.emit({ type: "hello", protocolVersion: 999 });
+    await failed;
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
   it.each(["stdin", "stdout", "stderr"] as const)(
     "retires a failed %s pipe and rejects pending work without crashing",
     async (stream) => {
@@ -75,7 +132,9 @@ describe("computer helper supervision", () => {
       await vi.advanceTimersByTimeAsync(100);
       expect(spawn).toHaveBeenCalledTimes(1);
       h.process.emit("exit", 1);
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(spawn).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(spawn).toHaveBeenCalledTimes(2);
       replacement.stdout.emit("data", JSON.stringify({ type: "hello", protocolVersion: 1 }) + "\n");
       replacement.stdout.emit(

@@ -3953,6 +3953,119 @@ describe("ChatView timeline (full app)", () => {
   });
 
   describe("file reference previews", () => {
+    it.each(["/tmp/screenshot.png", "/tmp/report.pdf"])(
+      "keeps the editor/viewer handoff for external media %s",
+      async (filePath) => {
+        const base = createSnapshotForTargetUser({
+          targetMessageId: "msg-media" as MessageId,
+          targetText: "Open media",
+          fillerPairCount: 1,
+          targetPairIndex: 0,
+        });
+        const snapshot = {
+          ...base,
+          threads: base.threads.map((thread) => ({
+            ...thread,
+            messages: [
+              createAssistantMessage({
+                id: "msg-media-ref" as MessageId,
+                text: `[media](${filePath})`,
+                offsetSeconds: 1,
+              }),
+            ],
+          })),
+        };
+        const mounted = await mountChatView({
+          viewport: { name: "wide", width: 1600, height: 1000 },
+          snapshot,
+          configureFixture(next) {
+            next.serverConfig = { ...next.serverConfig, availableEditors: ["vscode"] };
+          },
+        });
+        try {
+          await page.getByRole("link", { name: filePath.split("/").at(-1)!, exact: true }).click();
+          await expect
+            .poll(() => wsRequests.find((body) => body._tag === WS_METHODS.shellOpenInEditor))
+            .toMatchObject({ cwd: filePath, editor: "vscode" });
+          expect(wsRequests.some((body) => body._tag === WS_METHODS.projectsReadFile)).toBe(false);
+        } finally {
+          await mounted.cleanup();
+        }
+      },
+    );
+
+    it("resolves a legacy absolute reference to its persisted non-UUID attachment before external fallback", async () => {
+      const base = createSnapshotForTargetUser({
+        targetMessageId: "msg-legacy" as MessageId,
+        targetText: "Open attachment",
+        fillerPairCount: 1,
+        targetPairIndex: 0,
+      });
+      const snapshot = {
+        ...base,
+        threads: base.threads.map((thread) => ({
+          ...thread,
+          messages: [
+            {
+              ...createUserMessage({
+                id: "msg-legacy-upload" as MessageId,
+                text: "saved attachment",
+                offsetSeconds: 0,
+              }),
+              attachments: [
+                {
+                  type: "image" as const,
+                  id: "screenshot.png",
+                  name: "screenshot.png",
+                  mimeType: "image/png",
+                  sizeBytes: 128,
+                  sourceUrl: "/attachments/screenshot.png",
+                  previewUrl: "/attachments/screenshot.png",
+                },
+              ],
+            },
+            createAssistantMessage({
+              id: "msg-legacy-ref" as MessageId,
+              text: "[saved screenshot](/old-profile/attachments/screenshot.png)",
+              offsetSeconds: 1,
+            }),
+          ],
+        })),
+      };
+      const mounted = await mountChatView({
+        viewport: { name: "wide", width: 1600, height: 1000 },
+        snapshot,
+        configureFixture(next) {
+          next.resolveWsRequest = (body) =>
+            body._tag === WS_METHODS.projectsIssueAssetUrl
+              ? {
+                  type: "result",
+                  result: [
+                    {
+                      relativePath: "screenshot.png",
+                      url: "/attachments/screenshot.png",
+                      expiresAt: "2099-01-01T00:00:00Z",
+                    },
+                  ],
+                }
+              : undefined;
+        },
+      });
+      try {
+        await page.getByRole("link", { name: "screenshot.png", exact: true }).click();
+        await expect.element(page.getByRole("dialog")).toBeVisible();
+        await expect
+          .poll(() => wsRequests.find((body) => body._tag === WS_METHODS.projectsIssueAssetUrl))
+          .toMatchObject({
+            identity: { kind: "attachments" },
+            files: [{ relativePath: "screenshot.png", grant: "file" }],
+          });
+        expect(wsRequests.some((body) => body._tag === WS_METHODS.projectsReadFile)).toBe(false);
+        expect(wsRequests.some((body) => body._tag === WS_METHODS.shellOpenInEditor)).toBe(false);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
     it("reports editor failures when panel previews are disabled", async () => {
       persistAppSettings({ openFileLinksInPanel: false });
       const base = createSnapshotForTargetUser({

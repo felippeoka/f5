@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import * as Path from "node:path";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import { afterEach, expect, it, vi } from "vitest";
-import { assertFileActionCaller, registerDesktopFileActions, vscodeFileUrl } from "./fileActions";
+import {
+  assertFileActionCaller,
+  registerDesktopFileActions,
+  vscodeFileUrl,
+  finderRevealArgs,
+} from "./fileActions";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -24,20 +29,28 @@ async function fixture() {
     },
   };
   const actions = {
-    assertCaller: vi.fn((_event: IpcMainInvokeEvent, trusted: unknown) => {
-      if (trusted !== true) throw new Error("File actions require a user gesture.");
-    }),
+    assertCaller: vi.fn((_event: IpcMainInvokeEvent) => {}),
     openExternal: vi.fn(async (_url: string) => {}),
-    showItemInFolder: vi.fn((_path: string) => {}),
-    activateFileManager: vi.fn(async () => {}),
+    revealFile: vi.fn(async (_path: string) => {}),
   };
-  registerDesktopFileActions(ipc, actions);
+  const authority = registerDesktopFileActions(ipc, actions);
   return {
     file,
     canonical: await realpath(file),
     actions,
-    invoke: (channel: string, path: string, trusted: unknown = true) =>
-      handlers.get(channel)!({} as IpcMainInvokeEvent, path, trusted),
+    authority,
+    invoke: (
+      channel: string,
+      path: string | undefined,
+      trusted: unknown = true,
+      authorization?: string,
+    ) =>
+      handlers.get(channel)!(
+        { sender: { id: 1 } } as IpcMainInvokeEvent,
+        path,
+        trusted,
+        authorization,
+      ),
   };
 }
 
@@ -49,25 +62,30 @@ it("opens VS Code through its native file URL, preserving positions and escaping
   );
 });
 
-it("reveals the existing file before activating the file manager, keeping the selection", async () => {
+it("reveals the canonical file using one native operation", async () => {
   const f = await fixture();
   await f.invoke("desktop:reveal-file", f.file);
-  expect(f.actions.showItemInFolder).toHaveBeenCalledWith(f.canonical);
-  expect(f.actions.activateFileManager).toHaveBeenCalledOnce();
-  expect(f.actions.showItemInFolder.mock.invocationCallOrder[0]).toBeLessThan(
-    f.actions.activateFileManager.mock.invocationCallOrder[0]!,
-  );
+  expect(f.actions.revealFile).toHaveBeenCalledWith(f.canonical);
+});
+
+it("orders Finder reveal and activation in one script with a separate path argument", () => {
+  const path = '/tmp/file "quoted".json';
+  const args = finderRevealArgs(path);
+  expect(args.at(-1)).toBe(path);
+  expect(args[1]).not.toContain(path);
+  expect(args[1]!.indexOf("reveal POSIX file")).toBeLessThan(args[1]!.indexOf("activate"));
 });
 
 it.each(["desktop:reveal-file", "desktop:open-in-vscode"])(
   "rejects missing files, relative paths, and absent gestures for %s",
   async (channel) => {
     const f = await fixture();
-    await expect(f.invoke(channel, f.file + ".missing")).rejects.toThrow();
+    if (channel === "desktop:reveal-file")
+      await expect(f.invoke(channel, f.file + ".missing")).rejects.toThrow();
     await expect(f.invoke(channel, "relative.json")).rejects.toThrow("absolute path");
     await expect(f.invoke(channel, f.file, false)).rejects.toThrow("user gesture");
     expect(f.actions.openExternal).not.toHaveBeenCalled();
-    expect(f.actions.showItemInFolder).not.toHaveBeenCalled();
+    expect(f.actions.revealFile).not.toHaveBeenCalled();
   },
 );
 
@@ -77,7 +95,7 @@ it("propagates native launch and Finder activation errors", async () => {
   await expect(f.invoke("desktop:open-in-vscode", f.file)).rejects.toThrow(
     "VS Code is not installed",
   );
-  f.actions.activateFileManager.mockRejectedValue(new Error("Cannot activate Finder"));
+  f.actions.revealFile.mockRejectedValue(new Error("Cannot activate Finder"));
   await expect(f.invoke("desktop:reveal-file", f.file)).rejects.toThrow("Cannot activate Finder");
 });
 
@@ -87,20 +105,44 @@ it("builds Windows VS Code file URLs without treating drive letters as a protoco
   );
 });
 
-it.each([
-  { registered: false },
-  { mainFrame: false },
-  { origin: "https://untrusted.invalid" },
-  { trustedGesture: false },
-])("rejects unauthorized desktop file actions: %j", (override) => {
-  expect(() =>
-    assertFileActionCaller({
-      registered: true,
-      mainFrame: true,
-      origin: "f5://app",
-      expectedOrigin: "f5://app",
-      trustedGesture: true,
-      ...override,
-    }),
-  ).toThrow();
+it.each([{ registered: false }, { mainFrame: false }, { origin: "https://untrusted.invalid" }])(
+  "rejects unauthorized desktop file actions: %j",
+  (override) => {
+    expect(() =>
+      assertFileActionCaller({
+        registered: true,
+        mainFrame: true,
+        origin: "f5://app",
+        expectedOrigin: "f5://app",
+        ...override,
+      }),
+    ).toThrow();
+  },
+);
+
+it("opens a not-yet-created editor file using its canonical existing parent", async () => {
+  const f = await fixture();
+  await f.invoke("desktop:open-in-vscode", f.file + ".missing:2:1");
+  expect(f.actions.openExternal).toHaveBeenCalledWith(vscodeFileUrl(f.canonical + ".missing:2:1"));
+});
+it("carries a native context-menu selection through a delayed preferred-editor handoff", async () => {
+  const f = await fixture();
+  f.authority.nativeMenuSelected(1, f.file);
+  const token = (await f.invoke("desktop:prepare-editor-open", f.file, false)) as string;
+  await f.invoke("desktop:open-in-vscode", f.file, false, token);
+  expect(f.actions.openExternal).toHaveBeenCalledOnce();
+  await expect(f.invoke("desktop:open-in-vscode", f.file, false, token)).rejects.toThrow(
+    "authorization",
+  );
+});
+
+it("releases editor grants through IPC when the preferred editor uses another transport", async () => {
+  const f = await fixture();
+  for (let i = 0; i < 256; i++) {
+    const token = (await f.invoke("desktop:prepare-editor-open", f.file)) as string;
+    await f.invoke("desktop:release-editor-open", token, false);
+  }
+  const token = (await f.invoke("desktop:prepare-editor-open", f.file)) as string;
+  await f.invoke("desktop:open-in-vscode", f.file, false, token);
+  expect(f.actions.openExternal).toHaveBeenCalledOnce();
 });

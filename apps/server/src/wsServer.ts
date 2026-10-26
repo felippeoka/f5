@@ -5359,8 +5359,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.shellRevealInFileManager: {
         const body = stripRequestTag(request.body);
-        // Local previews use the same explicit cwd boundary as projects.readFile.
-        // Workspace callers retain their project/thread ownership checks.
+        // External previews may choose a local directory, as projects.readFile
+        // already permits. Ownership checks do not make that directory project-scoped.
+        if (
+          body.cwd !== undefined &&
+          (!path.isAbsolute(body.cwd) || body.kind !== "file" || /[\\/]/u.test(body.relativePath))
+        ) {
+          return yield* new RouteRequestError({
+            message: "External file reveals require an absolute directory and a single file name.",
+          });
+        }
         const workspaceRoot = yield* Effect.gen(function* () {
           const projectWorkspace = yield* projectionWorkspaceQuery.getProjectWorkspace(
             body.projectId,

@@ -36,8 +36,8 @@ export const RevealInFileManagerInput = Schema.Struct({
   threadId: ThreadId,
   relativePath: TrimmedNonEmptyString,
   kind: Schema.optional(Schema.Literals(["file", "directory"])),
-  // Read-only local previews can be outside the thread workspace. As with
-  // projects.readFile, cwd is an explicit containment boundary for this action.
+  // Caller-selected absolute directory for external file reveals, as with
+  // projects.readFile. This is not a registered-project authorization boundary.
   cwd: Schema.optional(FilesystemPath),
 });
 export type RevealInFileManagerInput = typeof RevealInFileManagerInput.Type;

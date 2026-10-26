@@ -17,6 +17,7 @@ import { ThreadId } from "@t3tools/contracts";
 import {
   AlertTriangleIcon,
   ExternalLinkIcon,
+  CodeXmlIcon,
   FolderOpenIcon,
   PencilIcon,
   RefreshCwIcon,
@@ -31,7 +32,7 @@ import { clearFileViewSearchParams, parseDiffRouteSearch } from "../diffRouteSea
 import { useDiffWordWrap } from "../appSettings";
 import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName } from "../lib/diffRendering";
-import { resolveFilePreviewTarget } from "../lib/filePreviewTarget";
+import { isExternalTextPreviewPath, resolveFilePreviewTarget } from "../lib/filePreviewTarget";
 import { fileContentQueryOptions, providerQueryKeys } from "../lib/providerReactQuery";
 import { useWatchedWorkspacePaths } from "../lib/workspaceWatch";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -129,7 +130,9 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
   const fileEndLine = surface?.endLine ?? fileSearch.fileEndLine;
   const fileColumn = surface?.column ?? fileSearch.fileColumn;
   const previewTarget = resolveFilePreviewTarget(filePath, workspaceRoot);
-  const canDisplayFileInPanel = Boolean(previewTarget);
+  const canDisplayFileInPanel = Boolean(
+    previewTarget && (!previewTarget.readOnly || isExternalTextPreviewPath(filePath ?? "")),
+  );
   const readOnly = previewTarget?.readOnly ?? false;
   const positionBadge = useMemo(
     () => formatPositionBadge({ line: fileLine, endLine: fileEndLine, column: fileColumn }),
@@ -503,8 +506,16 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
       line: fileLine,
       column: fileColumn,
     });
-    void openFileInEditor(targetPath, "vscode");
+    void openFileInEditor(targetPath);
   }, [fileColumn, fileLine, filePath, workspaceRoot]);
+
+  const openInVSCode = () => {
+    if (filePath)
+      void openFileInEditor(
+        resolveEditorTarget({ filePath, workspaceRoot, line: fileLine, column: fileColumn }),
+        "vscode",
+      );
+  };
 
   const showFileContextMenu = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
@@ -614,10 +625,20 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
           variant="outline"
           onClick={openInEditor}
           disabled={!filePath}
+          aria-label="Open in preferred editor"
+          title="Open in preferred editor"
+        >
+          <ExternalLinkIcon className="size-3.5" />
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="outline"
+          onClick={openInVSCode}
+          disabled={!filePath}
           aria-label="Open in VS Code"
           title="Open in VS Code"
         >
-          <ExternalLinkIcon className="size-3.5" />
+          <CodeXmlIcon className="size-3.5" />
         </Button>
         <Button
           size="icon-xs"
@@ -660,7 +681,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
             <div className="mt-4 flex items-center gap-2">
               <Button size="xs" variant="outline" onClick={openInEditor}>
                 <ExternalLinkIcon className="size-3.5" />
-                Open in VS Code
+                Open in preferred editor
               </Button>
             </div>
           </div>
@@ -705,11 +726,11 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
                 <code className="break-all font-mono text-foreground select-all">
                   {watchedFilePath}
                 </code>
-                {workspaceRoot ? (
+                {previewTarget?.cwd ? (
                   <>
                     {" "}
-                    in workspace folder{" "}
-                    <code className="break-all font-mono select-all">{workspaceRoot}</code>
+                    {readOnly ? "in folder " : "in workspace folder "}
+                    <code className="break-all font-mono select-all">{previewTarget.cwd}</code>
                   </>
                 ) : null}
               </p>
@@ -721,7 +742,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
               </Button>
               <Button size="xs" variant="outline" onClick={openInEditor}>
                 <ExternalLinkIcon className="size-3.5" />
-                Open in VS Code
+                Open in preferred editor
               </Button>
             </div>
           </div>
