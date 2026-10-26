@@ -31,7 +31,7 @@ import { revealFile } from "../lib/revealFile";
 import { clearFileViewSearchParams, parseDiffRouteSearch } from "../diffRouteSearch";
 import { useDiffWordWrap } from "../appSettings";
 import { useTheme } from "../hooks/useTheme";
-import { resolveDiffThemeName } from "../lib/diffRendering";
+import { PREFERRED_HIGHLIGHTER, resolveDiffThemeName } from "../lib/diffRendering";
 import { isExternalTextPreviewPath, resolveFilePreviewTarget } from "../lib/filePreviewTarget";
 import { fileContentQueryOptions, providerQueryKeys } from "../lib/providerReactQuery";
 import { useWatchedWorkspacePaths } from "../lib/workspaceWatch";
@@ -891,6 +891,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
                     disableFileHeader: true,
                     overflow: wordWrap ? "wrap" : "scroll",
                     theme: resolveDiffThemeName(resolvedTheme),
+                    preferredHighlighter: PREFERRED_HIGHLIGHTER,
                     themeType: resolvedTheme,
                     unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                   }}
