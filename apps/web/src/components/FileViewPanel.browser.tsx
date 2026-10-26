@@ -15,10 +15,12 @@ const api = vi.hoisted(() => ({
   writeFile: vi.fn(),
   setWatchedPaths: vi.fn(),
   onWatchedPathsChanged: vi.fn(),
+  openInEditor: vi.fn(),
+  revealInFileManager: vi.fn(),
 }));
 vi.mock("../nativeApi", () => ({
-  ensureNativeApi: () => ({ projects: api }),
-  readNativeApi: () => ({ projects: api }),
+  ensureNativeApi: () => ({ projects: api, shell: api }),
+  readNativeApi: () => ({ projects: api, shell: api }),
 }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => vi.fn(),
@@ -53,6 +55,49 @@ beforeEach(() => {
   noteWsConnectionOpened();
   noteWsSynchronized();
 });
+
+it.each([
+  ["src/app.ts", "/repo/src/app.ts", "/repo", "src/app.ts"],
+  ["/tmp/external/report.json", "/tmp/external/report.json", "/tmp/external", "report.json"],
+])(
+  "opens %s in VS Code and reveals the actual file",
+  async (file, absolutePath, cwd, relativePath) => {
+    route.fileViewPath = file;
+    api.readFile.mockResolvedValue({
+      relativePath,
+      contents: "{}",
+      byteLength: 2,
+      truncated: false,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const screen = await render(
+      <QueryClientProvider client={client}>
+        <FileViewPanel mode="sheet" />
+      </QueryClientProvider>,
+    );
+    try {
+      await screen.getByRole("button", { name: "Open in VS Code", exact: true }).click();
+      await expect.poll(() => api.openInEditor.mock.calls).toEqual([[absolutePath, "vscode"]]);
+      await screen.getByRole("button", { name: "Reveal in file manager", exact: true }).click();
+      await expect
+        .poll(() => api.revealInFileManager.mock.calls)
+        .toEqual([
+          [
+            {
+              projectId: "project-1",
+              threadId: "thread-1",
+              ...(file.startsWith("/") ? { cwd } : {}),
+              relativePath,
+              kind: "file",
+            },
+          ],
+        ]);
+    } finally {
+      await screen.unmount();
+      client.clear();
+    }
+  },
+);
 afterEach(() => {
   vi.clearAllMocks();
   route.fileViewPath = "app.ts";

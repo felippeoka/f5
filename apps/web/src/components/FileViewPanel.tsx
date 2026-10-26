@@ -17,6 +17,7 @@ import { ThreadId } from "@t3tools/contracts";
 import {
   AlertTriangleIcon,
   ExternalLinkIcon,
+  FolderOpenIcon,
   PencilIcon,
   RefreshCwIcon,
   SaveIcon,
@@ -25,6 +26,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { openFileInEditor } from "../lib/openFileInEditor";
+import { revealFile } from "../lib/revealFile";
 import { clearFileViewSearchParams, parseDiffRouteSearch } from "../diffRouteSearch";
 import { useDiffWordWrap } from "../appSettings";
 import { useTheme } from "../hooks/useTheme";
@@ -501,7 +503,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
       line: fileLine,
       column: fileColumn,
     });
-    void openFileInEditor(targetPath);
+    void openFileInEditor(targetPath, "vscode");
   }, [fileColumn, fileLine, filePath, workspaceRoot]);
 
   const showFileContextMenu = useCallback(
@@ -612,9 +614,28 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
           variant="outline"
           onClick={openInEditor}
           disabled={!filePath}
-          aria-label="Open file in editor"
+          aria-label="Open in VS Code"
+          title="Open in VS Code"
         >
           <ExternalLinkIcon className="size-3.5" />
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="outline"
+          onClick={() =>
+            filePath &&
+            activeProjectId &&
+            activeThreadId &&
+            void revealFile(filePath, workspaceRoot, {
+              projectId: activeProjectId,
+              threadId: activeThreadId,
+            })
+          }
+          disabled={!previewTarget || !activeProjectId || !activeThreadId}
+          aria-label="Reveal in file manager"
+          title="Reveal in Finder / file manager"
+        >
+          <FolderOpenIcon className="size-3.5" />
         </Button>
         <Button size="icon-xs" variant="ghost" onClick={closeFileView} aria-label="Close file view">
           <XIcon className="size-3.5" />
@@ -639,7 +660,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
             <div className="mt-4 flex items-center gap-2">
               <Button size="xs" variant="outline" onClick={openInEditor}>
                 <ExternalLinkIcon className="size-3.5" />
-                Open in editor
+                Open in VS Code
               </Button>
             </div>
           </div>
@@ -700,7 +721,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
               </Button>
               <Button size="xs" variant="outline" onClick={openInEditor}>
                 <ExternalLinkIcon className="size-3.5" />
-                Open in editor
+                Open in VS Code
               </Button>
             </div>
           </div>

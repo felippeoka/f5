@@ -281,6 +281,20 @@ it("builds platform-specific file reveal commands", () => {
 });
 
 it.layer(NodeServices.layer)("launchDetached", (it) => {
+  it.effect(
+    "reports an early launcher exit and its diagnostic instead of treating spawn as success",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* launchDetached({
+          command: process.execPath,
+          args: ["-e", "console.error('Cannot connect to editor'); process.exit(7)"],
+        }).pipe(Effect.result);
+        assert.equal(result._tag, "Failure");
+        if (result._tag === "Failure") {
+          assert.match(result.failure.message, /Launcher failed \(7\).*Cannot connect to editor/s);
+        }
+      }),
+  );
   it.effect("resolves when command can be spawned", () =>
     Effect.gen(function* () {
       const result = yield* launchDetached({

@@ -5481,24 +5481,32 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.shellRevealInFileManager: {
         const body = stripRequestTag(request.body);
-        const projectWorkspace = yield* projectionWorkspaceQuery.getProjectWorkspace(
-          body.projectId,
-        );
-        if (Option.isNone(projectWorkspace)) {
-          return yield* new RouteRequestError({ message: "Project not found." });
-        }
-        const threadProjectId = yield* projectionWorkspaceQuery.getThreadProjectId(body.threadId);
-        if (Option.isSome(threadProjectId) && threadProjectId.value !== body.projectId) {
-          return yield* new RouteRequestError({
-            message: "Thread does not belong to the selected project.",
-          });
-        }
-        const threadWorkspace = yield* projectionWorkspaceQuery.getThreadWorkspace(body.threadId);
+        // Local previews use the same explicit cwd boundary as projects.readFile.
+        // Workspace callers retain their project/thread ownership checks.
+        const workspaceRoot = yield* Effect.gen(function* () {
+          const projectWorkspace = yield* projectionWorkspaceQuery.getProjectWorkspace(
+            body.projectId,
+          );
+          if (Option.isNone(projectWorkspace)) {
+            return yield* new RouteRequestError({ message: "Project not found." });
+          }
+          const threadProjectId = yield* projectionWorkspaceQuery.getThreadProjectId(body.threadId);
+          if (Option.isSome(threadProjectId) && threadProjectId.value !== body.projectId) {
+            return yield* new RouteRequestError({
+              message: "Thread does not belong to the selected project.",
+            });
+          }
+          const threadWorkspace = yield* projectionWorkspaceQuery.getThreadWorkspace(body.threadId);
+          return (
+            body.cwd ??
+            Option.match(threadWorkspace, {
+              onNone: () => projectWorkspace.value.workspaceRoot,
+              onSome: (thread) => thread.workspaceRoot,
+            })
+          );
+        });
         const target = yield* resolveWorkspaceReadPath({
-          workspaceRoot: Option.match(threadWorkspace, {
-            onNone: () => projectWorkspace.value.workspaceRoot,
-            onSome: (thread) => thread.workspaceRoot,
-          }),
+          workspaceRoot,
           relativePath: body.relativePath,
           allowWorkspaceRoot: true,
           path,

@@ -3199,6 +3199,37 @@ describe("WebSocket Server", () => {
     });
     expect(escapeResponse.error).toBeDefined();
     expect(revealCalls).toHaveLength(2);
+    const external = makeTempDir("t3code-reveal-external-");
+    fs.writeFileSync(path.join(external, "report.json"), "{}");
+    const localReveal = await sendRequest(ws, WS_METHODS.shellRevealInFileManager, {
+      projectId,
+      threadId,
+      cwd: external,
+      relativePath: "report.json",
+      kind: "file",
+    });
+    expect(localReveal.error).toBeUndefined();
+    expect(revealCalls[2]).toBe(path.join(fs.realpathSync(external), "report.json"));
+    for (const relativePath of ["missing.json", "../report.json"]) {
+      const rejected = await sendRequest(ws, WS_METHODS.shellRevealInFileManager, {
+        projectId,
+        threadId,
+        cwd: external,
+        relativePath,
+        kind: "file",
+      });
+      expect(rejected.error).toBeDefined();
+    }
+    fs.symlinkSync(workspaceRoot, path.join(external, "escape"), "dir");
+    const symlinkEscape = await sendRequest(ws, WS_METHODS.shellRevealInFileManager, {
+      projectId,
+      threadId,
+      cwd: external,
+      relativePath: "escape/src/app.ts",
+      kind: "file",
+    });
+    expect(symlinkEscape.error).toBeDefined();
+    expect(revealCalls).toHaveLength(3);
     const inventory = await sendRequest(ws, WS_METHODS.worktreesList, { projectId });
     expect(inventory.error).toBeUndefined();
     expect(inventory.result).toMatchObject({

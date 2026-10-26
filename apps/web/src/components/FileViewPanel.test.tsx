@@ -191,7 +191,7 @@ describe("FileViewPanel", () => {
 
     expect(markup).toContain("Unable to read src/app.ts");
     expect(markup).toContain("Retry");
-    expect(markup).toContain("Open in editor");
+    expect(markup).toContain("Open in VS Code");
   });
 
   it("hands binary files to the media viewer instead of the text error", async () => {

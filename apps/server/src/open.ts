@@ -8,6 +8,7 @@
  */
 import { spawn } from "node:child_process";
 import NodePath from "node:path";
+import { Socket } from "node:net";
 
 import { EDITORS, type EditorId } from "@t3tools/contracts";
 import { Cause, Effect, Exit, Layer, Schema, ServiceMap } from "effect";
@@ -266,7 +267,7 @@ export const launchDetached = (launch: EditorLaunch) =>
         const invocation = resolveInvocation(launch.command, launch.args);
         child = spawn(invocation.file, [...invocation.args], {
           detached: true,
-          stdio: "ignore",
+          stdio: ["ignore", "ignore", "pipe"],
           windowsHide: true,
         });
       } catch (error) {
@@ -275,14 +276,38 @@ export const launchDetached = (launch: EditorLaunch) =>
         );
       }
 
-      const handleSpawn = () => {
+      let stderr = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-4096);
+      });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let finished = false;
+      const finish = (error?: OpenError) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        // Keep draining late diagnostics without keeping the server alive or
+        // closing the editor's pipe underneath it.
+        if (child.stderr instanceof Socket) child.stderr.unref();
         child.unref();
-        resume(Effect.void);
+        resume(error ? Effect.fail(error) : Effect.void);
       };
-
-      child.once("spawn", handleSpawn);
+      // CLI launchers can spawn successfully and then immediately fail. Observe
+      // that handoff briefly without waiting for a long-running editor to close.
+      child.once("spawn", () => {
+        timer = setTimeout(() => finish(), 1000);
+      });
+      child.once("exit", (code, signal) =>
+        finish(
+          code === 0
+            ? undefined
+            : new OpenError({
+                message: `Launcher failed (${signal ?? code}): ${stderr.trim() || launch.command}`,
+              }),
+        ),
+      );
       child.once("error", (cause) =>
-        resume(Effect.fail(new OpenError({ message: "failed to spawn detached process", cause }))),
+        finish(new OpenError({ message: "failed to spawn detached process", cause })),
       );
     });
   });
