@@ -102,6 +102,10 @@ export class ComputerHelperClient implements ComputerHelper {
     });
     this.child = child;
     this.childExited = new Promise<void>((done) => child.once("exit", () => done()));
+    // Pipe errors are emitted by the streams, independently of ChildProcess
+    // errors. In particular, a helper can close stdin just after its hello.
+    for (const stream of [child.stdin, child.stdout, child.stderr])
+      stream.on("error", () => this.failTransport(child));
     this.ready = false;
     this.terminalFailure = false;
     this.helperState = undefined;
@@ -125,6 +129,7 @@ export class ComputerHelperClient implements ComputerHelper {
       };
       let end: number;
       while ((end = buffer.indexOf("\n")) >= 0) {
+        if (this.child !== child) return;
         const line = buffer.slice(0, end);
         buffer = buffer.slice(end + 1);
         if (Buffer.byteLength(line) > 12 * 1024 * 1024) {
@@ -235,6 +240,8 @@ export class ComputerHelperClient implements ComputerHelper {
     if (JSON.stringify(this.state) === JSON.stringify(status) && this.pending.size === 0) return;
     this.state = status;
     this.control({ type: "suspend" });
+    // A synchronous pipe failure may have retired the helper during suspend.
+    if (this.state !== status) return;
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(
@@ -249,7 +256,32 @@ export class ComputerHelperClient implements ComputerHelper {
     for (const listener of this.listeners) listener({ type: "status", status });
   }
   control(message: Record<string, unknown>): void {
-    if (this.child?.stdin.writable) this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    const child = this.child;
+    if (!child) return;
+    if (!child.stdin.writable || child.stdin.destroyed) {
+      this.failTransport(child);
+      return;
+    }
+    try {
+      child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+        if (error) this.failTransport(child);
+      });
+    } catch {
+      this.failTransport(child);
+    }
+  }
+  private failTransport(child: ChildProcessWithoutNullStreams): void {
+    if (this.child !== child) return;
+    const exited = this.childExited;
+    // Detach before fail() sends suspend, so a broken pipe cannot recurse.
+    this.child = null;
+    this.ready = false;
+    this.fail(this.terminalFailure ? this.state : { available: false, reason: "helper-crashed" });
+    child.kill("SIGKILL");
+    if (this.closing || this.terminalFailure) return;
+    this.crashes = this.crashes.filter((time) => this.now() - time < 60_000);
+    this.crashes.push(this.now());
+    if (this.crashes.length < 3) void this.restartAfterExit(exited);
   }
   request(
     request: ComputerAutomationRequest,
