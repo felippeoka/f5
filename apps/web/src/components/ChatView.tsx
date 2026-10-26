@@ -7199,6 +7199,7 @@ export default memo(function ChatView({
     () => (activeThread ? threadActionController.menuItemsForThread(activeThread) : []),
     [
       activeThread?.archivedAt,
+      activeThread?.scheduledOrigin,
       activeThread?.id,
       activeThread?.pinnedAt,
       activeThread?.pinOrderKey,
@@ -7662,6 +7663,7 @@ export default memo(function ChatView({
               isServerThread={isServerThread}
               activeThreadId={activeThread.id}
               activeThreadTitle={activeThread.title}
+              scheduledOrigin={activeThread.scheduledOrigin}
               nativeGoalSummary={
                 nativeGoal ? `Goal: ${nativeGoal.objective} · ${nativeGoal.status}` : undefined
               }
