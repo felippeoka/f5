@@ -24,6 +24,7 @@ function resolveRawNewThreadPreferences(
     "lastProvider" | "lastModelByProvider" | "lastModelOptions"
   >,
 ): {
+  source: "project" | "remembered" | "fallback";
   provider?: ProviderKind;
   instanceId?: ProviderInstanceId;
   model?: string;
@@ -39,6 +40,7 @@ function resolveRawNewThreadPreferences(
       ? driver
       : inferProviderForModel(selection.model, "codex");
     return {
+      source: "project",
       provider,
       instanceId: selection.instanceId,
       model: selection.model,
@@ -49,11 +51,12 @@ function resolveRawNewThreadPreferences(
   if (project?.defaultModel) {
     const provider = inferProviderForModel(project.defaultModel, "codex");
     if (enabled(ProviderInstanceId.make(provider)))
-      return { provider, model: project.defaultModel };
+      return { source: "project", provider, model: project.defaultModel };
     needsFallback = true;
   }
   if (preferences.lastProvider && enabled(ProviderInstanceId.make(preferences.lastProvider)))
     return {
+      source: "remembered",
       provider: preferences.lastProvider,
       ...(preferences.lastModelByProvider[preferences.lastProvider]
         ? { model: preferences.lastModelByProvider[preferences.lastProvider]! }
@@ -62,14 +65,17 @@ function resolveRawNewThreadPreferences(
     };
   if (preferences.lastProvider) needsFallback = true;
   if (!needsFallback)
-    return preferences.lastModelOptions ? { options: preferences.lastModelOptions } : {};
+    return preferences.lastModelOptions
+      ? { source: "remembered", options: preferences.lastModelOptions }
+      : { source: "fallback" };
   const fallback = [...Object.keys(settings.providers), ...Object.keys(settings.providerInstances)]
     .map((id) => ProviderInstanceId.make(id))
     .find((id) => enabled(id) && isKnownProviderKind(settings.providerInstances[id]?.driver ?? id));
-  if (!fallback) return {};
+  if (!fallback) return { source: "fallback" };
   const driver = settings.providerInstances[fallback]?.driver ?? fallback;
-  if (!isKnownProviderKind(driver)) return {};
+  if (!isKnownProviderKind(driver)) return { source: "fallback" };
   return {
+    source: "fallback",
     provider: driver,
     instanceId: fallback,
     model: DEFAULT_MODEL_BY_PROVIDER[driver as ProviderKind],
@@ -80,25 +86,12 @@ function resolveRawNewThreadPreferences(
 /** Remembered traits carry over, but new conversations choose their own effort. */
 export function resolveNewThreadPreferences(
   ...args: Parameters<typeof resolveRawNewThreadPreferences>
-): ReturnType<typeof resolveRawNewThreadPreferences> & {
-  source: "project" | "remembered" | "fallback";
-} {
-  const [project, settings] = args;
+): ReturnType<typeof resolveRawNewThreadPreferences> {
   const result = resolveRawNewThreadPreferences(...args);
-  const projectSelection = project?.defaultModelSelection;
-  const source =
-    projectSelection &&
-    resolveProjectProviderInstanceEnabled(settings, project?.id, projectSelection.instanceId)
-      ? "project"
-      : project?.defaultModel && result.model === project.defaultModel
-        ? "project"
-        : result.options != null
-          ? "remembered"
-          : "fallback";
-  if (source !== "remembered" || result.options == null) return { ...result, source };
+  if (result.source !== "remembered" || result.options == null) return result;
   const provider = result.provider ?? "codex";
   const selections = providerModelOptionsToSelections(provider, result.options)?.filter(
     (option) => !isEffortSelection(option.id, option.value),
   );
-  return { ...result, source, options: providerSelectionsToModelOptions(provider, selections) };
+  return { ...result, options: providerSelectionsToModelOptions(provider, selections) };
 }

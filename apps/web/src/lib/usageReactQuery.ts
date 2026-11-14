@@ -307,18 +307,20 @@ async function drainAccountRefreshes(client: QueryClient, queue: RefreshRequest[
     const job = queue[0]!;
     try {
       await client.cancelQueries({ queryKey: usageQueryKeys.accounts, exact: true });
-      const accounts = decodeUsageAccounts(
-        await ensureNativeApi().usage.getAccounts(
-          {
-            refresh: job.refresh,
-            ...(job.providerInstanceId ? { providerInstanceId: job.providerInstanceId } : {}),
-          },
-          { priority: "interactive" },
-        ),
-      );
-      // Reads started while the probe was pending must not publish older snapshots.
-      await client.cancelQueries({ queryKey: usageQueryKeys.accounts, exact: true });
-      client.setQueryData(usageQueryKeys.accounts, accounts);
+      const accounts = await client.fetchQuery({
+        ...usageAccountsQueryOptions(),
+        staleTime: 0,
+        queryFn: async () =>
+          decodeUsageAccounts(
+            await ensureNativeApi().usage.getAccounts(
+              {
+                refresh: job.refresh,
+                ...(job.providerInstanceId ? { providerInstanceId: job.providerInstanceId } : {}),
+              },
+              { priority: "interactive" },
+            ),
+          ),
+      });
       job.resolve(accounts);
     } catch (error) {
       job.reject(error);

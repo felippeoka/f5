@@ -19,6 +19,15 @@ const preferences = {
 };
 
 describe("shared new-thread and scheduled-task defaults", () => {
+  it("identifies remembered provider choices even without remembered options", () => {
+    expect(
+      resolveNewThreadPreferences(undefined, DEFAULT_SERVER_SETTINGS, {
+        lastProvider: "codex",
+        lastModelByProvider: { codex: "gpt-5" },
+        lastModelOptions: null,
+      }).source,
+    ).toBe("remembered");
+  });
   it("preserves explicit project Medium while dropping remembered effort only", () => {
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       providers: { codex: { enabled: true } },
