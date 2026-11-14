@@ -43,6 +43,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useDiffWordWrap } from "../appSettings";
 import { openFileInEditor } from "../lib/openFileInEditor";
+import { showLocalPathContextMenu } from "../lib/localPathContextMenu";
 import { findWorkspaceBasenameFile } from "../lib/workspaceBasename";
 import { readNativeApi } from "../nativeApi";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
@@ -237,10 +238,15 @@ function MarkdownFileChip({
   anchorProps?: React.AnchorHTMLAttributes<HTMLAnchorElement>;
 }) {
   const handleFileNavigation = useFileNavigation();
+  const entryKind = meta.line ? "file" : inferEntryKindFromPath(meta.filePath);
   const positionSuffix = meta.line ? `:${meta.line}${meta.column ? `:${meta.column}` : ""}` : "";
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    if (entryKind === "directory") {
+      void openFileInEditor(meta.filePath, "vscode");
+      return;
+    }
     if (handleFileNavigation(meta.targetPath)) {
       return;
     }
@@ -279,12 +285,20 @@ function MarkdownFileChip({
                 : {})}
               className="chat-markdown-file-link"
               onClick={handleClick}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void showLocalPathContextMenu(meta.filePath, {
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
             />
           }
         >
           <VscodeEntryIcon
             pathValue={meta.filePath}
-            kind={inferEntryKindFromPath(meta.filePath)}
+            kind={entryKind}
             theme={theme}
             className="chat-markdown-file-link-icon"
           />
