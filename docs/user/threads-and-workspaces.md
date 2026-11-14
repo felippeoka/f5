@@ -8,7 +8,7 @@ afterwards.
 
 ## How to
 
-1. Click **New thread** (`mod+N`) or type in the box on Home.
+1. Click **New thread** (`mod+N`), or [start it from Home](#start-a-thread-from-home).
 2. Pick the **provider and model** from the model chip, and **traits** such as reasoning effort.
 3. Pick **Access**, the thread's [runtime mode](../runtime-modes.md).
 4. Choose **Agent** or **Plan**. Plan asks for a plan you can accept or revise before any change.
@@ -20,6 +20,26 @@ afterwards.
 The composer also takes [attachments](attachments-and-media.md), `@` file mentions and `/`
 commands, including provider and project skills. The context ring shows how full the model's
 context window is.
+
+## Start a thread from Home
+
+The box at the top of Home starts a thread without leaving Home. Pick the project, the model
+and its effort, **Agent** or **Plan**, **Access**, and **Local** or **New worktree**, type the
+task and press `Enter`. The thread starts in the background and shows up under **Running**;
+`mod+Enter` starts it and opens it. The settings begin from the project's defaults for a new
+thread, and a new worktree starts from the project's current branch. If F5 cannot read the
+project's branches, the workspace shows **Local** and the thread starts in the project folder.
+
+The box follows **Settings → Conversation → Send shortcut**. If that setting asks for
+`mod+Enter`, `Enter` adds a line, and `mod+Enter` starts the thread and stays on Home; open the
+thread from the **Open** button in the confirmation.
+
+If the send fails, your text stays in the box. If no answer came back, for example because the
+connection dropped, send the same text again: F5 resends the same message, so the thread starts
+once. Text that begins with a `/` command or a skill
+opens the full composer instead, where those are resolved. For attachments, `@` mentions or
+another base branch, click **Open full composer**: it opens a new thread with your text and
+the settings you picked, unsent.
 
 To give the agent another thread as context, drag that thread from the sidebar into the
 composer. If you selected several threads, dragging one of them adds them all, up to 10 per
@@ -142,7 +162,8 @@ commit, push and pull request actions. Linked pull requests also appear in the
   modes and go out as plain text; one that starts with a `/command` or a `$skill` opens the
   thread with the text in its composer, which resolves it. `J`/`K` or the arrow keys move,
   `O` opens, `E` settles (not a running thread or one waiting on an approval or a question),
-  `H` snoozes, `P` pins, `R` starts a reply and `/` jumps to the new thread box. `Enter`
+  `H` snoozes, `P` pins, `R` starts a reply and `/` jumps to the
+  [new thread box](#start-a-thread-from-home). `Enter`
   approves the request once or implements the plan, and opens other threads; `D` declines.
   `Enter` and the arrow keys act from the queue: after a click in the pane to read it, they
   scroll and answer nothing. `Enter` is left unbound when the provider asks for "no" to be the

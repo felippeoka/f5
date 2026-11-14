@@ -22,11 +22,16 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
+import { APP_SETTINGS_STORAGE_KEY, parsePersistedAppSettings } from "../../appSettings";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useComposerFocusRequestStore } from "../../composerFocusRequestStore";
 import { resetThreadRepliesForTests } from "../../lib/sendThreadReply";
+import { resetBackgroundThreadStartForTests } from "../../lib/startThreadInBackground";
 import { useNextTurnQueueStore } from "../../nextTurnQueueStore";
+import { resetProtocolStateForTests, setServerBootstrap } from "../../protocolState";
 import { useStore } from "../../store";
+import { serverBootstrapFixture } from "../../test/serverBootstrap";
+import { createTestServerProvider } from "../../testServerProvider";
 import type { Project, Thread } from "../../types";
 import { useWorkflowCreateDialogStore } from "../../workflowCreateDialogStore";
 import {
@@ -35,6 +40,7 @@ import {
   resetWsConnectionStateForTests,
 } from "../../wsConnectionState";
 import { SidebarProvider } from "../ui/sidebar";
+import { homeComposerDraft } from "./homeComposerDraft";
 import { resetHomeInlineStoreForTests } from "./homeInlineStore";
 import { HomeMissionControl } from "./HomeMissionControl";
 import { useHomeSelectionStore } from "./homeSelectionStore";
@@ -54,16 +60,46 @@ vi.mock("./HomePreviewPane", async (importOriginal) => {
   };
 });
 
-function holdPreview(): () => void {
+// The composer's controls load after the box. A test holds them back to send before then.
+const controlsGate = vi.hoisted(() => ({ pending: null as Promise<void> | null }));
+vi.mock("./HomeComposerControls", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./HomeComposerControls")>();
+  const { createElement, use } = await import("react");
+  return {
+    ...actual,
+    default: (props: Parameters<typeof actual.default>[0]) => {
+      if (controlsGate.pending) use(controlsGate.pending);
+      return createElement(actual.default, props);
+    },
+  };
+});
+
+function hold(gate: { pending: Promise<void> | null }): () => void {
   let release!: () => void;
-  previewGate.pending = new Promise<void>((resolve) => {
+  gate.pending = new Promise<void>((resolve) => {
     release = resolve;
   });
   return () => {
-    previewGate.pending = null;
+    gate.pending = null;
     release();
   };
 }
+const holdPreview = () => hold(previewGate);
+
+/** A promise a test settles by hand, to act while a request is in flight. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
+const IS_MAC = /mac|iphone|ipad|ipod/i.test(navigator.platform);
+const MOD_ENTER = IS_MAC ? "{Meta>}{Enter}{/Meta}" : "{Control>}{Enter}{/Control}";
+const MOD_ENTER_LABEL = IS_MAC ? "⌘Enter" : "Ctrl+Enter";
 
 const NOW_ISO = new Date().toISOString();
 // Older than every thread so thread activity, not creation order, picks the
@@ -73,6 +109,17 @@ const PROJECT_CREATED_AT = "2026-01-01T00:00:00.000Z";
 const getProjectSettings = vi.fn(async () => {
   throw new Error("offline");
 });
+// One provider, so Home's composer has a model to send with.
+const serverConfig = async () => ({
+  cwd: "/repo",
+  keybindingsConfigPath: "/repo/.t3code-keybindings.json",
+  keybindings: [],
+  customKeybindings: [],
+  issues: [],
+  providers: [createTestServerProvider("codex")],
+  availableEditors: [],
+});
+const getServerConfig = vi.fn(serverConfig);
 const dispatchCommand = vi.fn(async (_command: { type: string; threadId?: string }) => ({
   sequence: 1,
 }));
@@ -134,10 +181,11 @@ const resumedQueue = async (input: {
 const setQueuePaused = vi.fn(resumedQueue);
 const noPausedQueues = async () => ({ threads: [] as ReadonlyArray<object> });
 const queueSummary = vi.fn(noPausedQueues);
-const listBranches = vi.fn(async (_input: { cwd: string }) => ({
+const repoOnMain = async (_input: { cwd: string }) => ({
   isRepo: true,
   branches: [{ name: "main", current: true }],
-}));
+});
+const listBranches = vi.fn(repoOnMain);
 
 function makeProject(id: string, name: string): Project {
   return {
@@ -360,7 +408,7 @@ describe("HomeMissionControl", () => {
         getDiskSpace: () => getDiskSpace(),
         onDiskSpaceUpdated: () => () => {},
       },
-      server: { getProjectSettings },
+      server: { getProjectSettings, getConfig: getServerConfig },
       projects: { ensureScratch },
       orchestration: { dispatchCommand, getThreadPeeks, getThreadTailDetails },
       prHub: { getOverview: () => getPrHubOverview(), onChanged: () => () => {} },
@@ -381,11 +429,18 @@ describe("HomeMissionControl", () => {
     await page.viewport(1280, 800);
     noteWsConnectionOpened();
     noteWsSynchronized();
+    setServerBootstrap(serverBootstrapFixture);
   });
 
   afterEach(() => {
     previewGate.pending = null;
+    controlsGate.pending = null;
+    getServerConfig.mockImplementation(serverConfig);
+    listBranches.mockImplementation(repoOnMain);
     resetWsConnectionStateForTests();
+    resetProtocolStateForTests();
+    homeComposerDraft.resetForTests();
+    resetBackgroundThreadStartForTests();
     submitTurn.mockClear();
     submitTurn.mockImplementation(startedTurn);
     listQueue.mockClear();
@@ -424,7 +479,7 @@ describe("HomeMissionControl", () => {
       await page
         .getByRole("textbox", { name: "What should we work on?" })
         .fill("Research solar energy");
-      await page.getByRole("button", { name: "Start" }).click();
+      await page.getByRole("button", { name: "Open full composer" }).click();
       await vi.waitFor(() =>
         expect(document.querySelector('[data-testid="thread-route"]')).toBeTruthy(),
       );
@@ -449,7 +504,7 @@ describe("HomeMissionControl", () => {
       await pickNoProject();
       const input = page.getByRole("textbox", { name: "What should we work on?" });
       await input.fill("Keep my research");
-      await page.getByRole("button", { name: "Start" }).click();
+      await page.getByRole("button", { name: "Open full composer" }).click();
       await vi.waitFor(() =>
         expect(toast).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -462,7 +517,7 @@ describe("HomeMissionControl", () => {
       expect(view.pushedPaths).toEqual([]);
       await expect.element(input).toHaveValue("Keep my research");
       scratchSuccess();
-      await page.getByRole("button", { name: "Start" }).click();
+      await page.getByRole("button", { name: "Open full composer" }).click();
       await vi.waitFor(() =>
         expect(document.querySelector('[data-testid="thread-route"]')).toBeTruthy(),
       );
@@ -486,7 +541,7 @@ describe("HomeMissionControl", () => {
       await page
         .getByRole("textbox", { name: "What should we work on?" })
         .fill("Do not steal focus");
-      await page.getByRole("button", { name: "Start" }).click();
+      await page.getByRole("button", { name: "Open full composer" }).click();
       await vi.waitFor(() => expect(ensureScratch).toHaveBeenCalledTimes(1));
       await view.router.navigate({ to: "/$threadId", params: { threadId: "elsewhere" } });
       finish({ projectId: SCRATCH.id });
@@ -628,7 +683,7 @@ describe("HomeMissionControl", () => {
       await expect
         .element(page.getByRole("combobox", { name: "Project" }))
         .toHaveTextContent("No project");
-      await expect.element(page.getByRole("button", { name: "Start" })).toBeEnabled();
+      await expect.element(page.getByRole("button", { name: "Open full composer" })).toBeEnabled();
     } finally {
       await view.cleanup();
     }
@@ -656,7 +711,7 @@ describe("HomeMissionControl", () => {
       await page
         .getByRole("textbox", { name: "What should we work on?" })
         .fill("Fix the login bug");
-      await page.getByRole("button", { name: "Start" }).click();
+      await page.getByRole("button", { name: "Open full composer" }).click();
 
       await vi.waitFor(() => {
         expect(document.querySelector('[data-testid="thread-route"]')).toBeTruthy();
@@ -688,7 +743,7 @@ describe("HomeMissionControl", () => {
     ]);
     try {
       await page.getByRole("textbox", { name: "What should we work on?" }).fill("and add tests");
-      await userEvent.keyboard("{Enter}");
+      await page.getByRole("button", { name: "Open full composer" }).click();
 
       await vi.waitFor(() => {
         expect(document.querySelector('[data-testid="thread-route"]')?.textContent).toBe(
@@ -734,6 +789,468 @@ describe("HomeMissionControl", () => {
     } finally {
       await view.cleanup();
     }
+  });
+
+  describe("composer", () => {
+    /** Types the task and waits for the controls a send goes out with. */
+    async function typeTask(text: string) {
+      const input = page.getByRole("textbox", { name: "What should we work on?" });
+      await input.fill(text);
+      await expect.element(page.getByRole("button", { name: "Send" })).toBeEnabled();
+      return input;
+    }
+
+    const sentCommand = () => submitTurn.mock.calls[0]![0].command;
+
+    it("starts the thread in the background on Enter and stays on Home", async () => {
+      const toast = vi.spyOn(toastManager, "add");
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        const input = await typeTask("Fix the login bug");
+        await userEvent.keyboard("{Enter}");
+
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+        const submission = submitTurn.mock.calls[0]![0];
+        expect(submission.intent).toBe("auto");
+        expect(submission.submissionId).toBe(submission.command.commandId);
+        expect(submission.command).toMatchObject({
+          type: "thread.turn.start",
+          message: { role: "user", text: "Fix the login bug", attachments: [] },
+          provider: "codex",
+          modelSelection: { instanceId: "codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          titleSourceText: "Fix the login bug",
+          bootstrap: {
+            createThread: { projectId: PROJECT_A.id, branch: null, worktreePath: null },
+          },
+        });
+        expect(submission.command.bootstrap?.prepareWorktree).toBeUndefined();
+        await expect.element(input).toHaveValue("");
+        await vi.waitFor(() =>
+          expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: "Thread started" })),
+        );
+        expect(view.pushedPaths).toEqual([]);
+        // No draft is left behind for the sidebar to list.
+        expect(useComposerDraftStore.getState().draftThreadsByThreadId).toEqual({});
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("opens the started thread with mod+Enter once it has arrived", async () => {
+      submitTurn.mockImplementation(async (input) => {
+        // The thread's creation event lands after the reply that named it.
+        setTimeout(() =>
+          useStore.setState((state) => ({
+            threads: [...state.threads, makeThread(PROJECT_A.id, input.command.threadId)],
+          })),
+        );
+        return startedTurn(input);
+      });
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Fix the login bug");
+        await userEvent.keyboard(MOD_ENTER);
+
+        await vi.waitFor(() =>
+          expect(document.querySelector('[data-testid="thread-route"]')?.textContent).toBe(
+            sentCommand().threadId,
+          ),
+        );
+        expect(submitTurn).toHaveBeenCalledTimes(1);
+        expect(view.pushedPaths).toEqual([`/${sentCommand().threadId}`]);
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("keeps the text when the send fails, and sends once on the retry", async () => {
+      submitTurn.mockRejectedValueOnce(new Error("Codex is turned off for this project."));
+      const toast = vi.spyOn(toastManager, "add");
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        const input = await typeTask("Fix the login bug");
+        await page.getByRole("button", { name: "Send" }).click();
+        await vi.waitFor(() =>
+          expect(toast).toHaveBeenCalledWith(
+            expect.objectContaining({
+              type: "error",
+              title: "Could not start thread",
+              description: "Codex is turned off for this project.",
+            }),
+          ),
+        );
+        await expect.element(input).toHaveValue("Fix the login bug");
+        expect(view.pushedPaths).toEqual([]);
+
+        await page.getByRole("button", { name: "Send" }).click();
+        await expect.element(input).toHaveValue("");
+        expect(submitTurn).toHaveBeenCalledTimes(2);
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("sends with the mode and access picked on Home", async () => {
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Plan the migration");
+        await page.getByRole("button", { name: "Plan", exact: true }).click();
+        await document.querySelector<HTMLElement>('[data-composer-control="runtimeMode"]')!.click();
+        await page.getByRole("menuitemradio", { name: /Supervised/ }).click();
+        // The access menu stays open after a choice, as it does in a thread.
+        await userEvent.keyboard("{Escape}");
+        await page.getByRole("button", { name: "Send" }).click();
+
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+        expect(sentCommand()).toMatchObject({
+          runtimeMode: "approval-required",
+          interactionMode: "plan",
+          bootstrap: {
+            createThread: { runtimeMode: "approval-required", interactionMode: "plan" },
+          },
+        });
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("starts in a new worktree from the project's current branch", async () => {
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Try the risky refactor");
+        await page.getByRole("combobox", { name: "Workspace" }).click();
+        await page.getByRole("option", { name: "New worktree" }).click();
+        await expect.element(page.getByText("from main")).toBeVisible();
+        await page.getByRole("button", { name: "Send" }).click();
+
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+        expect(listBranches).toHaveBeenCalledWith(expect.objectContaining({ cwd: PROJECT_A.cwd }));
+        expect(sentCommand().bootstrap).toMatchObject({
+          createThread: { projectId: PROJECT_A.id, branch: "main", worktreePath: null },
+          prepareWorktree: {
+            projectCwd: PROJECT_A.cwd,
+            baseBranch: "main",
+            requireWorktree: true,
+          },
+        });
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("starts a thread without a project", async () => {
+      scratchSuccess();
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await pickNoProject();
+        await typeTask("Research solar energy");
+        // No project, so no workspace to choose.
+        expect(page.getByRole("combobox", { name: "Workspace" }).all()).toHaveLength(0);
+        await page.getByRole("button", { name: "Send" }).click();
+
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+        expect(ensureScratch).toHaveBeenCalledTimes(1);
+        expect(sentCommand().bootstrap).toMatchObject({
+          createThread: { projectId: SCRATCH.id, branch: null, worktreePath: null },
+        });
+        expect(view.pushedPaths).toEqual([]);
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("hands a command to the full composer instead of sending it", async () => {
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("/review the last commit");
+        await userEvent.keyboard("{Enter}");
+
+        await vi.waitFor(() =>
+          expect(document.querySelector('[data-testid="thread-route"]')).toBeTruthy(),
+        );
+        const threadId = document.querySelector('[data-testid="thread-route"]')?.textContent ?? "";
+        expect(
+          useComposerDraftStore.getState().draftsByThreadId[threadId as ThreadId]?.prompt,
+        ).toBe("/review the last commit");
+        expect(submitTurn).not.toHaveBeenCalled();
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("opens the full composer with the mode picked on Home", async () => {
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Plan the migration");
+        await page.getByRole("button", { name: "Plan", exact: true }).click();
+        await page.getByRole("button", { name: "Open full composer" }).click();
+
+        await vi.waitFor(() =>
+          expect(document.querySelector('[data-testid="thread-route"]')).toBeTruthy(),
+        );
+        const threadId = document.querySelector('[data-testid="thread-route"]')?.textContent ?? "";
+        const drafts = useComposerDraftStore.getState();
+        expect(drafts.draftsByThreadId[threadId as ThreadId]).toMatchObject({
+          prompt: "Plan the migration",
+          interactionMode: "plan",
+        });
+        expect(submitTurn).not.toHaveBeenCalled();
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("keeps the text and sends nothing while the connection is down", async () => {
+      const toast = vi.spyOn(toastManager, "add");
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        const input = await typeTask("Fix the login bug");
+        resetWsConnectionStateForTests();
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() =>
+          expect(toast).toHaveBeenCalledWith(
+            expect.objectContaining({ title: "Waiting for connection" }),
+          ),
+        );
+        expect(submitTurn).not.toHaveBeenCalled();
+        await expect.element(input).toHaveValue("Fix the login bug");
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("keeps the typed text across a trip to another page", async () => {
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Half a thought");
+        await view.router.navigate({ to: "/$threadId", params: { threadId: "elsewhere" } });
+        await view.router.navigate({ to: "/" });
+        await expect
+          .element(page.getByRole("textbox", { name: "What should we work on?" }))
+          .toHaveValue("Half a thought");
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("follows the send shortcut setting: Enter adds a line, the modifier sends and stays", async () => {
+      localStorage.setItem(
+        APP_SETTINGS_STORAGE_KEY,
+        JSON.stringify({ ...parsePersistedAppSettings(null), sendShortcut: "mod-enter" }),
+      );
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        const input = await typeTask("Fix the login bug");
+        await userEvent.keyboard("{Enter}");
+        await expect.element(input).toHaveValue("Fix the login bug\n");
+        expect(submitTurn).not.toHaveBeenCalled();
+        await page.getByRole("button", { name: "Send" }).hover();
+        await expect
+          .element(page.getByText(`${MOD_ENTER_LABEL} starts the thread and stays here.`))
+          .toBeVisible();
+
+        await userEvent.keyboard(MOD_ENTER);
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+        expect(sentCommand().message.text).toBe("Fix the login bug");
+        await expect.element(input).toHaveValue("");
+        // The modifier is the way to send here, so it does not also open the thread.
+        expect(view.pushedPaths).toEqual([]);
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("names both keys in the Send tooltip with the plain Enter setting", async () => {
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Fix the login bug");
+        await page.getByRole("button", { name: "Send" }).hover();
+        await expect
+          .element(
+            page.getByText(
+              `Enter starts the thread and stays here. ${MOD_ENTER_LABEL} also opens it.`,
+            ),
+          )
+          .toBeVisible();
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("stays busy with the text in flight across a trip away, and clears it on the answer", async () => {
+      const answer = deferred<TurnSubmissionOutcome>();
+      submitTurn.mockImplementation(() => answer.promise);
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Fix the login bug");
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+
+        await view.router.navigate({ to: "/$threadId", params: { threadId: "elsewhere" } });
+        await view.router.navigate({ to: "/" });
+        const input = page.getByRole("textbox", { name: "What should we work on?" });
+        await expect.element(input).toHaveValue("Fix the login bug");
+        // Still the message in flight: it cannot be edited or sent a second time.
+        await expect.element(input).toHaveAttribute("readonly");
+        await expect.element(page.getByRole("button", { name: "Send" })).toBeDisabled();
+
+        answer.resolve(await startedTurn(submitTurn.mock.calls[0]![0]));
+        await expect.element(input).toHaveValue("");
+        await expect.element(input).not.toHaveAttribute("readonly");
+        expect(submitTurn).toHaveBeenCalledTimes(1);
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("clears the box once the full composer has the text, even when Home was left meanwhile", async () => {
+      const scratch = deferred<{ projectId: ProjectId }>();
+      ensureScratch.mockImplementation(() => scratch.promise as never);
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await pickNoProject();
+        await typeTask("Research solar energy");
+        await page.getByRole("button", { name: "Open full composer" }).click();
+        await vi.waitFor(() => expect(ensureScratch).toHaveBeenCalledTimes(1));
+        await view.router.navigate({ to: "/$threadId", params: { threadId: "elsewhere" } });
+
+        useStore.setState((state) => ({ projects: [...state.projects, SCRATCH] }));
+        scratch.resolve({ projectId: SCRATCH.id });
+        await vi.waitFor(() =>
+          expect(
+            Object.values(useComposerDraftStore.getState().draftsByThreadId).map(
+              (draft) => draft.prompt,
+            ),
+          ).toContain("Research solar energy"),
+        );
+        // One copy of the task: in the draft, not also waiting on Home.
+        await vi.waitFor(() => expect(homeComposerDraft.text()).toBe(""));
+        await view.router.navigate({ to: "/" });
+        await expect
+          .element(page.getByRole("textbox", { name: "What should we work on?" }))
+          .toHaveValue("");
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("gives a reused empty draft the modes Home shows, not the ones it had", async () => {
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        const reused = ThreadId.makeUnsafe("reused-draft");
+        const drafts = useComposerDraftStore.getState();
+        drafts.setProjectDraftThreadId(PROJECT_A.id, reused, {
+          envMode: "local",
+          runtimeMode: "approval-required",
+          interactionMode: "plan",
+        });
+        drafts.setRuntimeMode(reused, "approval-required");
+        drafts.setInteractionMode(reused, "plan");
+
+        // Home shows the project's defaults: nothing was picked here.
+        await typeTask("Fix the login bug");
+        await page.getByRole("button", { name: "Open full composer" }).click();
+        await vi.waitFor(() =>
+          expect(document.querySelector('[data-testid="thread-route"]')?.textContent).toBe(reused),
+        );
+        const after = useComposerDraftStore.getState();
+        expect(after.draftsByThreadId[reused]).toMatchObject({
+          prompt: "Fix the login bug",
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        });
+        expect(after.draftThreadsByThreadId[reused]).toMatchObject({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        });
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("starts in the project folder, and says so, when the branches cannot be read", async () => {
+      listBranches.mockRejectedValue(new Error("git is not available"));
+      // A worktree was the choice while the repository could still be read.
+      homeComposerDraft.setEnvMode(PROJECT_A.id, "worktree");
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        await typeTask("Fix the login bug");
+        const workspaceChip = () =>
+          document.querySelector<HTMLElement>('[role="status"][data-composer-control="envMode"]');
+        await vi.waitFor(() => expect(workspaceChip()?.textContent).toBe("Local"));
+        expect(workspaceChip()?.title).toContain("could not be read");
+        expect(page.getByRole("combobox", { name: "Workspace" }).all()).toHaveLength(0);
+
+        await page.getByRole("button", { name: "Send" }).click();
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+        expect(sentCommand().bootstrap).toMatchObject({
+          createThread: { projectId: PROJECT_A.id, branch: null, worktreePath: null },
+        });
+        expect(sentCommand().bootstrap?.prepareWorktree).toBeUndefined();
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("says the providers are loading, not missing, until the server lists them", async () => {
+      const config = deferred<Awaited<ReturnType<typeof serverConfig>>>();
+      getServerConfig.mockImplementation(() => config.promise);
+      const toast = vi.spyOn(toastManager, "add");
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        const input = await typeTask("Fix the login bug");
+        await expect.element(page.getByText("Loading providers…")).toBeVisible();
+        expect(page.getByText("No provider available").all()).toHaveLength(0);
+
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() =>
+          expect(toast).toHaveBeenCalledWith(
+            expect.objectContaining({
+              type: "error",
+              description: "Still loading the providers. Try again in a moment.",
+            }),
+          ),
+        );
+        expect(submitTurn).not.toHaveBeenCalled();
+        await expect.element(input).toHaveValue("Fix the login bug");
+
+        config.resolve(await serverConfig());
+        await expect.element(page.getByText("Loading providers…")).not.toBeInTheDocument();
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+      } finally {
+        await view.cleanup();
+      }
+    });
+
+    it("says it is still loading when Enter comes before the controls", async () => {
+      const release = hold(controlsGate);
+      const toast = vi.spyOn(toastManager, "add");
+      const view = await renderHome([IDLE_THREAD]);
+      try {
+        const input = page.getByRole("textbox", { name: "What should we work on?" });
+        await input.fill("Fix the login bug");
+        await expect.element(page.getByRole("button", { name: "Send" })).toBeDisabled();
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() =>
+          expect(toast).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "info", title: "Still loading" }),
+          ),
+        );
+        expect(submitTurn).not.toHaveBeenCalled();
+        await expect.element(input).toHaveValue("Fix the login bug");
+
+        release();
+        await expect.element(page.getByRole("button", { name: "Send" })).toBeEnabled();
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() => expect(submitTurn).toHaveBeenCalledTimes(1));
+      } finally {
+        release();
+        await view.cleanup();
+      }
+    });
   });
 
   describe("triage queue", () => {
