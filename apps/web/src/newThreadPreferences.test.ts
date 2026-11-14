@@ -19,6 +19,23 @@ const preferences = {
 };
 
 describe("shared new-thread and scheduled-task defaults", () => {
+  it("preserves explicit project Medium while dropping remembered effort only", () => {
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      providers: { codex: { enabled: true } },
+    });
+    const result = resolveNewThreadPreferences(
+      {
+        id: projectId,
+        defaultModelSelection: createModelSelection(codex, "gpt-5", [
+          { id: "reasoningEffort", value: "medium" },
+        ]),
+      },
+      settings,
+      preferences,
+    );
+    expect(result.source).toBe("project");
+    expect(result.options?.codex?.reasoningEffort).toBe("medium");
+  });
   it("honors project instance disablement before remembered provider choices", () => {
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       providers: { claudeAgent: { enabled: true }, codex: { enabled: true } },
@@ -31,6 +48,7 @@ describe("shared new-thread and scheduled-task defaults", () => {
       instanceId: codex,
       model: DEFAULT_MODEL_BY_PROVIDER.codex,
       options: null,
+      source: "fallback",
     });
   });
 
@@ -50,7 +68,8 @@ describe("shared new-thread and scheduled-task defaults", () => {
     ).toEqual({
       provider: "claudeAgent",
       model: "claude-opus-5-5",
-      options: preferences.lastModelOptions,
+      options: null,
+      source: "remembered",
     });
   });
 
@@ -72,6 +91,7 @@ describe("shared new-thread and scheduled-task defaults", () => {
       instanceId: codex,
       model: "gpt-5",
       options: null,
+      source: "project",
     });
   });
 });

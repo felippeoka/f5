@@ -8,11 +8,15 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   type ProviderModelOptions,
 } from "@t3tools/contracts";
-import { providerSelectionsToModelOptions } from "./providerModelOptions";
+import {
+  providerSelectionsToModelOptions,
+  providerModelOptionsToSelections,
+} from "./providerModelOptions";
+import { isEffortSelection } from "./components/chat/effortLevels";
 import type { Project } from "./types";
 import type { ModelPreferencesState } from "./modelPreferencesStore";
 /** Shared project/remembered defaults for new conversations and scheduled conversations. */
-export function resolveNewThreadPreferences(
+function resolveRawNewThreadPreferences(
   project: Pick<Project, "id" | "defaultModelSelection" | "defaultModel"> | undefined,
   settings: ServerSettings,
   preferences: Pick<
@@ -71,4 +75,30 @@ export function resolveNewThreadPreferences(
     model: DEFAULT_MODEL_BY_PROVIDER[driver as ProviderKind],
     options: null,
   };
+}
+
+/** Remembered traits carry over, but new conversations choose their own effort. */
+export function resolveNewThreadPreferences(
+  ...args: Parameters<typeof resolveRawNewThreadPreferences>
+): ReturnType<typeof resolveRawNewThreadPreferences> & {
+  source: "project" | "remembered" | "fallback";
+} {
+  const [project, settings] = args;
+  const result = resolveRawNewThreadPreferences(...args);
+  const projectSelection = project?.defaultModelSelection;
+  const source =
+    projectSelection &&
+    resolveProjectProviderInstanceEnabled(settings, project?.id, projectSelection.instanceId)
+      ? "project"
+      : project?.defaultModel && result.model === project.defaultModel
+        ? "project"
+        : result.options != null
+          ? "remembered"
+          : "fallback";
+  if (source !== "remembered" || result.options == null) return { ...result, source };
+  const provider = result.provider ?? "codex";
+  const selections = providerModelOptionsToSelections(provider, result.options)?.filter(
+    (option) => !isEffortSelection(option.id, option.value),
+  );
+  return { ...result, source, options: providerSelectionsToModelOptions(provider, selections) };
 }
