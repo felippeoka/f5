@@ -3462,6 +3462,12 @@ export const OrchestrationDeleteWorkflowInput = Schema.Struct({
 });
 export type OrchestrationDeleteWorkflowInput = typeof OrchestrationDeleteWorkflowInput.Type;
 
+export const OrchestrationDeleteWorkflowResult = Schema.Union([
+  Schema.Struct({ deletedThreadIds: Schema.Array(ThreadId) }),
+  Schema.Void,
+]);
+export type OrchestrationDeleteWorkflowResult = typeof OrchestrationDeleteWorkflowResult.Type;
+
 export const OrchestrationArchiveWorkflowInput = OrchestrationDeleteWorkflowInput;
 export type OrchestrationArchiveWorkflowInput = typeof OrchestrationArchiveWorkflowInput.Type;
 
@@ -3684,24 +3690,15 @@ export const OrchestrationRpcSchemas = {
   },
   deleteWorkflow: {
     input: OrchestrationDeleteWorkflowInput,
-    output: Schema.Union([
-      Schema.Struct({ deletedThreadIds: Schema.Array(ThreadId) }),
-      Schema.Void,
-    ]),
+    output: OrchestrationDeleteWorkflowResult,
   },
   deleteCodeReviewWorkflow: {
     input: OrchestrationDeleteCodeReviewWorkflowInput,
-    output: Schema.Union([
-      Schema.Struct({ deletedThreadIds: Schema.Array(ThreadId) }),
-      Schema.Void,
-    ]),
+    output: OrchestrationDeleteWorkflowResult,
   },
   deleteInvestigationWorkflow: {
     input: OrchestrationDeleteInvestigationWorkflowInput,
-    output: Schema.Union([
-      Schema.Struct({ deletedThreadIds: Schema.Array(ThreadId) }),
-      Schema.Void,
-    ]),
+    output: OrchestrationDeleteWorkflowResult,
   },
   skipDocumentReaderPass: {
     input: OrchestrationSkipDocumentReaderPassInput,

@@ -428,6 +428,27 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             });
           }
           if (existingReceipt.value.status === "accepted") {
+            const command = envelope.command;
+            if (
+              (command.type === "project.workflow.delete" ||
+                command.type === "project.code-review-workflow.delete" ||
+                command.type === "project.investigation-workflow.delete") &&
+              command.deleteThreads === true
+            ) {
+              const rows = yield* sql<{ threadId: ThreadId }>`
+                SELECT stream_id AS "threadId" FROM orchestration_events
+                WHERE command_id = ${command.commandId}
+                  AND sequence <= ${receipt.resultSequence}
+                  AND event_type = 'thread.deleted'
+                ORDER BY sequence
+              `.pipe(
+                Effect.mapError(toPersistenceSqlError("OrchestrationEngine.readDeletedThreadIds")),
+              );
+              return {
+                sequence: receipt.resultSequence,
+                deletedThreadIds: rows.map((row) => row.threadId),
+              };
+            }
             return {
               sequence: existingReceipt.value.resultSequence,
             };

@@ -1,5 +1,8 @@
 import { startDeferredClientDiagnostics } from "./deferredClientDiagnostics";
-import { cleanupDeletedThread } from "../lib/deletedThreadCleanup";
+import {
+  cleanupDeletedThread,
+  cleanupDeletedThreadsFromSnapshot,
+} from "../lib/deletedThreadCleanup";
 import type { AppSettings } from "../appSettings";
 import { startSequenceReconciliation } from "./sequenceReconciliation";
 import { getWsConnectionState, subscribeWsConnectionState } from "../wsConnectionState";
@@ -632,8 +635,7 @@ export function createOrchestrationSyncController(deps: OrchestrationSyncControl
         syncStartupSnapshot(snapshot, { rewindDraftReadTicket });
         void invalidateWorkflowQueries(queryClient);
         if (!snapshotIsProvisional) {
-          for (const thread of snapshot.threads)
-            if (thread.deletedAt !== null) void cleanupDeletedThread(thread.id);
+          void cleanupDeletedThreadsFromSnapshot(snapshot.threads);
           useComposerMentionHistoryStore
             .getState()
             .retainThreads(

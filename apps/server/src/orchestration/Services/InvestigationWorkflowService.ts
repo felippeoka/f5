@@ -3,6 +3,7 @@ import type {
   InvestigationWorkflow,
   InvestigationWorkflowId,
   OrchestrationCreateInvestigationWorkflowInput,
+  OrchestrationDeleteWorkflowResult,
   OrchestrationRetryInvestigationWorkflowInput,
   ThreadId,
 } from "@t3tools/contracts";
@@ -20,7 +21,7 @@ export interface InvestigationWorkflowServiceShape {
   readonly deleteWorkflow: (
     workflowId: InvestigationWorkflowId,
     deleteThreads?: boolean,
-  ) => Effect.Effect<{ deletedThreadIds: import("@t3tools/contracts").ThreadId[] } | void, Error>;
+  ) => Effect.Effect<OrchestrationDeleteWorkflowResult, Error>;
   readonly retryWorkflow: (
     input: OrchestrationRetryInvestigationWorkflowInput,
   ) => Effect.Effect<void, Error>;

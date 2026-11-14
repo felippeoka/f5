@@ -10,6 +10,7 @@ import {
   type InvestigationWorkflowId,
   type PlanningWorkflowId,
   type ThreadId,
+  type OrchestrationDeleteWorkflowResult,
 } from "@t3tools/contracts";
 
 import { survivingThreadAfterDeletion } from "./lib/threadOrdering";
@@ -19,6 +20,26 @@ import { readNativeApi } from "./nativeApi";
 import type { Project, Thread } from "./types";
 import { toastManager } from "./components/ui/toast";
 import { getOrphanedWorktreePathForThread } from "./worktreeCleanup";
+import { useStore } from "./store";
+
+function offerOrphanedWorktreeCleanup(
+  deletedThreads: ReadonlyArray<Thread>,
+  survivors: ReadonlyArray<Thread>,
+  projects: ReadonlyArray<Project>,
+) {
+  const checkedPaths = new Set<string>();
+  const removalRows: WorktreeRemovalRow[] = [];
+  for (const thread of deletedThreads) {
+    const project = projects.find((entry) => entry.id === thread.projectId);
+    const orphanedPath = getOrphanedWorktreePathForThread([...survivors, thread], thread.id);
+    if (!project || !orphanedPath) continue;
+    const pathKey = normalizeProjectPathForComparison(orphanedPath);
+    if (checkedPaths.has(pathKey)) continue;
+    checkedPaths.add(pathKey);
+    removalRows.push({ projectId: project.id, path: orphanedPath });
+  }
+  if (removalRows.length) void useWorktreeRemovalDialogStore.getState().request(removalRows);
+}
 
 export type WorkflowArchiveKind = "planning" | "codeReview" | "investigation";
 export type WorkflowArchiveId = PlanningWorkflowId | CodeReviewWorkflowId | InvestigationWorkflowId;
@@ -142,8 +163,12 @@ export async function deleteWorkflow(input: {
     }
   }
 
+  // Domain events may remove the children before the RPC resolves.
+  const beforeDeletion = useStore.getState();
+  const threadsBeforeDeletion = [...beforeDeletion.threads];
+  const projectsBeforeDeletion = [...beforeDeletion.projects];
   try {
-    let result: { deletedThreadIds: ReadonlyArray<ThreadId> } | void;
+    let result: OrchestrationDeleteWorkflowResult;
     if (input.workflowType === "planning") {
       result = await api.orchestration.deleteWorkflow({
         workflowId: input.workflowId as PlanningWorkflowId,
@@ -160,7 +185,15 @@ export async function deleteWorkflow(input: {
         deleteThreads: true,
       });
     }
-    if (result) await Promise.all(result.deletedThreadIds.map(cleanupDeletedThread));
+    if (result && useStore.getState().backendGeneration === beforeDeletion.backendGeneration) {
+      const deletedIds = new Set(result.deletedThreadIds);
+      await Promise.all([...deletedIds].map(cleanupDeletedThread));
+      offerOrphanedWorktreeCleanup(
+        threadsBeforeDeletion.filter((thread) => deletedIds.has(thread.id)),
+        useStore.getState().threads.filter((thread) => !deletedIds.has(thread.id)),
+        projectsBeforeDeletion,
+      );
+    }
   } catch (error) {
     toastManager.add({
       type: "error",
@@ -241,18 +274,10 @@ export async function deleteThreadsWithCleanup(
     if (fallback) input.navigateToThread(fallback.id);
     else input.navigateHome();
   }
-  const checkedPaths = new Set<string>();
-  const removalRows: WorktreeRemovalRow[] = [];
-  for (const threadId of succeeded) {
-    const thread = input.threads.find((entry) => entry.id === threadId)!;
-    const project = input.projects.find((entry) => entry.id === thread.projectId);
-    const orphanedPath = getOrphanedWorktreePathForThread([...survivors(), thread], threadId);
-    if (!project || !orphanedPath) continue;
-    const pathKey = normalizeProjectPathForComparison(orphanedPath);
-    if (checkedPaths.has(pathKey)) continue;
-    checkedPaths.add(pathKey);
-    removalRows.push({ projectId: project.id, path: orphanedPath });
-  }
-  void useWorktreeRemovalDialogStore.getState().request(removalRows);
+  offerOrphanedWorktreeCleanup(
+    input.threads.filter((thread) => deletedIds.has(thread.id)),
+    survivors(),
+    input.projects,
+  );
   return { succeeded, failures };
 }

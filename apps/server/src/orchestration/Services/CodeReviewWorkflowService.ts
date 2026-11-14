@@ -3,6 +3,7 @@ import type {
   CodeReviewWorkflow,
   CodeReviewWorkflowId,
   OrchestrationCreateCodeReviewWorkflowInput,
+  OrchestrationDeleteWorkflowResult,
   OrchestrationPostCodeReviewWorkflowInput,
   OrchestrationPostCodeReviewWorkflowResult,
   OrchestrationRetryCodeReviewWorkflowInput,
@@ -25,7 +26,7 @@ export interface CodeReviewWorkflowServiceShape {
   readonly deleteWorkflow: (
     workflowId: CodeReviewWorkflowId,
     deleteThreads?: boolean,
-  ) => Effect.Effect<{ deletedThreadIds: import("@t3tools/contracts").ThreadId[] } | void, Error>;
+  ) => Effect.Effect<OrchestrationDeleteWorkflowResult, Error>;
   readonly retryWorkflow: (
     input: OrchestrationRetryCodeReviewWorkflowInput,
   ) => Effect.Effect<OrchestrationRetryWorkflowResult, Error>;

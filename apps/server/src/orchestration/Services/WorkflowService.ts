@@ -3,6 +3,7 @@ import {
   type OrchestrationSkipDocumentReaderPassInput,
   type OrchestrationSkipDocumentReaderPassResult,
   type OrchestrationCreateWorkflowInput,
+  type OrchestrationDeleteWorkflowResult,
   type OrchestrationCreateDocumentWorkflowInput,
   type OrchestrationRetryWorkflowInput,
   type OrchestrationRetryWorkflowResult,
@@ -34,7 +35,7 @@ export interface WorkflowServiceShape {
   readonly deleteWorkflow: (
     workflowId: PlanningWorkflowId,
     deleteThreads?: boolean,
-  ) => Effect.Effect<{ deletedThreadIds: import("@t3tools/contracts").ThreadId[] } | void, Error>;
+  ) => Effect.Effect<OrchestrationDeleteWorkflowResult, Error>;
   readonly retryWorkflow: (
     input: OrchestrationRetryWorkflowInput,
   ) => Effect.Effect<OrchestrationRetryWorkflowResult, Error>;

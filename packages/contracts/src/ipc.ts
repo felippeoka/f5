@@ -480,6 +480,7 @@ import type {
   OrchestrationDeleteCodeReviewWorkflowInput,
   OrchestrationDeleteInvestigationWorkflowInput,
   OrchestrationDeleteWorkflowInput,
+  OrchestrationDeleteWorkflowResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetStartupSnapshotInput,
@@ -1652,13 +1653,13 @@ export interface NativeApi {
     ) => Promise<void>;
     deleteWorkflow: (
       input: OrchestrationDeleteWorkflowInput,
-    ) => Promise<{ deletedThreadIds: ReadonlyArray<ThreadId> } | void>;
+    ) => Promise<OrchestrationDeleteWorkflowResult>;
     deleteCodeReviewWorkflow: (
       input: OrchestrationDeleteCodeReviewWorkflowInput,
-    ) => Promise<{ deletedThreadIds: ReadonlyArray<ThreadId> } | void>;
+    ) => Promise<OrchestrationDeleteWorkflowResult>;
     deleteInvestigationWorkflow: (
       input: OrchestrationDeleteInvestigationWorkflowInput,
-    ) => Promise<{ deletedThreadIds: ReadonlyArray<ThreadId> } | void>;
+    ) => Promise<OrchestrationDeleteWorkflowResult>;
     skipDocumentReaderPass: (
       input: OrchestrationSkipDocumentReaderPassInput,
     ) => Promise<OrchestrationSkipDocumentReaderPassResult>;
