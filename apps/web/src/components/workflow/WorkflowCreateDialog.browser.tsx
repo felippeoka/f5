@@ -1588,10 +1588,9 @@ describe("WorkflowCreateDialog", () => {
     try {
       const editor = page.getByTestId("composer-editor");
       await editor.fill("@docs/AGENTS.md ");
-      // Let the editor's controlled draft commit before dispatching the synthetic drop.
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
+      // The enabled action observes the controlled parent draft, rather than
+      // relying on a fixed number of frames after the editor's DOM update.
+      await vi.waitFor(() => expect(createWorkflowButton().disabled).toBe(false));
       const transfer = new DataTransfer();
       writeFileTreeDragMention(transfer, {
         projectId: "project-1",
@@ -1607,6 +1606,18 @@ describe("WorkflowCreateDialog", () => {
       );
       const chipCount = () => document.querySelectorAll("[data-composer-mention-chip]").length;
       await vi.waitFor(() => expect(chipCount()).toBe(1), { timeout: 5000 });
+      // Drop schedules focusAtEnd on a frame after committing the mention.
+      // Deletion must start from that caret, not the selection left by fill().
+      await vi.waitFor(() => {
+        const surface = editor.element();
+        const selection = window.getSelection();
+        expect(document.activeElement).toBe(surface);
+        expect(selection?.isCollapsed).toBe(true);
+        const range = document.createRange();
+        range.selectNodeContents(surface);
+        range.setEnd(selection!.anchorNode!, selection!.anchorOffset);
+        expect(range.toString()).toBe(surface.textContent);
+      });
       await userEvent.keyboard("{Backspace}{Backspace}");
       await vi.waitFor(() => expect(chipCount()).toBe(0));
       expect(editor.element().textContent).toContain("@docs/AGENTS.md");
