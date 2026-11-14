@@ -68,7 +68,11 @@ it("cleans retained startup state, preserves local drafts without tombstones and
 
 it("stops a snapshot cleanup batch when the backend changes", async () => {
   let resolveClose!: () => void;
-  close.mockReturnValue(new Promise<void>((resolve) => { resolveClose = resolve; }));
+  close.mockReturnValue(
+    new Promise<void>((resolve) => {
+      resolveClose = resolve;
+    }),
+  );
   const snapshot = Array.from({ length: 9 }, (_, index) => ({
     id: ThreadId.makeUnsafe("batch-" + index),
     deletedAt: "2026-01-01T00:00:00Z",
