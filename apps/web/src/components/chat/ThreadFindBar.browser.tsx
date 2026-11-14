@@ -58,6 +58,24 @@ it("offers retry for search and navigation failures", async () => {
   await page.getByRole("button", { name: "Retry" }).click();
   await expect.element(page.getByRole("status")).toHaveTextContent("2 of 2");
 });
+
+it("closes with the X button by mouse and keyboard without navigating", async () => {
+  const onClose = vi.fn();
+  const screen = await render(
+    <ThreadFindBar threadId={threadId} onMatch={async () => {}} onClose={onClose} />,
+  );
+  try {
+    const close = page.getByRole("button", { name: "Close find" });
+    await close.click();
+    expect(onClose).toHaveBeenCalledOnce();
+    (close.element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(api.searchThread).not.toHaveBeenCalled();
+  } finally {
+    await screen.unmount();
+  }
+});
 it("reselects a single match on Next and aborts the previous request", async () => {
   api.searchThread.mockImplementation(async () => ({ ...result(), totalMatches: 1 }));
   const signals: AbortSignal[] = [];

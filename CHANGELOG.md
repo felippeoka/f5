@@ -4,10 +4,23 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- Conversation usage limits above the sidebar profile, with pinning and account-scoped refresh.
+- Separate prompt and response navigation rails, optional follow controls, and visible earlier-history loading.
+- Markdown continuation in the composer, supported High effort defaults, and compact per-turn token footers.
+- Workflow archive, restore and explicit deletion actions, with shared-thread protection and atomic child deletion.
+- VS Code and file-manager actions for local paths and project breadcrumbs.
+
+### Changed
+
+- Updated F5 icons, sidebar/header controls, model ordering, Find closing and composer readiness.
+- Usage limits use a shared snapshot cache and serialized account refreshes.
+
 ### Fixed
 
 - Codex turns now record prompt-cache usage across all model requests, restoring cache history and cache-miss indicators while keeping context occupancy separate. Previously unreported historical usage remains unavailable.
-- Pull requests and Usage are back in the sidebar's top navigation, next to Home and Scheduled, with the Pull requests "needs you" badge. In 0.1.9 they moved to the sidebar footer, where they took up no space and could not be seen or clicked. The Pull requests page now shows Settings in the footer again, as it did before 0.1.9; Settings and Usage keep their Back action.
+- Pull requests is back in the sidebar's primary navigation with its "needs you" badge. Usage limits sit above the profile footer and link to the full Usage page. The Pull requests page shows Settings in the footer; Settings and Usage retain their Back action.
 
 ### Changed
 

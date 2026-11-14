@@ -817,6 +817,7 @@ export async function ensureThreadHistoryBackfill(
   })().finally(() => {
     if (inFlightThreadHistoryBackfills.get(backfillKey) === backfillPromise) {
       inFlightThreadHistoryBackfills.delete(backfillKey);
+      useStore.getState().cancelThreadHistoryBackfill(threadId, expectedGeneration);
     }
   });
 
