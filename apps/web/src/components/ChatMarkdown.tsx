@@ -42,10 +42,8 @@ import type { Components, ExtraProps } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useDiffWordWrap } from "../appSettings";
-import { openFileInEditor } from "../lib/openFileInEditor";
+import { openMarkdownFileLink } from "../lib/openMarkdownFileLink";
 import { showLocalPathContextMenu } from "../lib/localPathContextMenu";
-import { findWorkspaceBasenameFile } from "../lib/workspaceBasename";
-import { readNativeApi } from "../nativeApi";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
@@ -65,11 +63,9 @@ import {
   collectMarkdownLinkHrefs,
   chatMarkdownUrlTransform,
   isMarkdownFileLinkLabel,
-  resolveMarkdownFileEditorTarget,
   resolveMarkdownFileLinkMeta,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
-import { inferEntryKindFromPath } from "../vscode-icons";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { ThreadReferenceChip } from "./chat/ThreadReferenceChip";
 import { threadIdOfThreadReferenceUrl } from "@t3tools/shared/threadReferences";
@@ -238,25 +234,11 @@ function MarkdownFileChip({
   anchorProps?: React.AnchorHTMLAttributes<HTMLAnchorElement>;
 }) {
   const handleFileNavigation = useFileNavigation();
-  const entryKind = meta.line ? "file" : inferEntryKindFromPath(meta.filePath);
   const positionSuffix = meta.line ? `:${meta.line}${meta.column ? `:${meta.column}` : ""}` : "";
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    if (entryKind === "directory") {
-      void openFileInEditor(meta.filePath, "vscode");
-      return;
-    }
-    if (handleFileNavigation(meta.targetPath)) {
-      return;
-    }
-    const api = readNativeApi();
-    // The lookup runs after the editor grant is captured, so a slow search keeps the click valid.
-    void openFileInEditor(meta.targetPath, undefined, () =>
-      resolveMarkdownFileEditorTarget(meta, cwd, (name) =>
-        api && cwd ? findWorkspaceBasenameFile(api, cwd, name) : Promise.resolve(null),
-      ),
-    );
+    void openMarkdownFileLink(meta, cwd, handleFileNavigation);
   };
 
   return (
@@ -298,7 +280,7 @@ function MarkdownFileChip({
         >
           <VscodeEntryIcon
             pathValue={meta.filePath}
-            kind={entryKind}
+            kind={/[\\/]$/.test(meta.filePath) ? "directory" : "file"}
             theme={theme}
             className="chat-markdown-file-link-icon"
           />

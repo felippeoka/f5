@@ -89,9 +89,13 @@ export function resolveNewThreadPreferences(
 ): ReturnType<typeof resolveRawNewThreadPreferences> {
   const result = resolveRawNewThreadPreferences(...args);
   if (result.source !== "remembered" || result.options == null) return result;
-  const provider = result.provider ?? "codex";
-  const selections = providerModelOptionsToSelections(provider, result.options)?.filter(
-    (option) => !isEffortSelection(option.id, option.value),
-  );
-  return { ...result, options: providerSelectionsToModelOptions(provider, selections) };
+  let options: ProviderModelOptions = {};
+  for (const provider of Object.keys(result.options)) {
+    if (!isKnownProviderKind(provider)) continue;
+    const selections = providerModelOptionsToSelections(provider, result.options)?.filter(
+      (option) => !isEffortSelection(option.id, option.value),
+    );
+    options = { ...options, ...providerSelectionsToModelOptions(provider, selections) };
+  }
+  return { ...result, options: Object.keys(options).length ? options : null };
 }

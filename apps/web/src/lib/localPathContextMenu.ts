@@ -2,6 +2,7 @@ import { withEditorOpenAuthorization } from "../editorPreferences";
 import { readNativeApi } from "../nativeApi";
 import { toastManager } from "../components/ui/toast";
 import { desktopIpcErrorMessage } from "./desktopIpcError";
+import { isMacPlatform } from "./utils";
 
 /** Native menu selections authorize exactly this path, even after the original gesture expires. */
 export async function showLocalPathContextMenu(
@@ -16,7 +17,7 @@ export async function showLocalPathContextMenu(
         { id: "open-in-editor", label: "Open in VS Code" },
         {
           id: "reveal-in-file-manager",
-          label: navigator.platform.startsWith("Mac") ? "Show in Finder" : "Show in file manager",
+          label: isMacPlatform(navigator.platform) ? "Show in Finder" : "Show in file manager",
         },
       ],
       position,

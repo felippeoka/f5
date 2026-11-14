@@ -19,6 +19,28 @@ const preferences = {
 };
 
 describe("shared new-thread and scheduled-task defaults", () => {
+  it.each(["codex", undefined] as const)(
+    "preserves non-effort options for every remembered provider (last provider %s)",
+    (lastProvider) => {
+      const result = resolveNewThreadPreferences(undefined, DEFAULT_SERVER_SETTINGS, {
+        lastProvider: lastProvider ?? null,
+        lastModelByProvider: {},
+        lastModelOptions: {
+          codex: { reasoningEffort: "medium", fastMode: true },
+          claudeAgent: { effort: "low", thinking: false, fastMode: true, contextWindow: "1m" },
+          cursor: { reasoning: "medium", thinking: false, contextWindow: "200k" },
+          opencode: { variant: "high", agent: "build" },
+          pi: { thinking: "minimal" },
+        },
+      });
+      expect(result.options).toEqual({
+        codex: { fastMode: true },
+        claudeAgent: { thinking: false, fastMode: true, contextWindow: "1m" },
+        cursor: { thinking: false, contextWindow: "200k" },
+        opencode: { agent: "build" },
+      });
+    },
+  );
   it("identifies remembered provider choices even without remembered options", () => {
     expect(
       resolveNewThreadPreferences(undefined, DEFAULT_SERVER_SETTINGS, {

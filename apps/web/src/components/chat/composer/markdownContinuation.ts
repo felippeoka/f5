@@ -7,13 +7,28 @@ export interface MarkdownContinuation {
 export function markdownContinuation(value: string, cursor: number): MarkdownContinuation | null {
   const before = value.slice(0, cursor);
   const line = before.slice(before.lastIndexOf("\n") + 1);
-  let fence: string | undefined;
+  let fence: { marker: string; quoteDepth: number } | undefined;
   for (const previous of before.split("\n").slice(0, -1)) {
-    const match = previous.match(/^\s{0,3}(`{3,}|~{3,})/);
+    const container = previous.match(/^[ \t]*(?:>[ \t]*)+/)?.[0] ?? "";
+    const quoteDepth = (container.match(/>/g) ?? []).length;
+    // Leaving a quote also leaves its fenced block.
+    if (fence && quoteDepth < fence.quoteDepth) fence = undefined;
+    const match = previous.slice(container.length).match(/^[ ]{0,3}(`{3,}|~{3,})(.*)$/);
     if (!match) continue;
-    if (!fence) fence = match[1];
-    else if (match[1]![0] === fence[0] && match[1]!.length >= fence.length) fence = undefined;
+    const marker = match[1]!;
+    if (!fence) {
+      if (marker[0] === "`" && match[2]!.includes("`")) continue;
+      fence = { marker, quoteDepth };
+    } else if (
+      quoteDepth === fence.quoteDepth &&
+      marker[0] === fence.marker[0] &&
+      marker.length >= fence.marker.length &&
+      !match[2]!.trim()
+    )
+      fence = undefined;
   }
+  const currentQuoteDepth = (line.match(/^[ \t]*(?:>[ \t]*)+/)?.[0].match(/>/g) ?? []).length;
+  if (fence && currentQuoteDepth < fence.quoteDepth) fence = undefined;
   if (fence) return null;
   const quote = line.match(/^([ \t]*(?:>[ \t]*)+)/)?.[0] ?? "";
   const body = line.slice(quote.length);

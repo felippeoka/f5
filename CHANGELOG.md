@@ -17,24 +17,23 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 - Opt into **Proactive panels** in Conversation settings to open linked pull requests and completed-turn diffs. Manual panel choices take priority and dismissed turn diffs stay dismissed.
 - Linux builds include a Debian/Ubuntu package alongside the AppImage. Installed Debian packages can download and install updates from F5.
 
-### Changed
-
-- Updated F5 icons, sidebar/header controls, model ordering, Find closing and composer readiness.
-- Usage limits use a shared snapshot cache and serialized account refreshes.
-
 ### Fixed
+
+- Workflow deletion retries failed provider shutdowns and offers one cleanup prompt for orphaned worktrees. Reconnects clean retained deleted-thread state without replaying every historical deletion.
 
 - Forgejo PR watches pass once required checks finish without failure, even if optional checks fail. Skipped jobs and warnings no longer keep watches pending. PR Hub refreshes Forgejo check status during polling and handles server-capped status pages and same-second check updates.
 - Agent Bridge tool calls whose text contains Unicode line or paragraph separators no longer fail with a parse error.
 - Codex turns now record prompt-cache usage across all model requests, restoring cache history and cache-miss indicators while keeping context occupancy separate. Previously unreported historical usage remains unavailable.
-- Pull requests is back in the sidebar's primary navigation with its "needs you" badge. Usage limits sit above the profile footer and link to the full Usage page. The Pull requests page shows Settings in the footer; Settings and Usage retain their Back action.
+- Pull requests is back in the sidebar's primary navigation with its "needs you" badge, alongside Usage. Usage limits sit above the profile footer and link to the full Usage page. The Pull requests page shows Settings in the footer; Settings and Usage retain their Back action.
 - Proactive panels preserve manual choices across thread visits, keep dismissed PR panels closed, and open turn diffs without stale file previews or extra browser history entries. Rejected background message loads release their event-buffer retainers so stopped threads can leave the cache.
 - Project image choices wait for **Save image** before changing the saved icon. Linux downloads offer AppImage alongside Debian packages.
 - Background thread sync batches updates and backs off failed loads. Its desktop-only switch is disabled when using F5 in a browser.
-
 - Large worktree submodule clones can run past five minutes while reporting progress. Updates with no output for five minutes stop with a warning instead of leaving worktree preparation stuck.
 
 ### Changed
+
+- Updated F5 icons, sidebar/header controls, model ordering, Find closing and composer readiness.
+- Usage limits use a shared snapshot cache and serialized account refreshes.
 
 - Home is now a triage queue. Threads are grouped into **Needs a decision**, **Ready for review** (failed turns and finished work you have not opened), **Running** (with one row per active workflow) and **Pinned**, and the pane beside the queue shows the selected thread's request, error or last reply without opening it. From that pane you can approve or decline a request, answer a question, implement or revise a plan, resume a paused queue, reply to finished or failed work and queue a message behind a running turn; messages use the thread's own model and modes. `J`/`K` move, `O` opens, `E` settles, `H` snoozes, `P` pins and `R` starts a reply; `Enter` approves once or implements the plan (and opens other threads), `D` declines; `mod+shift+H` opens Home from anywhere. A line above the queue counts pull requests and upstream topics waiting on you and shows the next scheduled run, a usage limit above 50% and low disk space. The greeting, the resume banner, the Recent list and the `mod+1`–`9` project shortcut are gone from Home; recent threads are in the sidebar's Recent view.
 - The box at the top of Home starts the thread itself. Pick the project, model, effort, **Agent** or **Plan**, access and **Local** or **New worktree**, then press `Enter`: the thread starts in the background and Home stays open, and `mod+Enter` also opens it. The box follows the **Send shortcut** setting: if it asks for `mod+Enter`, `Enter` adds a line and `mod+Enter` sends and stays. A send that fails keeps your text, and sending the same text again with the same project and settings after a lost connection starts one thread, not two. The confirmation's **Open** button waits for the new thread to arrive before it opens it. Text that begins with a `/` command or a skill, and anything that needs attachments or mentions, goes to the full composer, which the expand button opens with your text and settings.

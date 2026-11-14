@@ -283,6 +283,58 @@ function preloadThreadFileChange(input: {
 }
 
 describe("MessagesTimeline", () => {
+  it("keeps a paginated turn start unknown until its persisted timing is available", async () => {
+    const { deriveTimelineEntries } = await import("../../session-logic");
+    const { buildTimelineRows, createTimelineRowCache } = await import("./MessagesTimeline");
+    const turnId = TurnId.makeUnsafe("partially-loaded-turn");
+    const answer = {
+      id: MessageId.makeUnsafe("partial-answer"),
+      role: "assistant" as const,
+      text: "Only the last part is loaded",
+      createdAt: "2026-11-14T12:40:31.000Z",
+      completedAt: "2026-11-14T12:40:40.000Z",
+      streaming: false,
+      turnId,
+    };
+    const input = {
+      timelineEntries: deriveTimelineEntries([answer], [], [], []),
+      completionDividerBeforeEntryId: null,
+      completionSummary: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      liveActivity: null,
+      expandMcpToolCalls: false,
+      cache: createTimelineRowCache(),
+    };
+    expect(buildTimelineRows(input).find((row) => row.id === answer.id)).toMatchObject({
+      showCompletionDivider: false,
+      completionSummary: null,
+      durationStart: undefined,
+    });
+    expect(buildTimelineRows(input).find((row) => row.id === answer.id)).not.toHaveProperty(
+      "completionStartedAt",
+    );
+    expect(
+      buildTimelineRows({
+        ...input,
+        turnDiffSummaryByTurnId: new Map([
+          [
+            turnId,
+            {
+              turnId,
+              files: [],
+              startedAt: "2026-11-14T12:40:00.000Z",
+              completedAt: answer.completedAt,
+            },
+          ],
+        ]),
+      }).find((row) => row.id === answer.id),
+    ).toMatchObject({
+      completionStartedAt: "2026-11-14T12:40:00.000Z",
+      completionSummary: "Worked for 40s",
+      durationStart: "2026-11-14T12:40:00.000Z",
+    });
+  });
   it("shows the latest tool-free completion and refreshes lifecycle metadata on the streaming fast path", async () => {
     const { createTimelineEntryCache, deriveTimelineEntries } = await import("../../session-logic");
     const { buildTimelineRows, createTimelineRowCache } = await import("./MessagesTimeline");

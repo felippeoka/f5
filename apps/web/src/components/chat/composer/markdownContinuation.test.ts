@@ -35,3 +35,21 @@ it("resumes lists after a closed fence and uses the caret's line", () => {
     text: "\n2. ",
   });
 });
+
+it.each([
+  "```\n```still-code\n1. literal",
+  "~~~\n~~~still-code\n1. literal",
+  "> ```ts\n> 1. literal",
+  "> > ~~~~\n> > ~~~\n> > - literal",
+])("does not continue lists inside a fenced container: %s", (value) => {
+  expect(markdownContinuation(value, value.length)).toBeNull();
+});
+
+it.each(["> ```\n> code\n> ```   \n> 1. Next", "> ```\n> code\n1. Next"])(
+  "continues lists after leaving or closing a quoted fence: %s",
+  (value) => {
+    expect(markdownContinuation(value, value.length)?.text).toBe(
+      value.endsWith("> 1. Next") ? "\n> 2. " : "\n2. ",
+    );
+  },
+);

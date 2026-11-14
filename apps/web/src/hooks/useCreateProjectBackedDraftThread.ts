@@ -64,9 +64,7 @@ export function seedDraftThreadFromModelPreferences(
   if (preference.provider) draft.setProvider(threadId, preference.provider);
   if (preference.instanceId) draft.setProviderInstance(threadId, preference.instanceId);
   if (preference.model) draft.setModel(threadId, preference.model);
-  if (preference.options !== undefined) {
-    draft.setModelOptions(threadId, preference.options);
-  }
+  if (preference.options !== undefined) draft.setModelOptions(threadId, preference.options);
 }
 
 function maybeMarkOnboardingLiteCompleted(

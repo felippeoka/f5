@@ -2077,7 +2077,7 @@ type TimelineRow =
       message: TimelineMessage;
       /** A message-mode answer renders as its question's Q&A card. */
       userInput?: TimelineMessageUserInput;
-      durationStart: string;
+      durationStart: string | undefined;
       showCompletionDivider: boolean;
       completionSummary: string | null;
       completionStartedAt?: string;
@@ -2191,12 +2191,14 @@ function resolveWorkGroupRenderState(
 // Live clocks are leaves on the shared 1 Hz ticker so a tick re-renders only
 // the text that shows elapsed time, never the timeline or its rows.
 function LiveMessageMeta(props: {
-  durationStart: string;
+  durationStart: string | undefined;
   completedAt: string | undefined;
   streaming: boolean;
 }) {
   const nowIso = useNowIso(props.streaming);
-  const duration = formatElapsed(props.durationStart, props.streaming ? nowIso : props.completedAt);
+  const duration = props.durationStart
+    ? formatElapsed(props.durationStart, props.streaming ? nowIso : props.completedAt)
+    : null;
   return duration ? `${duration} • ` : null;
 }
 
@@ -5392,14 +5394,16 @@ export function buildTimelineRows(input: {
   // in component state: this also survives reloads and loading older turns.
   const lastAssistantByTurn = new Map<TurnId, string>();
   const startByTurn = new Map<TurnId, string>();
+  const promptStartByMessageId = new Map<string, string>();
   let lastUserAt: string | undefined;
   for (const entry of timelineEntries) {
     if (entry.kind !== "message") continue;
     const message = entry.message;
     if (message.role === "user") lastUserAt = message.createdAt;
+    if (lastUserAt) promptStartByMessageId.set(message.id, lastUserAt);
     if (!message.turnId) continue;
-    if (!startByTurn.has(message.turnId)) {
-      startByTurn.set(message.turnId, lastUserAt ?? message.createdAt);
+    if (!startByTurn.has(message.turnId) && lastUserAt) {
+      startByTurn.set(message.turnId, lastUserAt);
     }
     if (message.role === "assistant") lastAssistantByTurn.set(message.turnId, entry.id);
   }
@@ -5538,7 +5542,7 @@ export function buildTimelineRows(input: {
     const completionStartedAt =
       turnSummary?.startedAt ??
       (turnId ? startByTurn.get(turnId) : undefined) ??
-      durationStartByMessageId.get(message.id);
+      promptStartByMessageId.get(message.id);
     const completionCompletedAt = turnSummary?.completedAt ?? message.completedAt;
     const isHistoricalCompletion =
       message.role === "assistant" &&
@@ -5559,7 +5563,11 @@ export function buildTimelineRows(input: {
         : input.completionSummary
       : null;
     const durationStart =
-      durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
+      isHistoricalCompletion || isLatestCompletion
+        ? completionStartedAt
+        : promptStartByMessageId.has(message.id)
+          ? durationStartByMessageId.get(message.id)
+          : undefined;
     nextRows.push(
       reuse(
         timelineEntry.id,

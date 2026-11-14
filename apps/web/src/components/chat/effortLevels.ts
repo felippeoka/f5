@@ -101,7 +101,9 @@ const EFFORT_DESCRIPTOR_IDS = new Set([
 /** Only string selections are effort levels: "thinking" can also be a boolean toggle. */
 export function isEffortSelection(id: string, value: unknown): boolean {
   return (
-    EFFORT_DESCRIPTOR_IDS.has(id) && typeof value === "string" && getEffortLevel(value) !== null
+    EFFORT_DESCRIPTOR_IDS.has(id) &&
+    typeof value === "string" &&
+    (getEffortLevel(value) !== null || value === "off" || value === "none" || value === "minimal")
   );
 }
 

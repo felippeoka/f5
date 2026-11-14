@@ -2583,10 +2583,21 @@ export default memo(function ChatView({
   );
   const historyThreadId = activeThread?.id ?? null;
   const historyStage = activeThreadHistory.stage;
+  const olderHistoryControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => olderHistoryControllerRef.current?.abort(), [historyThreadId]);
   const retryOlderTimelineHistory = useCallback(() => {
-    void loadOlderTimelineHistory(new AbortController().signal).catch((error) => {
-      console.warn("Failed to load earlier conversation history.", error);
-    });
+    olderHistoryControllerRef.current?.abort();
+    const controller = new AbortController();
+    olderHistoryControllerRef.current = controller;
+    void loadOlderTimelineHistory(controller.signal)
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          console.warn("Failed to load earlier conversation history.", error);
+      })
+      .finally(() => {
+        if (olderHistoryControllerRef.current === controller)
+          olderHistoryControllerRef.current = null;
+      });
   }, [loadOlderTimelineHistory]);
   // Memoized so a ChatView render that changes nothing in the timeline (opening an image,
   // a dialog) keeps the timeline's props equal and skips its render.
