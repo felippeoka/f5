@@ -66,3 +66,18 @@ it("preserves line navigation and the preferred editor when the viewer declines"
   expect(mocks.list).not.toHaveBeenCalled();
   expect(mocks.open).toHaveBeenCalledWith("/repo/Makefile:7:2", "cursor", "captured-grant");
 });
+
+it("keeps the failed editor target in the visible error", async () => {
+  mocks.navigate.mockReturnValue(false);
+  mocks.open.mockRejectedValue(new Error("Editor launch failed"));
+  await openMarkdownFileLink(
+    resolveMarkdownFileLinkMeta("file:///tmp/export/report.json")!,
+    "/repo",
+    mocks.navigate,
+  );
+  expect(mocks.toast).toHaveBeenCalledWith(
+    expect.objectContaining({
+      description: "/tmp/export/report.json: Editor launch failed",
+    }),
+  );
+});

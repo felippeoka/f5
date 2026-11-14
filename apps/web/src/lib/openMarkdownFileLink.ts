@@ -13,6 +13,7 @@ export async function openMarkdownFileLink(
   cwd: string | undefined,
   navigateFile: (target: string) => boolean,
 ): Promise<void> {
+  let reportedPath = meta.targetPath;
   try {
     const api = readNativeApi();
     if (!api) throw new Error("Local file actions are unavailable.");
@@ -43,6 +44,7 @@ export async function openMarkdownFileLink(
         : await resolveMarkdownFileEditorTarget(meta, cwd, (name) =>
             cwd ? findWorkspaceBasenameFile(api, cwd, name) : Promise.resolve(null),
           );
+      reportedPath = target;
       const editor = directory
         ? "vscode"
         : resolveAndPersistPreferredEditor((await api.server.getConfig()).availableEditors);
@@ -54,8 +56,7 @@ export async function openMarkdownFileLink(
     toastManager.add({
       type: "error",
       title: "Unable to open local path",
-      description:
-        error instanceof Error ? error.message : "An unexpected file action error occurred.",
+      description: `${reportedPath}: ${error instanceof Error ? error.message : "An unexpected file action error occurred."}`,
     });
   }
 }
