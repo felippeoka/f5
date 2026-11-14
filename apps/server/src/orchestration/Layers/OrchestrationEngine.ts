@@ -909,7 +909,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             );
           }
         }
-        return { sequence: committedCommand.lastSequence };
+        return {
+          sequence: committedCommand.lastSequence,
+          ...(committedCommand.committedEvents.some((event) => event.type === "thread.deleted")
+            ? {
+                deletedThreadIds: committedCommand.committedEvents.flatMap((event) =>
+                  event.type === "thread.deleted" ? [event.payload.threadId] : [],
+                ),
+              }
+            : {}),
+        };
       }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
     ).pipe(
       Effect.flatMap((exit) =>

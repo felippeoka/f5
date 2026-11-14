@@ -4063,8 +4063,23 @@ const make = Effect.gen(function* () {
           break;
         }
         case "thread.deleted":
-          threadProviderOptions.delete(event.payload.threadId);
-          threadModelOptions.delete(event.payload.threadId);
+          yield* withThreadTurnGate(
+            event.payload.threadId,
+            providerService.stopSession({ threadId: event.payload.threadId }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logError("Failed to stop provider for deleted thread", {
+                  threadId: event.payload.threadId,
+                  cause,
+                }),
+              ),
+              Effect.ensuring(
+                Effect.sync(() => {
+                  threadProviderOptions.delete(event.payload.threadId);
+                  threadModelOptions.delete(event.payload.threadId);
+                }),
+              ),
+            ),
+          );
           break;
         case "thread.turn-start-requested":
           yield* processTurnStartRequested(event);

@@ -31,7 +31,10 @@ export interface WorkflowServiceShape {
   readonly createWorkflow: (input: CreateWorkflowInput) => Effect.Effect<PlanningWorkflowId, Error>;
   readonly archiveWorkflow: (workflowId: PlanningWorkflowId) => Effect.Effect<void, Error>;
   readonly unarchiveWorkflow: (workflowId: PlanningWorkflowId) => Effect.Effect<void, Error>;
-  readonly deleteWorkflow: (workflowId: PlanningWorkflowId) => Effect.Effect<void, Error>;
+  readonly deleteWorkflow: (
+    workflowId: PlanningWorkflowId,
+    deleteThreads?: boolean,
+  ) => Effect.Effect<{ deletedThreadIds: import("@t3tools/contracts").ThreadId[] } | void, Error>;
   readonly retryWorkflow: (
     input: OrchestrationRetryWorkflowInput,
   ) => Effect.Effect<OrchestrationRetryWorkflowResult, Error>;

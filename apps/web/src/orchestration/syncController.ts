@@ -1,4 +1,5 @@
 import { startDeferredClientDiagnostics } from "./deferredClientDiagnostics";
+import { cleanupDeletedThread } from "../lib/deletedThreadCleanup";
 import type { AppSettings } from "../appSettings";
 import { startSequenceReconciliation } from "./sequenceReconciliation";
 import { getWsConnectionState, subscribeWsConnectionState } from "../wsConnectionState";
@@ -415,6 +416,7 @@ export function createOrchestrationSyncController(deps: OrchestrationSyncControl
       removeOrphanedTerminalsForCurrentStoreThreads();
     }
     if (event.type === "thread.deleted") {
+      void cleanupDeletedThread(event.payload.threadId);
       useComposerMentionHistoryStore.getState().forgetThread(event.payload.threadId);
       removeOrphanedTerminalsForCurrentStoreThreads();
     }
@@ -435,7 +437,10 @@ export function createOrchestrationSyncController(deps: OrchestrationSyncControl
     let sawProjectDeleted = false;
     for (const event of batch) {
       if (event.type === "thread.created") sawThreadCreated = true;
-      if (event.type === "thread.deleted") sawThreadDeleted = true;
+      if (event.type === "thread.deleted") {
+        sawThreadDeleted = true;
+        void cleanupDeletedThread(event.payload.threadId);
+      }
       if (event.type === "project.deleted") sawProjectDeleted = true;
       switch (event.type) {
         case "thread.deleted":
@@ -627,6 +632,8 @@ export function createOrchestrationSyncController(deps: OrchestrationSyncControl
         syncStartupSnapshot(snapshot, { rewindDraftReadTicket });
         void invalidateWorkflowQueries(queryClient);
         if (!snapshotIsProvisional) {
+          for (const thread of snapshot.threads)
+            if (thread.deletedAt !== null) void cleanupDeletedThread(thread.id);
           useComposerMentionHistoryStore
             .getState()
             .retainThreads(

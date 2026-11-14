@@ -1650,11 +1650,15 @@ export interface NativeApi {
     unarchiveInvestigationWorkflow: (
       input: OrchestrationUnarchiveInvestigationWorkflowInput,
     ) => Promise<void>;
-    deleteWorkflow: (input: OrchestrationDeleteWorkflowInput) => Promise<void>;
-    deleteCodeReviewWorkflow: (input: OrchestrationDeleteCodeReviewWorkflowInput) => Promise<void>;
+    deleteWorkflow: (
+      input: OrchestrationDeleteWorkflowInput,
+    ) => Promise<{ deletedThreadIds: ReadonlyArray<ThreadId> } | void>;
+    deleteCodeReviewWorkflow: (
+      input: OrchestrationDeleteCodeReviewWorkflowInput,
+    ) => Promise<{ deletedThreadIds: ReadonlyArray<ThreadId> } | void>;
     deleteInvestigationWorkflow: (
       input: OrchestrationDeleteInvestigationWorkflowInput,
-    ) => Promise<void>;
+    ) => Promise<{ deletedThreadIds: ReadonlyArray<ThreadId> } | void>;
     skipDocumentReaderPass: (
       input: OrchestrationSkipDocumentReaderPassInput,
     ) => Promise<OrchestrationSkipDocumentReaderPassResult>;

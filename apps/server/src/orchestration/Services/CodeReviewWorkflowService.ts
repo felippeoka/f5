@@ -22,7 +22,10 @@ export interface CodeReviewWorkflowServiceShape {
   ) => Effect.Effect<CodeReviewWorkflowId, Error>;
   readonly archiveWorkflow: (workflowId: CodeReviewWorkflowId) => Effect.Effect<void, Error>;
   readonly unarchiveWorkflow: (workflowId: CodeReviewWorkflowId) => Effect.Effect<void, Error>;
-  readonly deleteWorkflow: (workflowId: CodeReviewWorkflowId) => Effect.Effect<void, Error>;
+  readonly deleteWorkflow: (
+    workflowId: CodeReviewWorkflowId,
+    deleteThreads?: boolean,
+  ) => Effect.Effect<{ deletedThreadIds: import("@t3tools/contracts").ThreadId[] } | void, Error>;
   readonly retryWorkflow: (
     input: OrchestrationRetryCodeReviewWorkflowInput,
   ) => Effect.Effect<OrchestrationRetryWorkflowResult, Error>;

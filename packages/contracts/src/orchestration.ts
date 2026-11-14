@@ -1215,6 +1215,7 @@ const ProjectWorkflowDeleteCommand = Schema.Struct({
   workflowId: PlanningWorkflowId,
   projectId: ProjectId,
   createdAt: IsoDateTime,
+  deleteThreads: Schema.optional(Schema.Boolean),
 });
 
 const ProjectCodeReviewWorkflowCreateCommand = Schema.Struct({
@@ -1255,6 +1256,7 @@ const ProjectCodeReviewWorkflowDeleteCommand = Schema.Struct({
   workflowId: CodeReviewWorkflowId,
   projectId: ProjectId,
   createdAt: IsoDateTime,
+  deleteThreads: Schema.optional(Schema.Boolean),
 });
 
 const ProjectInvestigationWorkflowCreateCommand = Schema.Struct({
@@ -1294,6 +1296,7 @@ const ProjectInvestigationWorkflowDeleteCommand = Schema.Struct({
   workflowId: InvestigationWorkflowId,
   projectId: ProjectId,
   createdAt: IsoDateTime,
+  deleteThreads: Schema.optional(Schema.Boolean),
 });
 
 const ThreadCreateCommand = Schema.Struct({
@@ -3455,6 +3458,7 @@ export type OrchestrationCreateInvestigationWorkflowResult =
 
 export const OrchestrationDeleteWorkflowInput = Schema.Struct({
   workflowId: PlanningWorkflowId,
+  deleteThreads: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationDeleteWorkflowInput = typeof OrchestrationDeleteWorkflowInput.Type;
 
@@ -3466,6 +3470,7 @@ export type OrchestrationUnarchiveWorkflowInput = typeof OrchestrationUnarchiveW
 
 export const OrchestrationDeleteCodeReviewWorkflowInput = Schema.Struct({
   workflowId: CodeReviewWorkflowId,
+  deleteThreads: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationDeleteCodeReviewWorkflowInput =
   typeof OrchestrationDeleteCodeReviewWorkflowInput.Type;
@@ -3482,6 +3487,7 @@ export type OrchestrationUnarchiveCodeReviewWorkflowInput =
 
 export const OrchestrationDeleteInvestigationWorkflowInput = Schema.Struct({
   workflowId: InvestigationWorkflowId,
+  deleteThreads: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationDeleteInvestigationWorkflowInput =
   typeof OrchestrationDeleteInvestigationWorkflowInput.Type;
@@ -3678,15 +3684,24 @@ export const OrchestrationRpcSchemas = {
   },
   deleteWorkflow: {
     input: OrchestrationDeleteWorkflowInput,
-    output: Schema.Void,
+    output: Schema.Union([
+      Schema.Struct({ deletedThreadIds: Schema.Array(ThreadId) }),
+      Schema.Void,
+    ]),
   },
   deleteCodeReviewWorkflow: {
     input: OrchestrationDeleteCodeReviewWorkflowInput,
-    output: Schema.Void,
+    output: Schema.Union([
+      Schema.Struct({ deletedThreadIds: Schema.Array(ThreadId) }),
+      Schema.Void,
+    ]),
   },
   deleteInvestigationWorkflow: {
     input: OrchestrationDeleteInvestigationWorkflowInput,
-    output: Schema.Void,
+    output: Schema.Union([
+      Schema.Struct({ deletedThreadIds: Schema.Array(ThreadId) }),
+      Schema.Void,
+    ]),
   },
   skipDocumentReaderPass: {
     input: OrchestrationSkipDocumentReaderPassInput,
