@@ -2,7 +2,6 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   CalendarClockIcon,
   GitMergeIcon,
-  GaugeIcon,
   GitPullRequestIcon,
   ClockIcon,
   HomeIcon,
@@ -164,7 +163,7 @@ function NavIconButton(props: {
 }
 
 /**
- * One strip of icon buttons (Home, Search, Pull requests, Upstream, Scheduled, Usage), ending
+ * One strip of icon buttons (Home, Search, Pull requests, Upstream, Scheduled), ending
  * with the Projects | Recent toggle. Search toggles the thread search field under the strip;
  * the field stays while it holds a query.
  */
@@ -182,7 +181,6 @@ export function SidebarNav(props: {
   const isOnScheduled = useLocation({ select: (loc) => loc.pathname === "/scheduled" });
   const isOnHome = useLocation({ select: (loc) => loc.pathname === "/" });
   const isOnPullRequests = useLocation({ select: (loc) => loc.pathname === "/pull-requests" });
-  const isOnUsage = useLocation({ select: (loc) => loc.pathname === "/usage" });
   const isOnUpstream = useLocation({ select: (loc) => loc.pathname === "/upstream" });
   const prHubNeedsYouCount = usePrHubNeedsYouCount();
   const upstream = useUpstreamNav();
@@ -240,12 +238,6 @@ export function SidebarNav(props: {
           label="Scheduled"
           isActive={isOnScheduled}
           onSelect={() => void navigate({ to: "/scheduled" })}
-        />
-        <NavIconButton
-          icon={GaugeIcon}
-          label="Usage"
-          isActive={isOnUsage}
-          onSelect={() => void navigate({ to: "/usage" })}
         />
         <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-border" />
         <SidebarViewToggle view={props.view} onViewChange={props.onViewChange} />
