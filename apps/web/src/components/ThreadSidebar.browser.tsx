@@ -5096,8 +5096,17 @@ describe("Thread sidebar", () => {
         const ownRow = await waitForSidebarThreadRow(LONG_THREAD_TITLE);
         useStore.getState().evictThreadDetails([otherId]);
         // Crossing a row on the way elsewhere reads nothing.
-        await userEvent.hover(otherRow);
-        await userEvent.hover(document.body);
+        // Dispatch a sweep synchronously: driver round trips can exceed the hover delay.
+        otherRow.dispatchEvent(
+          new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }),
+        );
+        otherRow.dispatchEvent(
+          new PointerEvent("pointerout", {
+            bubbles: true,
+            pointerType: "mouse",
+            relatedTarget: document.body,
+          }),
+        );
         await sleep(400);
         expect(peekReads()).toBe(0);
 

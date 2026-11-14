@@ -4252,6 +4252,7 @@ describe("MessagesTimeline HTML renders", () => {
     document.body.append(host);
     const screen = await render(
       <TimelineHarness
+        initialAutoFollow
         initialEntries={initialEntries}
         initialHeight={800}
         initialIsWorking
@@ -4305,6 +4306,7 @@ describe("MessagesTimeline HTML renders", () => {
     document.body.append(host);
     const screen = await render(
       <TimelineHarness
+        initialAutoFollow
         initialEntries={initialEntries}
         initialHeight={800}
         initialIsWorking
