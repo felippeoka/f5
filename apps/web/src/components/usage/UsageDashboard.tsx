@@ -33,6 +33,7 @@ import { formatAbsoluteTimeLabel, formatRelativeTimeLabel } from "../../lib/rela
 import {
   accountJobsPending,
   forceRefreshUsageAccounts,
+  refreshUsageAccounts,
   refreshUsageSummaries,
   USAGE_ACCOUNTS_FORCE_MUTATION_KEY,
   usageAccountsQueryOptions,
@@ -807,6 +808,24 @@ type SummaryState = ReturnType<typeof useUsageSummary>;
 function useLimitsRefresh() {
   const client = useQueryClient();
   const accountsQuery = useQuery(usageAccountsQueryOptions());
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "hidden" || !onlineManager.isOnline()) return;
+      const accounts = client.getQueryData<UsageAccounts>(usageQueryKeys.accounts);
+      if (!accountJobsPending(accounts)) void refreshUsageAccounts(client).catch(() => {});
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 300_000);
+    window.addEventListener("focus", refresh);
+    const unsubscribe = onlineManager.subscribe((online) => {
+      if (online) refresh();
+    });
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      unsubscribe();
+    };
+  }, [client]);
   const jobsPending = accountJobsPending(accountsQuery.data);
   const [notice, setNotice] = useState<string | null>(null);
   const force = useMutation({
