@@ -29,8 +29,14 @@ import type { Project } from "../../types";
 import { workflowRouteForType } from "../sidebar/sidebarLists";
 import { Kbd } from "../ui/kbd";
 import { Skeleton } from "../ui/skeleton";
-import { type HomeItem, homeSettleBlocker, type HomeWorkflowRow } from "./homeItems";
-import type { HomePreviewActions } from "./HomePreviewPane";
+import {
+  HOME_REPLY_BOX_BY_KIND,
+  type HomeItem,
+  homeSettleBlocker,
+  type HomeWorkflowRow,
+} from "./homeItems";
+import type { HomePreviewKeys } from "./HomeInlineActions";
+import type { HomePreviewActions, HomePreviewHandle } from "./HomePreviewPane";
 import type { HomeProjectSelection } from "./HomeProjectPickerPlaceholder";
 import { HomeQueueList } from "./HomeQueueList";
 import { HomeQuickStart } from "./HomeQuickStart";
@@ -83,14 +89,43 @@ function EmptyQueue(props: { readonly otherSurfacesNeedYou: boolean }) {
   );
 }
 
-const KEY_HINTS: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readonly label: string }> = [
-  { keys: ["J", "K"], label: "move" },
-  { keys: ["↵", "O"], label: "open" },
-  { keys: ["E"], label: "settle" },
-  { keys: ["H"], label: "snooze" },
-  { keys: ["P"], label: "pin" },
-  { keys: ["/"], label: "new thread" },
-];
+interface KeyHint {
+  readonly keys: ReadonlyArray<string>;
+  readonly label: string;
+}
+
+/**
+ * The keys that act on the selected item. On an approval or a plan, Enter and D belong to
+ * what the preview has on screen: `keys` says what they would do there, and is null until
+ * the preview shows the item. A key that would do nothing is not listed.
+ */
+function keyHintsFor(item: HomeItem | null, keys: HomePreviewKeys | null): ReadonlyArray<KeyHint> {
+  const thread = item?.type === "thread" ? item : null;
+  const kind = thread?.kind ?? null;
+  const reply = kind ? HOME_REPLY_BOX_BY_KIND[kind] : null;
+  const settles =
+    thread !== null &&
+    homeSettleBlocker({ kind: thread.kind, pinned: thread.thread.pinnedAt != null }) === null;
+  return [
+    { keys: ["J", "K"], label: "move" },
+    ...(kind === "approval" || kind === "plan"
+      ? [
+          ...(keys?.primary ? [{ keys: ["↵"], label: keys.primary }] : []),
+          ...(keys?.deny ? [{ keys: ["D"], label: "deny" }] : []),
+          { keys: ["O"], label: "open" },
+        ]
+      : [{ keys: ["↵", "O"], label: "open" }]),
+    ...(reply ? [{ keys: ["R"], label: reply.label.toLowerCase() }] : []),
+    ...(thread
+      ? [
+          ...(settles ? [{ keys: ["E"], label: "settle" }] : []),
+          { keys: ["H"], label: "snooze" },
+          { keys: ["P"], label: "pin" },
+        ]
+      : []),
+    { keys: ["/"], label: "new thread" },
+  ];
+}
 
 /**
  * Home: a triage queue (what needs a decision, what is ready for review, what is running,
@@ -111,6 +146,22 @@ export function HomeMissionControl() {
   const sectionRef = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  // Set by the preview once it shows the selected item; null while it loads.
+  const previewRef = useRef<HomePreviewHandle | null>(null);
+  // What Enter and D do in the preview, by the item it reported them for.
+  const [previewKeys, setPreviewKeys] = useState<{
+    readonly itemId: string;
+    readonly keys: HomePreviewKeys;
+  } | null>(null);
+  const onPreviewKeysChange = useCallback((itemId: string, keys: HomePreviewKeys) => {
+    setPreviewKeys((current) =>
+      current?.itemId === itemId &&
+      current.keys.primary === keys.primary &&
+      current.keys.deny === keys.deny
+        ? current
+        : { itemId, keys },
+    );
+  }, []);
 
   // ── Selection ──────────────────────────────────────────────────────
   // A string key, so a rebuilt queue with the same rows does not count as a change.
@@ -239,8 +290,9 @@ export function HomeMissionControl() {
         void executeAction(threadId, pinned ? "unpin" : "pin");
       },
       snooze: (threadId, actionId) => void executeAction(threadId, actionId),
+      focusQueue,
     }),
-    [executeAction, openItem, openThread, openWorkflow, queue.items, threads],
+    [executeAction, focusQueue, openItem, openThread, openWorkflow, queue.items, threads],
   );
   const setSnoozeMenuOpen = useCallback(
     (open: boolean) => {
@@ -285,13 +337,29 @@ export function HomeMissionControl() {
     // here is not Home's.
     if (!(target instanceof HTMLElement) || !event.currentTarget.contains(target)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (isTypingTarget(target)) return;
+    const typing = isTypingTarget(target);
+    if (event.key === "Escape") {
+      if (typing) {
+        // Leave a text box for the queue; what was typed stays in it.
+        if (event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        focusQueue();
+        return;
+      }
+      if (!narrow || !detailOpen) return;
+      event.preventDefault();
+      closeDetail();
+      return;
+    }
+    // Text boxes, and panels with keys of their own (the question form), keep their keys.
+    if (typing || target.closest('[data-home-keys="ignore"]')) return;
     // The queue, or the preview only while it stands in for the queue. A click in the
     // preview beside the queue focuses it too: that is reading, and must not hand it
-    // Enter or the arrow keys.
+    // Enter (which approves or implements) or the arrow keys.
     const onQueue =
       target === listRef.current ||
       (narrow && detailOpen && target.dataset.slot === "home-preview");
+    const selectedKind = selectedItem?.type === "thread" ? selectedItem.kind : null;
     const move = (delta: 1 | -1) => {
       const next = stepHomeSelection(itemIds, selectedId, delta);
       if (next === null) return;
@@ -299,12 +367,6 @@ export function HomeMissionControl() {
       setSelectedId(next);
     };
 
-    if (event.key === "Escape") {
-      if (!narrow || !detailOpen) return;
-      event.preventDefault();
-      closeDetail();
-      return;
-    }
     if (event.key === "/") {
       event.preventDefault();
       composerRef.current?.focus();
@@ -328,7 +390,12 @@ export function HomeMissionControl() {
       if (event.key === "Enter" && selectedItem) {
         event.preventDefault();
         if (narrow && !detailOpen) setDetailOpen(true);
-        else openItem(selectedItem);
+        // Enter answers what the preview shows, so it waits for the preview: it does
+        // nothing while the request or plan is still loading, and never falls back to
+        // opening the thread.
+        else if (selectedKind === "approval" || selectedKind === "plan") {
+          previewRef.current?.primary();
+        } else openItem(selectedItem);
         return;
       }
     }
@@ -338,6 +405,13 @@ export function HomeMissionControl() {
         return move(1);
       case "k":
         return move(-1);
+      case "d":
+        if (selectedKind === "approval" && previewRef.current?.deny()) event.preventDefault();
+        return;
+      case "r":
+        // Prevented, or the key would land in the box it just focused.
+        if (previewRef.current?.focusReply()) event.preventDefault();
+        return;
       case "o":
         if (!selectedItem) return;
         event.preventDefault();
@@ -422,6 +496,8 @@ export function HomeMissionControl() {
                 )}
                 peek={selectedThread ? peeks.get(selectedThread.id) : undefined}
                 actions={actions}
+                handleRef={previewRef}
+                onKeysChange={onPreviewKeysChange}
                 holdsFocus={narrow}
                 snoozeMenu={{ ...snoozeMenu, onOpenChange: setSnoozeMenuOpen }}
                 onBack={narrow ? closeDetail : undefined}
@@ -438,7 +514,12 @@ export function HomeMissionControl() {
           data-slot="home-key-hints"
           className="flex flex-wrap items-center gap-x-4 gap-y-1 text-2xs text-muted-foreground"
         >
-          {KEY_HINTS.map((hint) => (
+          {keyHintsFor(
+            selectedItem,
+            previewKeys !== null && previewKeys.itemId === selectedItem?.id
+              ? previewKeys.keys
+              : null,
+          ).map((hint) => (
             <span key={hint.label} className="inline-flex items-center gap-1">
               {hint.keys.map((key) => (
                 <Kbd key={key}>{key}</Kbd>
