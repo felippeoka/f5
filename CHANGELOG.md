@@ -6,6 +6,7 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ### Added
 
+- The Claude card on the Usage page lists your plan's limit resets (such as **Full reset** and **Fable reset**) with their expiry, and each has a button that uses it after you confirm, as on claude.ai. A reset that can't be used yet says why, such as "Usable once you hit a limit". When your tightest Claude limit is used up, the reset Claude suggests next appears beside it, and threads paused on that limit resume once it is cleared. F5 reads the sign-in Claude Code already stores, so macOS may ask once to let F5 read it from the Keychain.
 - Desktop users can enable **Keep running threads synced** in Conversation settings to keep all active threads ready to open, including threads outside the recent-thread cache.
 - Choose a project image in Project settings by entering its path inside the project. Emoji, colored symbols and automatic monograms remain available.
 - Opt into **Proactive panels** in Conversation settings to open linked pull requests and completed-turn diffs. Manual panel choices take priority and dismissed turn diffs stay dismissed.
