@@ -137,6 +137,18 @@ export function SidebarUsageLimits({ threadId }: { threadId: ThreadId | null }) 
           <TooltipPopup side="top">Open Usage</TooltipPopup>
         </Tooltip>
       </div>
+      {windows.length > 0 && account?.enabled === false ? (
+        <p className="text-2xs text-muted-foreground">
+          This provider is disabled. Showing collected limits.
+        </p>
+      ) : windows.length > 0 &&
+        account?.sections.some(
+          (section) => section.snapshot !== null && section.outcome === "unavailable",
+        ) ? (
+        <p role="status" className="text-2xs text-muted-foreground">
+          Collected limits may be stale.
+        </p>
+      ) : null}
       <div className="max-h-64 space-y-3 overflow-y-auto">
         {!selection?.instanceId ? (
           <p className="text-xs text-muted-foreground">Select a conversation to see its limits.</p>
