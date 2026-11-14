@@ -3826,7 +3826,7 @@ describe("ChatView timeline (full app)", () => {
                 latestTurn: {
                   turnId,
                   state: "running",
-                  requestedAt: isoAt(200),
+                  requestedAt: isoAt(190),
                   startedAt: isoAt(200),
                   completedAt: null,
                   assistantMessageId: null,
@@ -3870,9 +3870,15 @@ describe("ChatView timeline (full app)", () => {
         ),
       }));
       await vi.waitFor(() => expect(document.activeElement).toBe(editor));
-      await expect.element(page.getByText("Worked for 47s", { exact: true })).toBeVisible();
-      await expect.element(page.getByText(/ • 47s$/)).toBeVisible();
-      await expect.element(page.getByText("· 285 tokens", { exact: true })).toBeVisible();
+      await expect.element(page.getByText("Worked for 57s", { exact: true })).toBeVisible();
+      await expect
+        .element(page.getByText("57s • Tokens: Not reported", { exact: true }))
+        .toBeVisible();
+      const tokens = document.querySelector<HTMLElement>(
+        '[data-message-id="completed-answer"] [data-slot="assistant-message-meta"] [tabindex="0"]',
+      )!;
+      await page.elementLocator(tokens).hover();
+      await expect.element(page.getByRole("row", { name: "Reasoning 285" })).toBeVisible();
     } finally {
       outside.remove();
       await mounted.cleanup();

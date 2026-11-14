@@ -1380,6 +1380,7 @@ export default memo(function ChatView({
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
+  const activeTurnPromptStartedAt = activeLatestTurn?.requestedAt ?? activeLatestTurn?.startedAt;
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
   const projectBreadcrumbActions = useProjectBreadcrumbActions({
     project: activeProject,
@@ -2634,13 +2635,13 @@ export default memo(function ChatView({
       byTurnId.set(turnId, {
         ...byTurnId.get(turnId),
         turnId,
-        ...(activeLatestTurn.startedAt ? { startedAt: activeLatestTurn.startedAt } : {}),
+        ...(activeTurnPromptStartedAt ? { startedAt: activeTurnPromptStartedAt } : {}),
         completedAt: activeLatestTurn.completedAt,
         files: byTurnId.get(turnId)?.files ?? [],
       });
     }
     return byTurnId;
-  }, [turnDiffSummaries, latestTurnSettled, activeLatestTurn]);
+  }, [turnDiffSummaries, latestTurnSettled, activeLatestTurn, activeTurnPromptStartedAt]);
   const promptCache = useThreadPromptCache({
     threadId: isServerThread ? threadId : null,
     enabled: settings.showPromptCacheIndicator,
@@ -2660,19 +2661,19 @@ export default memo(function ChatView({
   }, [turnDiffSummaries]);
   const completionSummary = useMemo(() => {
     if (!latestTurnSettled) return null;
-    if (!activeLatestTurn?.startedAt) return null;
-    if (!activeLatestTurn.completedAt) return null;
+    if (!activeTurnPromptStartedAt) return null;
+    if (!activeLatestTurn?.completedAt) return null;
 
-    const elapsed = formatElapsed(activeLatestTurn.startedAt, activeLatestTurn.completedAt);
+    const elapsed = formatElapsed(activeTurnPromptStartedAt, activeLatestTurn.completedAt);
     return elapsed ? `Worked for ${elapsed}` : null;
-  }, [activeLatestTurn?.completedAt, activeLatestTurn?.startedAt, latestTurnSettled]);
+  }, [activeLatestTurn?.completedAt, activeTurnPromptStartedAt, latestTurnSettled]);
   const completionDividerBeforeEntryId = useMemo(() => {
     if (!latestTurnSettled) return null;
-    if (!activeLatestTurn?.startedAt) return null;
-    if (!activeLatestTurn.completedAt) return null;
+    if (!activeTurnPromptStartedAt) return null;
+    if (!activeLatestTurn?.completedAt) return null;
     if (!completionSummary) return null;
 
-    const turnStartedAt = Date.parse(activeLatestTurn.startedAt);
+    const turnStartedAt = Date.parse(activeTurnPromptStartedAt);
     const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
     if (Number.isNaN(turnStartedAt)) return null;
     if (Number.isNaN(turnCompletedAt)) return null;
@@ -2692,7 +2693,7 @@ export default memo(function ChatView({
     return inRangeMatch ?? fallbackMatch;
   }, [
     activeLatestTurn?.completedAt,
-    activeLatestTurn?.startedAt,
+    activeTurnPromptStartedAt,
     completionSummary,
     latestTurnSettled,
     timelineEntries,
