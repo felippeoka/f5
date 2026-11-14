@@ -355,6 +355,8 @@ export const SETTINGS_ITEM_ROUTES = defineItemRoutes({
   "conversation.prompt-cache": {
     category: "conversation",
   },
+  "conversation.proactive-panels": { category: "conversation" },
+  "conversation.running-thread-sync": { category: "conversation" },
   "conversation.inline-diffs": {
     category: "conversation",
   },

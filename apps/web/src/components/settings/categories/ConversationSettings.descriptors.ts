@@ -137,6 +137,13 @@ const CONVERSATION_CONTROL_DESCRIPTORS = (
       ["cache", "tokens", "usage", "cost"],
     ],
     [
+      "proactive-panels",
+      "Proactive panels",
+      "Open linked pull requests and completed turn diffs automatically.",
+      "Proactive panels",
+      ["pull requests", "diff", "panel", "automatic"],
+    ],
+    [
       "inline-diffs",
       "Show file diffs inline",
       "Display complete diffs for file changes in chat.",
@@ -170,6 +177,13 @@ const CONVERSATION_CONTROL_DESCRIPTORS = (
 
 export const CONVERSATION_SETTINGS_DESCRIPTORS = [
   ...CONVERSATION_CONTROL_DESCRIPTORS,
+  {
+    ...SETTINGS_ITEM_ROUTES["conversation.running-thread-sync"],
+    label: "Keep running threads synced",
+    description: "Keep active desktop threads ready to open without a synchronization flash.",
+    keywords: ["desktop", "background", "sync", "running", "performance"],
+    targetSelector: '[aria-label="Keep running threads synced"]',
+  },
   {
     ...SETTINGS_ITEM_ROUTES["conversation.display-density"],
     label: "Display density",
